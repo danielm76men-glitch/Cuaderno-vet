@@ -1,5 +1,5 @@
 export const firebaseConfig = {
-  apiKey: "AIzaSyDQyyv2bIruA3xcxpTHM2gsEHzo7buRdJ98",
+  apiKey: "AIzaSyDyvv2bIruA3xcxpTH2MzgEMzo7buRdJ90",
   authDomain: "cuaderno-vet.firebaseapp.com",
   projectId: "cuaderno-vet",
   storageBucket: "cuaderno-vet.firebasestorage.app",

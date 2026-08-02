@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cuaderno · Medicina Veterinaria</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📓</text></svg>" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="mobile-bar">
+        <strong id="mobileLabel" class="mobile-label">Materias</strong>
+        <button id="toggleSidebar" type="button">Ver índice</button>
+      </div>
+      <div class="brand">
+        <h1>Cuaderno</h1>
+        <p>Medicina Veterinaria</p>
+        <div class="conn-pill" id="connPill">
+          <span class="dot"></span>
+          <span id="connText">Conectando…</span>
+        </div>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab" data-section="materias" role="tab" aria-selected="true">
+          Materias <span class="count" id="countMaterias">0</span>
+        </button>
+        <button class="tab" data-section="casos" role="tab" aria-selected="false">
+          Casos clínicos <span class="count" id="countCasos">0</span>
+        </button>
+      </div>
+      <div class="search-wrap">
+        <input type="search" id="search" placeholder="Buscar en el cuaderno…" autocomplete="off" />
+      </div>
+      <div class="entry-list" id="entryList"></div>
+      <button class="new-entry" id="newEntry" type="button">+ Nueva entrada</button>
+      <div class="backup">
+        <div class="backup-row">
+          <button class="backup-btn" id="exportBtn" type="button">↓ Descargar copia</button>
+          <button class="backup-btn" id="importBtn" type="button">↑ Importar copia antigua</button>
+        </div>
+        <div class="backup-msg" id="backupMsg"></div>
+        <input type="file" id="importFile" accept="application/json,.json" style="display:none" />
+      </div>
+    </aside>
+
+    <main class="notebook">
+      <div class="page" id="page"></div>
+    </main>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

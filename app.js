@@ -1,0 +1,514 @@
+import { firebaseConfig } from "./firebase-config.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import {
+  getAuth,
+  signInAnonymously,
+  onAuthStateChanged
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import {
+  getFirestore,
+  collection,
+  doc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  onSnapshot,
+  query,
+  orderBy,
+  serverTimestamp,
+  enableIndexedDbPersistence
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+enableIndexedDbPersistence(db).catch((err) => {
+  if (err.code === "failed-precondition") {
+    console.warn("Persistencia offline no disponible: hay otra pestaña del cuaderno abierta.");
+  } else if (err.code === "unimplemented") {
+    console.warn("Este navegador no soporta persistencia offline.");
+  }
+});
+
+const SECTION_META = {
+  materias: {
+    label: "Materia",
+    metaLabel: "Materia / tema",
+    metaPlaceholder: "Ej. Patología General",
+    bodyPlaceholder: "Escribe tus apuntes de clase…",
+    titlePlaceholder: "Título del apunte",
+    emptyGlyph: "§",
+    emptyTitle: "Aún no hay apuntes de materias",
+    emptyBody: "Crea una entrada para empezar a registrar tus clases."
+  },
+  casos: {
+    label: "Caso clínico",
+    metaLabel: "Especie / paciente",
+    metaPlaceholder: "Ej. Canino, Golden Retriever, 4 años",
+    bodyPlaceholder: "Anamnesis, examen físico, diagnóstico, tratamiento…",
+    titlePlaceholder: "Motivo de consulta",
+    emptyGlyph: "✚",
+    emptyTitle: "Aún no hay casos clínicos",
+    emptyBody: "Registra tu primer caso de prácticas o vinculación."
+  }
+};
+
+const els = {
+  app: document.getElementById("app"),
+  sidebar: document.getElementById("sidebar"),
+  tabs: Array.prototype.slice.call(document.querySelectorAll(".tab")),
+  search: document.getElementById("search"),
+  entryList: document.getElementById("entryList"),
+  newEntry: document.getElementById("newEntry"),
+  page: document.getElementById("page"),
+  countMaterias: document.getElementById("countMaterias"),
+  countCasos: document.getElementById("countCasos"),
+  toggleSidebar: document.getElementById("toggleSidebar"),
+  mobileLabel: document.getElementById("mobileLabel"),
+  connPill: document.getElementById("connPill"),
+  connText: document.getElementById("connText"),
+  exportBtn: document.getElementById("exportBtn"),
+  importBtn: document.getElementById("importBtn"),
+  importFile: document.getElementById("importFile"),
+  backupMsg: document.getElementById("backupMsg")
+};
+
+const state = {
+  entries: [],
+  section: "materias",
+  activeId: null,
+  query: "",
+  ready: false
+};
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function formatDate(iso) {
+  if (!iso) return "";
+  const parts = iso.split("-");
+  if (parts.length !== 3) return iso;
+  const months = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+  const m = parseInt(parts[1], 10) - 1;
+  return parts[2] + " " + months[m] + " " + parts[0];
+}
+
+function entriesForSection(section) {
+  return state.entries.filter((e) => e.section === section);
+}
+
+function matchesQuery(entry, q) {
+  if (!q) return true;
+  q = q.toLowerCase();
+  return (
+    (entry.title || "").toLowerCase().includes(q) ||
+    (entry.meta || "").toLowerCase().includes(q) ||
+    (entry.body || "").toLowerCase().includes(q)
+  );
+}
+
+function setConn(state_, text) {
+  els.connPill.setAttribute("data-state", state_);
+  els.connText.textContent = text;
+}
+
+function updateCounts() {
+  els.countMaterias.textContent = entriesForSection("materias").length;
+  els.countCasos.textContent = entriesForSection("casos").length;
+}
+
+function setActiveTab() {
+  els.tabs.forEach((t) => {
+    const sel = t.getAttribute("data-section") === state.section;
+    t.setAttribute("aria-selected", sel ? "true" : "false");
+  });
+  els.app.setAttribute("data-active", state.section);
+  els.mobileLabel.textContent = state.section === "materias" ? "Materias" : "Casos clínicos";
+}
+
+function renderList() {
+  const list = entriesForSection(state.section)
+    .filter((e) => matchesQuery(e, state.query))
+    .sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
+
+  els.entryList.innerHTML = "";
+
+  if (list.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-list";
+    empty.textContent = state.query
+      ? "Sin resultados para “" + state.query + "”."
+      : "Aún no hay entradas.";
+    els.entryList.appendChild(empty);
+    return;
+  }
+
+  list.forEach((entry) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "entry-item";
+    btn.setAttribute("aria-current", entry.id === state.activeId ? "true" : "false");
+
+    const row1 = document.createElement("div");
+    row1.className = "row1";
+    const title = document.createElement("span");
+    title.className = "title";
+    title.textContent = entry.title || "(sin título)";
+    const date = document.createElement("span");
+    date.className = "date";
+    date.textContent = formatDate(entry.date);
+    row1.appendChild(title);
+    row1.appendChild(date);
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = entry.meta || "";
+
+    btn.appendChild(row1);
+    btn.appendChild(meta);
+
+    if (entry._pending) {
+      const tag = document.createElement("div");
+      tag.className = "pending-tag";
+      tag.textContent = "● pendiente de sincronizar";
+      btn.appendChild(tag);
+    }
+
+    btn.addEventListener("click", () => {
+      state.activeId = entry.id;
+      render();
+    });
+    els.entryList.appendChild(btn);
+  });
+}
+
+function renderEmptyPage() {
+  const meta = SECTION_META[state.section];
+  const total = state.entries.length;
+  els.page.innerHTML = "";
+
+  const wrap = document.createElement("div");
+  wrap.className = "page-empty";
+
+  const glyph = document.createElement("div");
+  glyph.className = "glyph";
+  glyph.textContent = meta.emptyGlyph;
+
+  const h2 = document.createElement("h2");
+  h2.textContent = state.ready ? meta.emptyTitle : "Conectando con el cuaderno…";
+
+  const p = document.createElement("p");
+  p.textContent = state.ready ? meta.emptyBody : "Un momento, esto solo pasa la primera vez.";
+
+  wrap.appendChild(glyph);
+  wrap.appendChild(h2);
+  wrap.appendChild(p);
+
+  if (state.ready) {
+    const stats = document.createElement("div");
+    stats.className = "stats";
+    stats.innerHTML =
+      '<div><span class="n">' + entriesForSection("materias").length + '</span><span class="l">Materias</span></div>' +
+      '<div><span class="n">' + entriesForSection("casos").length + '</span><span class="l">Casos</span></div>' +
+      '<div><span class="n">' + total + '</span><span class="l">Total</span></div>';
+    wrap.appendChild(stats);
+  }
+
+  els.page.appendChild(wrap);
+}
+
+let saveTimer = null;
+function scheduleSave(entryId, patch, statusEl) {
+  if (saveTimer) clearTimeout(saveTimer);
+  if (statusEl) {
+    statusEl.parentElement.setAttribute("data-state", "pending");
+    statusEl.textContent = "Escribiendo…";
+  }
+  saveTimer = setTimeout(async () => {
+    try {
+      await updateDoc(doc(db, "entries", entryId), { ...patch, updatedAt: serverTimestamp() });
+      if (statusEl) {
+        statusEl.parentElement.setAttribute("data-state", "ok");
+        statusEl.textContent = "Sincronizado";
+      }
+    } catch (err) {
+      if (statusEl) {
+        statusEl.parentElement.setAttribute("data-state", "error");
+        statusEl.textContent = "Sin conexión — se guardará al reconectar";
+      }
+    }
+  }, 450);
+}
+
+function renderEditor(entry) {
+  const meta = SECTION_META[entry.section];
+  els.page.innerHTML = "";
+
+  const tag = document.createElement("span");
+  tag.className = "section-tag " + entry.section;
+  tag.textContent = meta.label;
+
+  const head = document.createElement("div");
+  head.className = "editor-head";
+  head.appendChild(tag);
+
+  const titleInput = document.createElement("input");
+  titleInput.className = "field-title";
+  titleInput.placeholder = meta.titlePlaceholder;
+  titleInput.value = entry.title || "";
+
+  const fieldRow = document.createElement("div");
+  fieldRow.className = "field-row";
+
+  const metaGroup = document.createElement("div");
+  metaGroup.className = "field-group";
+  const metaLabel = document.createElement("label");
+  metaLabel.textContent = meta.metaLabel;
+  const metaInput = document.createElement("input");
+  metaInput.placeholder = meta.metaPlaceholder;
+  metaInput.value = entry.meta || "";
+  metaGroup.appendChild(metaLabel);
+  metaGroup.appendChild(metaInput);
+
+  const dateGroup = document.createElement("div");
+  dateGroup.className = "field-group";
+  dateGroup.style.maxWidth = "170px";
+  const dateLabel = document.createElement("label");
+  dateLabel.textContent = "Fecha";
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.value = entry.date || todayISO();
+  dateGroup.appendChild(dateLabel);
+  dateGroup.appendChild(dateInput);
+
+  fieldRow.appendChild(metaGroup);
+  fieldRow.appendChild(dateGroup);
+
+  const divider = document.createElement("hr");
+  divider.className = "divider";
+
+  const body = document.createElement("textarea");
+  body.className = "field-body";
+  body.placeholder = meta.bodyPlaceholder;
+  body.value = entry.body || "";
+
+  const foot = document.createElement("div");
+  foot.className = "editor-foot";
+  const status = document.createElement("div");
+  status.className = "status";
+  status.setAttribute("data-state", "ok");
+  status.innerHTML = '<span class="dot"></span><span class="statusText">Sincronizado</span>';
+  const statusText = status.querySelector(".statusText");
+
+  const del = document.createElement("button");
+  del.className = "btn-delete";
+  del.type = "button";
+  del.textContent = "Eliminar entrada";
+  del.addEventListener("click", async () => {
+    if (confirm("¿Eliminar “" + (entry.title || "esta entrada") + "”? Esta acción no se puede deshacer.")) {
+      state.activeId = null;
+      render();
+      try {
+        await deleteDoc(doc(db, "entries", entry.id));
+      } catch (err) {
+        alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
+      }
+    }
+  });
+
+  foot.appendChild(status);
+  foot.appendChild(del);
+
+  els.page.appendChild(head);
+  els.page.appendChild(titleInput);
+  els.page.appendChild(fieldRow);
+  els.page.appendChild(divider);
+  els.page.appendChild(body);
+  els.page.appendChild(foot);
+
+  titleInput.addEventListener("input", () => scheduleSave(entry.id, { title: titleInput.value }, statusText));
+  metaInput.addEventListener("input", () => scheduleSave(entry.id, { meta: metaInput.value }, statusText));
+  dateInput.addEventListener("input", () => scheduleSave(entry.id, { date: dateInput.value }, statusText));
+  body.addEventListener("input", () => scheduleSave(entry.id, { body: body.value }, statusText));
+
+  if (!entry.title) {
+    setTimeout(() => titleInput.focus(), 0);
+  }
+}
+
+function render() {
+  setActiveTab();
+  updateCounts();
+  renderList();
+  const active = state.entries.find((e) => e.id === state.activeId);
+  if (active) {
+    renderEditor(active);
+  } else {
+    renderEmptyPage();
+  }
+}
+
+els.tabs.forEach((t) => {
+  t.addEventListener("click", () => {
+    state.section = t.getAttribute("data-section");
+    state.activeId = null;
+    render();
+  });
+});
+
+els.search.addEventListener("input", () => {
+  state.query = els.search.value;
+  renderList();
+});
+
+els.newEntry.addEventListener("click", async () => {
+  try {
+    const ref = await addDoc(collection(db, "entries"), {
+      section: state.section,
+      title: "",
+      meta: "",
+      date: todayISO(),
+      body: "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    state.activeId = ref.id;
+    render();
+    if (window.innerWidth <= 760) {
+      els.sidebar.classList.add("collapsed");
+    }
+  } catch (err) {
+    alert("No se pudo crear la entrada. Revisa tu conexión e intenta de nuevo.");
+  }
+});
+
+els.toggleSidebar.addEventListener("click", () => {
+  els.sidebar.classList.toggle("collapsed");
+});
+
+if (window.innerWidth <= 760) {
+  els.sidebar.classList.add("collapsed");
+}
+
+/* ---------- Backup: export / import (respaldo manual, además del sync automático) ---------- */
+
+function showBackupMsg(text, isError) {
+  els.backupMsg.textContent = text;
+  els.backupMsg.classList.toggle("error", !!isError);
+}
+
+els.exportBtn.addEventListener("click", () => {
+  const payload = JSON.stringify({ entries: state.entries, exportedAt: new Date().toISOString() }, null, 2);
+  const blob = new Blob([payload], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "cuaderno-vet-" + todayISO() + ".json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showBackupMsg("Copia descargada.");
+});
+
+els.importBtn.addEventListener("click", () => {
+  els.importFile.value = "";
+  els.importFile.click();
+});
+
+els.importFile.addEventListener("change", () => {
+  const file = els.importFile.files && els.importFile.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    let incoming;
+    try {
+      const parsed = JSON.parse(String(reader.result));
+      incoming = Array.isArray(parsed) ? parsed : parsed.entries;
+    } catch (e) {
+      showBackupMsg("Ese archivo no es una copia válida.", true);
+      return;
+    }
+    if (!Array.isArray(incoming) || incoming.length === 0) {
+      showBackupMsg("Ese archivo no tiene entradas para importar.", true);
+      return;
+    }
+    if (!confirm("¿Agregar " + incoming.length + " entrada(s) de esta copia al cuaderno? Se crearán como entradas nuevas.")) {
+      return;
+    }
+    showBackupMsg("Importando…");
+    let ok = 0;
+    for (const inc of incoming) {
+      if (!inc || !inc.section || !SECTION_META[inc.section]) continue;
+      try {
+        await addDoc(collection(db, "entries"), {
+          section: inc.section,
+          title: inc.title || "",
+          meta: inc.meta || "",
+          date: inc.date || todayISO(),
+          body: inc.body || "",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+        ok++;
+      } catch (err) {
+        break;
+      }
+    }
+    showBackupMsg("Se importaron " + ok + " de " + incoming.length + " entrada(s).");
+  };
+  reader.onerror = () => showBackupMsg("No se pudo leer el archivo.", true);
+  reader.readAsText(file);
+});
+
+/* ---------- Conexión ---------- */
+
+window.addEventListener("online", () => {
+  if (state.ready) setConn("online", "En línea");
+});
+window.addEventListener("offline", () => {
+  setConn("offline", "Sin conexión — se guardará al reconectar");
+});
+
+/* ---------- Firestore: autenticación y sincronización en tiempo real ---------- */
+
+let unsubscribe = null;
+
+onAuthStateChanged(auth, (user) => {
+  if (!user) return;
+  if (unsubscribe) return;
+
+  const q = query(collection(db, "entries"), orderBy("updatedAt", "desc"));
+  unsubscribe = onSnapshot(
+    q,
+    (snapshot) => {
+      state.entries = snapshot.docs.map((d) => {
+        const data = d.data({ serverTimestamps: "estimate" });
+        const ts = data.updatedAt;
+        return {
+          id: d.id,
+          ...data,
+          _pending: d.metadata.hasPendingWrites,
+          _sortKey: ts && typeof ts.toMillis === "function" ? ts.toMillis() : 0
+        };
+      });
+      state.ready = true;
+      setConn(navigator.onLine ? "online" : "offline", navigator.onLine ? "En línea" : "Sin conexión — se guardará al reconectar");
+      render();
+    },
+    (err) => {
+      setConn("error", "Error de conexión con el cuaderno");
+      console.error(err);
+    }
+  );
+});
+
+signInAnonymously(auth).catch((err) => {
+  setConn("error", "No se pudo conectar. Revisa tu conexión.");
+  console.error(err);
+});
+
+setConn("offline", "Conectando…");
+render();

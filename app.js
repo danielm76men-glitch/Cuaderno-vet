@@ -68,6 +68,7 @@ const els = {
   mobileLabel: document.getElementById("mobileLabel"),
   connPill: document.getElementById("connPill"),
   connText: document.getElementById("connText"),
+  themeToggle: document.getElementById("themeToggle"),
   exportBtn: document.getElementById("exportBtn"),
   importBtn: document.getElementById("importBtn"),
   importFile: document.getElementById("importFile"),
@@ -391,6 +392,25 @@ els.toggleSidebar.addEventListener("click", () => {
 if (window.innerWidth <= 760) {
   els.sidebar.classList.add("collapsed");
 }
+
+/* ---------- Tema claro / oscuro ---------- */
+
+const THEME_KEY = "vetcuaderno.theme.v1";
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  els.themeToggle.textContent = theme === "dark" ? "☀️" : "🌙";
+  els.themeToggle.setAttribute("aria-label", theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro");
+}
+
+let currentTheme = localStorage.getItem(THEME_KEY) || "light";
+applyTheme(currentTheme);
+
+els.themeToggle.addEventListener("click", () => {
+  currentTheme = currentTheme === "dark" ? "light" : "dark";
+  localStorage.setItem(THEME_KEY, currentTheme);
+  applyTheme(currentTheme);
+});
 
 /* ---------- Backup: export / import (respaldo manual, además del sync automático) ---------- */
 

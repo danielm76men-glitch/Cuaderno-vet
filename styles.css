@@ -91,6 +91,25 @@ body {
 }
 .brand p { margin: 0; font-size: 0.78rem; color: var(--muted); }
 
+.brand-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.theme-toggle {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.theme-toggle:hover { border-color: var(--teal); }
+
 .conn-pill {
   display: inline-flex;
   align-items: center;

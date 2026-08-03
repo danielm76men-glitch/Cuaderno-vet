@@ -44,8 +44,8 @@ const SECTION_META = {
   },
   casos: {
     label: "Caso clínico",
-    metaLabel: "Especie / paciente",
-    metaPlaceholder: "Ej. Canino, Golden Retriever, 4 años",
+    metaLabel: "Paciente",
+    metaPlaceholder: "Ej. Nombre del paciente",
     bodyPlaceholder: "Anamnesis, examen físico, diagnóstico, tratamiento…",
     titlePlaceholder: "Motivo de consulta",
     emptyGlyph: "✚",
@@ -53,6 +53,8 @@ const SECTION_META = {
     emptyBody: "Registra tu primer caso de prácticas o vinculación."
   }
 };
+
+const SPECIES_OPTIONS = ["Bovino", "Equino", "Porcino", "Aves", "Canino", "Felino", "Ovino", "Caprino", "Exótico", "Otro"];
 
 const els = {
   app: document.getElementById("app"),
@@ -106,6 +108,7 @@ function matchesQuery(entry, q) {
   return (
     (entry.title || "").toLowerCase().includes(q) ||
     (entry.meta || "").toLowerCase().includes(q) ||
+    (entry.especie || "").toLowerCase().includes(q) ||
     (entry.body || "").toLowerCase().includes(q)
   );
 }
@@ -165,7 +168,10 @@ function renderList() {
 
     const meta = document.createElement("div");
     meta.className = "meta";
-    meta.textContent = entry.meta || "";
+    const metaBits = [];
+    if (entry.section === "casos" && entry.especie) metaBits.push(entry.especie);
+    if (entry.meta) metaBits.push(entry.meta);
+    meta.textContent = metaBits.join(" · ");
 
     btn.appendChild(row1);
     btn.appendChild(meta);
@@ -243,6 +249,114 @@ function scheduleSave(entryId, patch, statusEl) {
   }, 450);
 }
 
+function buildMedsSection(entry, statusText) {
+  const wrap = document.createElement("div");
+  wrap.className = "meds";
+
+  const head = document.createElement("div");
+  head.className = "meds-head";
+  const label = document.createElement("span");
+  label.textContent = "Fármacos";
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "meds-add";
+  addBtn.textContent = "+ Agregar fármaco";
+  head.appendChild(label);
+  head.appendChild(addBtn);
+  wrap.appendChild(head);
+
+  const tableWrap = document.createElement("div");
+  tableWrap.className = "meds-table-wrap";
+  const table = document.createElement("div");
+  table.className = "meds-table";
+  tableWrap.appendChild(table);
+  wrap.appendChild(tableWrap);
+
+  const meds = Array.isArray(entry.farmacos) ? entry.farmacos.map((m) => ({ ...m })) : [];
+
+  function commit() {
+    scheduleSave(entry.id, { farmacos: meds }, statusText);
+  }
+
+  function renderRows() {
+    table.innerHTML = "";
+
+    if (meds.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "meds-empty";
+      empty.textContent = "Sin fármacos registrados.";
+      table.appendChild(empty);
+      return;
+    }
+
+    const headerRow = document.createElement("div");
+    headerRow.className = "meds-row meds-row-head";
+    ["Nombre", "Dosis", "Frecuencia", ""].forEach((t) => {
+      const s = document.createElement("span");
+      s.textContent = t;
+      headerRow.appendChild(s);
+    });
+    table.appendChild(headerRow);
+
+    meds.forEach((med, i) => {
+      const row = document.createElement("div");
+      row.className = "meds-row";
+
+      const nameInput = document.createElement("input");
+      nameInput.placeholder = "Ej. Amoxicilina";
+      nameInput.value = med.nombre || "";
+      nameInput.addEventListener("input", () => {
+        meds[i].nombre = nameInput.value;
+        commit();
+      });
+
+      const doseInput = document.createElement("input");
+      doseInput.placeholder = "Ej. 20 mg/kg";
+      doseInput.value = med.dosis || "";
+      doseInput.addEventListener("input", () => {
+        meds[i].dosis = doseInput.value;
+        commit();
+      });
+
+      const freqInput = document.createElement("input");
+      freqInput.placeholder = "Ej. c/12h";
+      freqInput.value = med.frecuencia || "";
+      freqInput.addEventListener("input", () => {
+        meds[i].frecuencia = freqInput.value;
+        commit();
+      });
+
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "meds-remove";
+      removeBtn.textContent = "×";
+      removeBtn.setAttribute("aria-label", "Quitar fármaco");
+      removeBtn.addEventListener("click", () => {
+        meds.splice(i, 1);
+        renderRows();
+        commit();
+      });
+
+      row.appendChild(nameInput);
+      row.appendChild(doseInput);
+      row.appendChild(freqInput);
+      row.appendChild(removeBtn);
+      table.appendChild(row);
+    });
+  }
+
+  renderRows();
+
+  addBtn.addEventListener("click", () => {
+    meds.push({ nombre: "", dosis: "", frecuencia: "" });
+    renderRows();
+    const inputs = table.querySelectorAll(".meds-row:last-child input");
+    if (inputs[0]) inputs[0].focus();
+  });
+
+  return wrap;
+}
+
 function renderEditor(entry) {
   const meta = SECTION_META[entry.section];
   els.page.innerHTML = "";
@@ -262,6 +376,31 @@ function renderEditor(entry) {
 
   const fieldRow = document.createElement("div");
   fieldRow.className = "field-row";
+
+  let speciesInput = null;
+  if (entry.section === "casos") {
+    const speciesGroup = document.createElement("div");
+    speciesGroup.className = "field-group";
+    speciesGroup.style.maxWidth = "170px";
+    const speciesLabel = document.createElement("label");
+    speciesLabel.textContent = "Especie";
+    speciesInput = document.createElement("select");
+    speciesInput.className = "field-select";
+    const blankOpt = document.createElement("option");
+    blankOpt.value = "";
+    blankOpt.textContent = "— Sin especificar —";
+    speciesInput.appendChild(blankOpt);
+    SPECIES_OPTIONS.forEach((opt) => {
+      const o = document.createElement("option");
+      o.value = opt;
+      o.textContent = opt;
+      speciesInput.appendChild(o);
+    });
+    speciesInput.value = entry.especie || "";
+    speciesGroup.appendChild(speciesLabel);
+    speciesGroup.appendChild(speciesInput);
+    fieldRow.appendChild(speciesGroup);
+  }
 
   const metaGroup = document.createElement("div");
   metaGroup.className = "field-group";
@@ -287,6 +426,59 @@ function renderEditor(entry) {
   fieldRow.appendChild(metaGroup);
   fieldRow.appendChild(dateGroup);
 
+  let razaInput = null;
+  let edadInput = null;
+  let pesoInput = null;
+  let detailsRow = null;
+  if (entry.section === "casos") {
+    detailsRow = document.createElement("div");
+    detailsRow.className = "field-row";
+
+    const razaGroup = document.createElement("div");
+    razaGroup.className = "field-group";
+    const razaLabel = document.createElement("label");
+    razaLabel.textContent = "Raza";
+    razaInput = document.createElement("input");
+    razaInput.placeholder = "Ej. Golden Retriever";
+    razaInput.value = entry.raza || "";
+    razaGroup.appendChild(razaLabel);
+    razaGroup.appendChild(razaInput);
+
+    const edadGroup = document.createElement("div");
+    edadGroup.className = "field-group";
+    edadGroup.style.maxWidth = "140px";
+    const edadLabel = document.createElement("label");
+    edadLabel.textContent = "Edad";
+    edadInput = document.createElement("input");
+    edadInput.placeholder = "Ej. 4 años";
+    edadInput.value = entry.edad || "";
+    edadGroup.appendChild(edadLabel);
+    edadGroup.appendChild(edadInput);
+
+    const pesoGroup = document.createElement("div");
+    pesoGroup.className = "field-group";
+    pesoGroup.style.maxWidth = "140px";
+    const pesoLabel = document.createElement("label");
+    pesoLabel.textContent = "Peso";
+    pesoInput = document.createElement("input");
+    pesoInput.placeholder = "Ej. 25 kg";
+    pesoInput.value = entry.peso || "";
+    pesoGroup.appendChild(pesoLabel);
+    pesoGroup.appendChild(pesoInput);
+
+    detailsRow.appendChild(razaGroup);
+    detailsRow.appendChild(edadGroup);
+    detailsRow.appendChild(pesoGroup);
+  }
+
+  const status = document.createElement("div");
+  status.className = "status";
+  status.setAttribute("data-state", "ok");
+  status.innerHTML = '<span class="dot"></span><span class="statusText">Sincronizado</span>';
+  const statusText = status.querySelector(".statusText");
+
+  const medsSection = entry.section === "casos" ? buildMedsSection(entry, statusText) : null;
+
   const divider = document.createElement("hr");
   divider.className = "divider";
 
@@ -297,11 +489,6 @@ function renderEditor(entry) {
 
   const foot = document.createElement("div");
   foot.className = "editor-foot";
-  const status = document.createElement("div");
-  status.className = "status";
-  status.setAttribute("data-state", "ok");
-  status.innerHTML = '<span class="dot"></span><span class="statusText">Sincronizado</span>';
-  const statusText = status.querySelector(".statusText");
 
   const del = document.createElement("button");
   del.className = "btn-delete";
@@ -325,6 +512,8 @@ function renderEditor(entry) {
   els.page.appendChild(head);
   els.page.appendChild(titleInput);
   els.page.appendChild(fieldRow);
+  if (detailsRow) els.page.appendChild(detailsRow);
+  if (medsSection) els.page.appendChild(medsSection);
   els.page.appendChild(divider);
   els.page.appendChild(body);
   els.page.appendChild(foot);
@@ -333,6 +522,10 @@ function renderEditor(entry) {
   metaInput.addEventListener("input", () => scheduleSave(entry.id, { meta: metaInput.value }, statusText));
   dateInput.addEventListener("input", () => scheduleSave(entry.id, { date: dateInput.value }, statusText));
   body.addEventListener("input", () => scheduleSave(entry.id, { body: body.value }, statusText));
+  if (speciesInput) speciesInput.addEventListener("change", () => scheduleSave(entry.id, { especie: speciesInput.value }, statusText));
+  if (razaInput) razaInput.addEventListener("input", () => scheduleSave(entry.id, { raza: razaInput.value }, statusText));
+  if (edadInput) edadInput.addEventListener("input", () => scheduleSave(entry.id, { edad: edadInput.value }, statusText));
+  if (pesoInput) pesoInput.addEventListener("input", () => scheduleSave(entry.id, { peso: pesoInput.value }, statusText));
 
   if (!entry.title) {
     setTimeout(() => titleInput.focus(), 0);

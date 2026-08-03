@@ -22,31 +22,31 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #1b1c16;
-    --paper-alt: #232319;
-    --paper-raised: #26261c;
+    --paper: #171813;
+    --paper-alt: #201f19;
+    --paper-raised: #242319;
     --ink: #ece7d6;
-    --muted: #a89f88;
-    --line: #3a392c;
-    --line-soft: #2c2b21;
-    --teal: #7dc0aa;
-    --teal-ink: #a9d9c7;
-    --teal-soft: #1e332c;
+    --muted: #9c9686;
+    --line: #38362c;
+    --line-soft: #29281f;
+    --teal: #948d78;
+    --teal-ink: #dcd7c7;
+    --teal-soft: #2b2a22;
     --rust: #e38a5c;
     --rust-ink: #eeab84;
     --rust-soft: #3a281d;
     --amber: #dcb24b;
     --amber-soft: #362c17;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.35);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
   }
 }
 :root[data-theme="dark"] {
-  --paper: #1b1c16; --paper-alt: #232319; --paper-raised: #26261c;
-  --ink: #ece7d6; --muted: #a89f88; --line: #3a392c; --line-soft: #2c2b21;
-  --teal: #7dc0aa; --teal-ink: #a9d9c7; --teal-soft: #1e332c;
+  --paper: #171813; --paper-alt: #201f19; --paper-raised: #242319;
+  --ink: #ece7d6; --muted: #9c9686; --line: #38362c; --line-soft: #29281f;
+  --teal: #948d78; --teal-ink: #dcd7c7; --teal-soft: #2b2a22;
   --rust: #e38a5c; --rust-ink: #eeab84; --rust-soft: #3a281d;
   --amber: #dcb24b; --amber-soft: #362c17;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 24px rgba(0, 0, 0, 0.35);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
 }
 :root[data-theme="light"] {
   --paper: #f3f1e7; --paper-alt: #ece7d7; --paper-raised: #fbfaf4;
@@ -292,6 +292,83 @@ body {
 .field-group label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
 .field-group input { font: inherit; font-size: 0.9rem; border: none; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); padding: 4px 2px; }
 .field-group input:focus-visible { outline: none; border-bottom-color: var(--teal); }
+.field-group select {
+  font: inherit;
+  font-size: 0.9rem;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 4px 2px;
+}
+.field-group select:focus-visible { outline: none; border-bottom-color: var(--teal); }
+
+.meds { margin: 16px 0 4px; }
+.meds-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.meds-head > span { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.meds-add {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--teal-ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.meds-add:hover { text-decoration: underline; }
+
+.meds-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.meds-table { min-width: 440px; }
+.meds-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 28px;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.meds-row:last-child { border-bottom: none; }
+.meds-row-head {
+  background: var(--paper-raised);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.meds-row input {
+  font: inherit;
+  font-size: 0.85rem;
+  border: none;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  padding: 3px 2px;
+  min-width: 0;
+  width: 100%;
+}
+.meds-row input:focus-visible { outline: none; border-bottom-color: var(--teal); }
+.meds-remove {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  justify-self: center;
+}
+.meds-remove:hover { color: var(--rust); }
+.meds-empty {
+  padding: 12px 10px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  text-align: center;
+}
 
 .divider { border: none; border-top: 1px solid var(--line); margin: 18px 0 0; }
 

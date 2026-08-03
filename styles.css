@@ -320,10 +320,10 @@ body {
 .meds-add:hover { text-decoration: underline; }
 
 .meds-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
-.meds-table { min-width: 440px; }
+.meds-table { min-width: 620px; }
 .meds-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 28px;
+  grid-template-columns: 1fr 1fr 1fr 1fr 28px;
   gap: 8px;
   align-items: center;
   padding: 7px 10px;

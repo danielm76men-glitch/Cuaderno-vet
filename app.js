@@ -291,7 +291,7 @@ function buildMedsSection(entry, statusText) {
 
     const headerRow = document.createElement("div");
     headerRow.className = "meds-row meds-row-head";
-    ["Nombre", "Dosis", "Frecuencia", ""].forEach((t) => {
+    ["Nombre", "Dosis", "Dosis administrada", "Frecuencia", ""].forEach((t) => {
       const s = document.createElement("span");
       s.textContent = t;
       headerRow.appendChild(s);
@@ -318,6 +318,14 @@ function buildMedsSection(entry, statusText) {
         commit();
       });
 
+      const doseGivenInput = document.createElement("input");
+      doseGivenInput.placeholder = "Ej. 500 mg";
+      doseGivenInput.value = med.dosisAdministrada || "";
+      doseGivenInput.addEventListener("input", () => {
+        meds[i].dosisAdministrada = doseGivenInput.value;
+        commit();
+      });
+
       const freqInput = document.createElement("input");
       freqInput.placeholder = "Ej. c/12h";
       freqInput.value = med.frecuencia || "";
@@ -339,6 +347,7 @@ function buildMedsSection(entry, statusText) {
 
       row.appendChild(nameInput);
       row.appendChild(doseInput);
+      row.appendChild(doseGivenInput);
       row.appendChild(freqInput);
       row.appendChild(removeBtn);
       table.appendChild(row);
@@ -350,6 +359,7 @@ function buildMedsSection(entry, statusText) {
   addBtn.addEventListener("click", () => {
     meds.push({ nombre: "", dosis: "", frecuencia: "" });
     renderRows();
+    commit();
     const inputs = table.querySelectorAll(".meds-row:last-child input");
     if (inputs[0]) inputs[0].focus();
   });

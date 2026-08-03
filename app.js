@@ -367,6 +367,66 @@ function buildMedsSection(entry, statusText) {
   return wrap;
 }
 
+function attachVoiceInput(button, targetEl) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const label = button.querySelector(".label");
+
+  if (!SpeechRecognition) {
+    button.style.display = "none";
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = "es-419";
+  recognition.continuous = true;
+  recognition.interimResults = false;
+
+  let listening = false;
+
+  function setListening(value) {
+    listening = value;
+    button.setAttribute("data-listening", value ? "true" : "false");
+    label.textContent = value ? "Escuchando… (clic para detener)" : "Dictar por voz";
+  }
+
+  recognition.addEventListener("result", (event) => {
+    let chunk = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      if (event.results[i].isFinal) {
+        chunk += event.results[i][0].transcript;
+      }
+    }
+    chunk = chunk.trim();
+    if (!chunk) return;
+    const current = targetEl.value;
+    const needsSpace = current && !/\s$/.test(current);
+    targetEl.value = current + (needsSpace ? " " : "") + chunk;
+    targetEl.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
+  recognition.addEventListener("end", () => setListening(false));
+
+  recognition.addEventListener("error", (event) => {
+    setListening(false);
+    if (event.error !== "no-speech" && event.error !== "aborted") {
+      alert("No se pudo usar el micrófono (" + event.error + "). Revisa los permisos del navegador.");
+    }
+  });
+
+  button.addEventListener("click", () => {
+    if (listening) {
+      recognition.stop();
+      return;
+    }
+    try {
+      recognition.start();
+      setListening(true);
+    } catch (err) {
+      /* recognition already active; ignore */
+    }
+  });
+}
+
 function renderEditor(entry) {
   const meta = SECTION_META[entry.section];
   els.page.innerHTML = "";
@@ -492,10 +552,20 @@ function renderEditor(entry) {
   const divider = document.createElement("hr");
   divider.className = "divider";
 
+  const bodyToolbar = document.createElement("div");
+  bodyToolbar.className = "body-toolbar";
+  const voiceBtn = document.createElement("button");
+  voiceBtn.type = "button";
+  voiceBtn.className = "voice-btn";
+  voiceBtn.setAttribute("data-listening", "false");
+  voiceBtn.innerHTML = '<span class="rec-dot"></span><span class="label">🎤 Dictar por voz</span>';
+  bodyToolbar.appendChild(voiceBtn);
+
   const body = document.createElement("textarea");
   body.className = "field-body";
   body.placeholder = meta.bodyPlaceholder;
   body.value = entry.body || "";
+  attachVoiceInput(voiceBtn, body);
 
   const foot = document.createElement("div");
   foot.className = "editor-foot";
@@ -525,6 +595,7 @@ function renderEditor(entry) {
   if (detailsRow) els.page.appendChild(detailsRow);
   if (medsSection) els.page.appendChild(medsSection);
   els.page.appendChild(divider);
+  els.page.appendChild(bodyToolbar);
   els.page.appendChild(body);
   els.page.appendChild(foot);
 

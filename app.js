@@ -74,12 +74,14 @@ const SECTION_META = {
 };
 
 const SPECIES_OPTIONS = ["Bovino", "Equino", "Porcino", "Aves", "Canino", "Felino", "Ovino", "Caprino", "Exótico", "Otro"];
+const AREA_OPTIONS = ["Cirugía", "Medicina interna", "Reproducción", "Emergencia", "Seguimiento", "Otro"];
 
 const els = {
   app: document.getElementById("app"),
   sidebar: document.getElementById("sidebar"),
   tabs: Array.prototype.slice.call(document.querySelectorAll(".tab")),
   search: document.getElementById("search"),
+  areaFilter: document.getElementById("areaFilter"),
   entryList: document.getElementById("entryList"),
   newEntry: document.getElementById("newEntry"),
   page: document.getElementById("page"),
@@ -108,6 +110,7 @@ const state = {
   section: "materias",
   activeId: null,
   query: "",
+  areaFilter: "",
   ready: false
 };
 
@@ -137,6 +140,7 @@ function matchesQuery(entry, q) {
     (entry.title || "").toLowerCase().includes(q) ||
     (entry.meta || "").toLowerCase().includes(q) ||
     (entry.especie || "").toLowerCase().includes(q) ||
+    (entry.area || "").toLowerCase().includes(q) ||
     (entry.body || "").toLowerCase().includes(q)
   );
 }
@@ -218,6 +222,7 @@ function setActiveTab() {
   els.app.setAttribute("data-active", state.section);
   els.mobileLabel.textContent = SECTION_LABELS[state.section] || "";
   els.newEntry.style.display = state.section === "farmacos" ? "none" : "";
+  if (els.areaFilter) els.areaFilter.hidden = state.section !== "casos";
 }
 
 function renderSearchHint(otherSection, otherCount) {
@@ -246,6 +251,7 @@ function renderList() {
 function renderEntryList() {
   const list = entriesForSection(state.section)
     .filter((e) => matchesQuery(e, state.query))
+    .filter((e) => state.section !== "casos" || !state.areaFilter || e.area === state.areaFilter)
     .sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
 
   if (state.query) {
@@ -285,6 +291,7 @@ function renderEntryList() {
     meta.className = "meta";
     const metaBits = [];
     if (entry.section === "casos" && entry.especie) metaBits.push(entry.especie);
+    if (entry.section === "casos" && entry.area) metaBits.push(entry.area);
     if (entry.meta) metaBits.push(entry.meta);
     meta.textContent = metaBits.join(" · ");
 
@@ -582,6 +589,110 @@ function buildMedsSection(entry, statusText) {
   return wrap;
 }
 
+function buildEvolucionesSection(entry, statusText) {
+  const wrap = document.createElement("div");
+  wrap.className = "evols";
+
+  const head = document.createElement("div");
+  head.className = "meds-head";
+  const label = document.createElement("span");
+  label.textContent = "Evoluciones";
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "meds-add";
+  addBtn.textContent = "+ Agregar evolución";
+  head.appendChild(label);
+  head.appendChild(addBtn);
+  wrap.appendChild(head);
+
+  const list = document.createElement("div");
+  list.className = "evols-list";
+  wrap.appendChild(list);
+
+  const evols = Array.isArray(entry.evoluciones) ? entry.evoluciones.map((e) => ({ ...e })) : [];
+
+  function commit() {
+    scheduleSave(entry.id, { evoluciones: evols }, statusText);
+  }
+
+  function renderItems() {
+    list.innerHTML = "";
+
+    if (evols.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "meds-empty";
+      empty.textContent = "Sin evoluciones registradas.";
+      list.appendChild(empty);
+      return;
+    }
+
+    // El array se guarda en orden de creación (igual que farmacos); para
+    // mostrarlo de más reciente a más antigua se calcula un orden de
+    // visualización aparte, sin reordenar el array real — así el índice
+    // real de cada fila no cambia mientras el usuario escribe en otra.
+    const order = evols
+      .map((_, i) => i)
+      .sort((a, b) => (evols[b].date || "").localeCompare(evols[a].date || "") || b - a);
+
+    order.forEach((i) => {
+      const evo = evols[i];
+      const item = document.createElement("div");
+      item.className = "evol-item";
+
+      const itemHead = document.createElement("div");
+      itemHead.className = "evol-item-head";
+
+      const dateInput = document.createElement("input");
+      dateInput.type = "date";
+      dateInput.value = evo.date || "";
+      dateInput.addEventListener("change", () => {
+        evols[i].date = dateInput.value;
+        commit();
+        renderItems();
+      });
+
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "meds-remove";
+      removeBtn.textContent = "×";
+      removeBtn.setAttribute("aria-label", "Quitar evolución");
+      removeBtn.addEventListener("click", () => {
+        evols.splice(i, 1);
+        renderItems();
+        commit();
+      });
+
+      itemHead.appendChild(dateInput);
+      itemHead.appendChild(removeBtn);
+
+      const textArea = document.createElement("textarea");
+      textArea.className = "evol-text";
+      textArea.placeholder = "Evolución, controles, seguimiento…";
+      textArea.value = evo.texto || "";
+      textArea.addEventListener("input", () => {
+        evols[i].texto = textArea.value;
+        commit();
+      });
+
+      item.appendChild(itemHead);
+      item.appendChild(textArea);
+      list.appendChild(item);
+    });
+  }
+
+  renderItems();
+
+  addBtn.addEventListener("click", () => {
+    evols.push({ date: todayISO(), texto: "" });
+    renderItems();
+    commit();
+    const areas = list.querySelectorAll(".evol-text");
+    if (areas[0]) areas[0].focus();
+  });
+
+  return wrap;
+}
+
 // Redimensiona/comprime en el navegador antes de subir (canvas nativo,
 // sin librerías): limita el lado más largo a maxDim y reexporta como
 // JPEG a la calidad indicada. Si el archivo no es una imagen decodificable
@@ -811,6 +922,31 @@ function renderEditor(entry) {
   const fieldRow = document.createElement("div");
   fieldRow.className = "field-row";
 
+  let areaInput = null;
+  if (entry.section === "casos") {
+    const areaGroup = document.createElement("div");
+    areaGroup.className = "field-group";
+    areaGroup.style.maxWidth = "180px";
+    const areaLabel = document.createElement("label");
+    areaLabel.textContent = "Área";
+    areaInput = document.createElement("select");
+    areaInput.className = "field-select";
+    const blankAreaOpt = document.createElement("option");
+    blankAreaOpt.value = "";
+    blankAreaOpt.textContent = "— Sin especificar —";
+    areaInput.appendChild(blankAreaOpt);
+    AREA_OPTIONS.forEach((opt) => {
+      const o = document.createElement("option");
+      o.value = opt;
+      o.textContent = opt;
+      areaInput.appendChild(o);
+    });
+    areaInput.value = entry.area || "";
+    areaGroup.appendChild(areaLabel);
+    areaGroup.appendChild(areaInput);
+    fieldRow.appendChild(areaGroup);
+  }
+
   let speciesInput = null;
   if (entry.section === "casos") {
     const speciesGroup = document.createElement("div");
@@ -913,9 +1049,13 @@ function renderEditor(entry) {
 
   const photosSection = entry.section === "casos" ? buildPhotosSection(entry, statusText) : null;
   const medsSection = entry.section === "casos" ? buildMedsSection(entry, statusText) : null;
+  const evolucionesSection = entry.section === "casos" ? buildEvolucionesSection(entry, statusText) : null;
 
   const divider = document.createElement("hr");
   divider.className = "divider";
+
+  const divider2 = document.createElement("hr");
+  divider2.className = "divider";
 
   const bodyToolbar = document.createElement("div");
   bodyToolbar.className = "body-toolbar";
@@ -963,12 +1103,17 @@ function renderEditor(entry) {
   els.page.appendChild(divider);
   els.page.appendChild(bodyToolbar);
   els.page.appendChild(body);
+  if (evolucionesSection) {
+    els.page.appendChild(divider2);
+    els.page.appendChild(evolucionesSection);
+  }
   els.page.appendChild(foot);
 
   titleInput.addEventListener("input", () => scheduleSave(entry.id, { title: titleInput.value }, statusText));
   metaInput.addEventListener("input", () => scheduleSave(entry.id, { meta: metaInput.value }, statusText));
   dateInput.addEventListener("input", () => scheduleSave(entry.id, { date: dateInput.value }, statusText));
   body.addEventListener("input", () => scheduleSave(entry.id, { body: body.value }, statusText));
+  if (areaInput) areaInput.addEventListener("change", () => scheduleSave(entry.id, { area: areaInput.value }, statusText));
   if (speciesInput) speciesInput.addEventListener("change", () => scheduleSave(entry.id, { especie: speciesInput.value }, statusText));
   if (razaInput) razaInput.addEventListener("input", () => scheduleSave(entry.id, { raza: razaInput.value }, statusText));
   if (edadInput) edadInput.addEventListener("input", () => scheduleSave(entry.id, { edad: edadInput.value }, statusText));
@@ -1068,6 +1213,8 @@ els.tabs.forEach((t) => {
   t.addEventListener("click", () => {
     state.section = t.getAttribute("data-section");
     state.activeId = null;
+    state.areaFilter = "";
+    if (els.areaFilter) els.areaFilter.value = "";
     render();
   });
 });
@@ -1076,6 +1223,23 @@ els.search.addEventListener("input", () => {
   state.query = els.search.value;
   renderList();
 });
+
+if (els.areaFilter) {
+  const blankAreaFilterOpt = document.createElement("option");
+  blankAreaFilterOpt.value = "";
+  blankAreaFilterOpt.textContent = "Todas las áreas";
+  els.areaFilter.appendChild(blankAreaFilterOpt);
+  AREA_OPTIONS.forEach((opt) => {
+    const o = document.createElement("option");
+    o.value = opt;
+    o.textContent = opt;
+    els.areaFilter.appendChild(o);
+  });
+  els.areaFilter.addEventListener("change", () => {
+    state.areaFilter = els.areaFilter.value;
+    renderList();
+  });
+}
 
 els.newEntry.addEventListener("click", async () => {
   try {

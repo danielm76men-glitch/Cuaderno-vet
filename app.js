@@ -457,13 +457,14 @@ function buildMedsSection(entry, statusText) {
 
   const head = document.createElement("div");
   head.className = "meds-head";
-  const label = document.createElement("span");
-  label.textContent = "Fármacos";
+  const toggleBtn = document.createElement("button");
+  toggleBtn.type = "button";
+  toggleBtn.className = "meds-toggle";
   const addBtn = document.createElement("button");
   addBtn.type = "button";
   addBtn.className = "meds-add";
   addBtn.textContent = "+ Agregar fármaco";
-  head.appendChild(label);
+  head.appendChild(toggleBtn);
   head.appendChild(addBtn);
   wrap.appendChild(head);
 
@@ -475,6 +476,20 @@ function buildMedsSection(entry, statusText) {
   wrap.appendChild(tableWrap);
 
   const meds = Array.isArray(entry.farmacos) ? entry.farmacos.map((m) => ({ ...m })) : [];
+
+  // Colapsado por defecto: la lista de fármacos solo se despliega cuando
+  // el usuario lo pide, en vez de ocupar espacio en la pantalla siempre.
+  let expanded = false;
+
+  function updateToggle() {
+    toggleBtn.textContent = (expanded ? "▾ " : "▸ ") + "Fármacos" + (meds.length ? " (" + meds.length + ")" : "");
+    tableWrap.hidden = !expanded;
+  }
+
+  toggleBtn.addEventListener("click", () => {
+    expanded = !expanded;
+    updateToggle();
+  });
 
   function commit() {
     scheduleSave(entry.id, { farmacos: meds }, statusText);
@@ -563,6 +578,7 @@ function buildMedsSection(entry, statusText) {
       removeBtn.addEventListener("click", () => {
         meds.splice(i, 1);
         renderRows();
+        updateToggle();
         commit();
       });
 
@@ -577,11 +593,14 @@ function buildMedsSection(entry, statusText) {
   }
 
   renderRows();
+  updateToggle();
 
   addBtn.addEventListener("click", () => {
     meds.push({ nombre: "", concentracion: "", dosis: "", dosisAdministrada: "", frecuencia: "" });
     renderRows();
     commit();
+    expanded = true;
+    updateToggle();
     const inputs = table.querySelectorAll(".meds-row:last-child input");
     if (inputs[0]) inputs[0].focus();
   });

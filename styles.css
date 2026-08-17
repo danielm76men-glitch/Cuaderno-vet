@@ -415,6 +415,20 @@ body {
 .meds { margin: 16px 0 4px; }
 .meds-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .meds-head > span { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+.meds-toggle {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.meds-toggle:hover { color: var(--teal-ink); }
 .meds-add {
   appearance: none;
   border: none;
@@ -436,7 +450,7 @@ body {
    720px sin recortar texto ni forzar scroll lateral. */
 .meds-table-wrap { border-radius: 8px; }
 .meds-table { min-width: 0; }
-.meds-row-head { display: none; }
+.meds-row.meds-row-head { display: none; }
 .meds-row {
   display: grid;
   grid-template-columns: 1fr auto;

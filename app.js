@@ -2,8 +2,11 @@ import { firebaseConfig } from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
   getAuth,
-  signInAnonymously,
-  onAuthStateChanged
+  onAuthStateChanged,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
+  signOut
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
   getFirestore,
@@ -13,8 +16,10 @@ import {
   updateDoc,
   deleteDoc,
   onSnapshot,
+  getDocs,
   query,
   orderBy,
+  where,
   serverTimestamp,
   enableIndexedDbPersistence
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
@@ -74,7 +79,13 @@ const els = {
   exportBtn: document.getElementById("exportBtn"),
   importBtn: document.getElementById("importBtn"),
   importFile: document.getElementById("importFile"),
-  backupMsg: document.getElementById("backupMsg")
+  backupMsg: document.getElementById("backupMsg"),
+  authGate: document.getElementById("authGate"),
+  authEmail: document.getElementById("authEmail"),
+  authSendBtn: document.getElementById("authSendBtn"),
+  authMsg: document.getElementById("authMsg"),
+  authUser: document.getElementById("authUser"),
+  signOutBtn: document.getElementById("signOutBtn")
 };
 
 const state = {
@@ -84,6 +95,8 @@ const state = {
   query: "",
   ready: false
 };
+
+let currentUid = null;
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -118,6 +131,23 @@ function setConn(state_, text) {
   els.connText.textContent = text;
 }
 
+let toastEl = null;
+let toastTimer = null;
+function showToast(text) {
+  if (!toastEl) {
+    toastEl = document.createElement("div");
+    toastEl.className = "toast";
+    document.body.appendChild(toastEl);
+  }
+  toastEl.textContent = text;
+  // reflow para reiniciar la animación si el toast ya estaba visible
+  toastEl.classList.remove("show");
+  void toastEl.offsetWidth;
+  toastEl.classList.add("show");
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1500);
+}
+
 function updateCounts() {
   els.countMaterias.textContent = entriesForSection("materias").length;
   els.countCasos.textContent = entriesForSection("casos").length;
@@ -138,6 +168,24 @@ function renderList() {
     .sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
 
   els.entryList.innerHTML = "";
+
+  if (state.query) {
+    const otherSection = state.section === "materias" ? "casos" : "materias";
+    const otherCount = entriesForSection(otherSection).filter((e) => matchesQuery(e, state.query)).length;
+    if (otherCount > 0) {
+      const hint = document.createElement("button");
+      hint.type = "button";
+      hint.className = "search-hint";
+      const otherLabel = otherSection === "materias" ? "Materias" : "Casos clínicos";
+      hint.textContent = otherCount + " resultado" + (otherCount === 1 ? "" : "s") + " en " + otherLabel;
+      hint.addEventListener("click", () => {
+        state.section = otherSection;
+        state.activeId = null;
+        render();
+      });
+      els.entryList.appendChild(hint);
+    }
+  }
 
   if (list.length === 0) {
     const empty = document.createElement("div");
@@ -226,20 +274,31 @@ function renderEmptyPage() {
   els.page.appendChild(wrap);
 }
 
-let saveTimer = null;
+// Un timer de debounce POR CAMPO (no uno global), para que editar un campo
+// nunca cancele el guardado pendiente de otro. Clave: "<entryId>:<campo>".
+const saveTimers = new Map();
+
 function scheduleSave(entryId, patch, statusEl) {
-  if (saveTimer) clearTimeout(saveTimer);
+  const field = Object.keys(patch)[0] || "default";
+  const key = entryId + ":" + field;
+
+  const existing = saveTimers.get(key);
+  if (existing) clearTimeout(existing);
+
   if (statusEl) {
     statusEl.parentElement.setAttribute("data-state", "pending");
     statusEl.textContent = "Escribiendo…";
   }
-  saveTimer = setTimeout(async () => {
+
+  const timer = setTimeout(async () => {
+    saveTimers.delete(key);
     try {
       await updateDoc(doc(db, "entries", entryId), { ...patch, updatedAt: serverTimestamp() });
       if (statusEl) {
         statusEl.parentElement.setAttribute("data-state", "ok");
         statusEl.textContent = "Sincronizado";
       }
+      showToast("Guardado");
     } catch (err) {
       if (statusEl) {
         statusEl.parentElement.setAttribute("data-state", "error");
@@ -247,6 +306,8 @@ function scheduleSave(entryId, patch, statusEl) {
       }
     }
   }, 450);
+
+  saveTimers.set(key, timer);
 }
 
 function buildMedsSection(entry, statusText) {
@@ -298,6 +359,17 @@ function buildMedsSection(entry, statusText) {
     });
     table.appendChild(headerRow);
 
+    function medField(labelText, inputEl) {
+      const field = document.createElement("div");
+      field.className = "meds-field";
+      const lbl = document.createElement("span");
+      lbl.className = "meds-field-label";
+      lbl.textContent = labelText;
+      field.appendChild(lbl);
+      field.appendChild(inputEl);
+      return field;
+    }
+
     meds.forEach((med, i) => {
       const row = document.createElement("div");
       row.className = "meds-row";
@@ -345,10 +417,10 @@ function buildMedsSection(entry, statusText) {
         commit();
       });
 
-      row.appendChild(nameInput);
-      row.appendChild(doseInput);
-      row.appendChild(doseGivenInput);
-      row.appendChild(freqInput);
+      row.appendChild(medField("Nombre", nameInput));
+      row.appendChild(medField("Dosis", doseInput));
+      row.appendChild(medField("Dosis administrada", doseGivenInput));
+      row.appendChild(medField("Frecuencia", freqInput));
       row.appendChild(removeBtn);
       table.appendChild(row);
     });
@@ -641,6 +713,7 @@ els.search.addEventListener("input", () => {
 els.newEntry.addEventListener("click", async () => {
   try {
     const ref = await addDoc(collection(db, "entries"), {
+      uid: currentUid,
       section: state.section,
       title: "",
       meta: "",
@@ -729,15 +802,31 @@ els.importFile.addEventListener("change", () => {
       showBackupMsg("Ese archivo no tiene entradas para importar.", true);
       return;
     }
-    if (!confirm("¿Agregar " + incoming.length + " entrada(s) de esta copia al cuaderno? Se crearán como entradas nuevas.")) {
+    if (!confirm("¿Agregar " + incoming.length + " entrada(s) de esta copia al cuaderno? Se omiten las que ya existan.")) {
       return;
     }
     showBackupMsg("Importando…");
+
+    // Evita duplicar: por id (re-importar el mismo export) o por
+    // section+título+fecha (migrar desde la versión vieja). El set se
+    // actualiza también con lo que se agrega EN ESTA misma importación,
+    // por si el propio archivo trae filas repetidas.
+    const dupKey = (e) => (e.section || "") + "␟" + (e.title || "") + "␟" + (e.date || "");
+    const seenIds = new Set(state.entries.map((e) => e.id).filter(Boolean));
+    const seenKeys = new Set(state.entries.map(dupKey));
+
     let ok = 0;
+    let skipped = 0;
     for (const inc of incoming) {
       if (!inc || !inc.section || !SECTION_META[inc.section]) continue;
+      const isDup = (inc.id && seenIds.has(inc.id)) || seenKeys.has(dupKey(inc));
+      if (isDup) {
+        skipped++;
+        continue;
+      }
       try {
         await addDoc(collection(db, "entries"), {
+          uid: currentUid,
           section: inc.section,
           title: inc.title || "",
           meta: inc.meta || "",
@@ -746,12 +835,17 @@ els.importFile.addEventListener("change", () => {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
+        seenKeys.add(dupKey(inc));
+        if (inc.id) seenIds.add(inc.id);
         ok++;
       } catch (err) {
         break;
       }
     }
-    showBackupMsg("Se importaron " + ok + " de " + incoming.length + " entrada(s).");
+    showBackupMsg(
+      "Se importaron " + ok + " de " + incoming.length + " entrada(s)." +
+      (skipped ? " " + skipped + " omitida(s) por ya existir." : "")
+    );
   };
   reader.onerror = () => showBackupMsg("No se pudo leer el archivo.", true);
   reader.readAsText(file);
@@ -766,15 +860,105 @@ window.addEventListener("offline", () => {
   setConn("offline", "Sin conexión — se guardará al reconectar");
 });
 
-/* ---------- Firestore: autenticación y sincronización en tiempo real ---------- */
+/* ---------- Acceso: enlace de correo (sin contraseña) ----------
+   Con esto el mismo uid viaja contigo entre dispositivos: inicias sesión
+   con el mismo correo en la laptop y en el cel, y ambos ven el mismo
+   cuaderno — a la vez que las reglas de Firestore pueden exigir que
+   uid == dueño de la entrada. */
+
+const EMAIL_KEY = "vetcuaderno.authEmail.v1";
+
+function setAuthMsg(text, kind) {
+  els.authMsg.textContent = text;
+  els.authMsg.classList.remove("error", "ok");
+  if (kind) els.authMsg.classList.add(kind);
+}
+
+function actionCodeSettings() {
+  return {
+    url: window.location.origin + window.location.pathname,
+    handleCodeInApp: true
+  };
+}
+
+els.authSendBtn.addEventListener("click", async () => {
+  const email = els.authEmail.value.trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    setAuthMsg("Escribe un correo válido.", "error");
+    return;
+  }
+  els.authSendBtn.disabled = true;
+  setAuthMsg("Enviando…");
+  try {
+    await sendSignInLinkToEmail(auth, email, actionCodeSettings());
+    localStorage.setItem(EMAIL_KEY, email);
+    setAuthMsg("Listo. Revisa " + email + " y abre el enlace para entrar (en cualquier dispositivo).", "ok");
+  } catch (err) {
+    setAuthMsg("No se pudo enviar el enlace. Revisa el correo o tu conexión.", "error");
+  } finally {
+    els.authSendBtn.disabled = false;
+  }
+});
+
+els.authEmail.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") els.authSendBtn.click();
+});
+
+if (els.signOutBtn) {
+  els.signOutBtn.addEventListener("click", () => {
+    if (confirm("¿Cerrar sesión en este dispositivo?")) signOut(auth);
+  });
+}
+
+async function completeSignInIfNeeded() {
+  if (!isSignInWithEmailLink(auth, window.location.href)) return;
+  let email = localStorage.getItem(EMAIL_KEY);
+  if (!email) {
+    email = window.prompt("Confirma el correo con el que solicitaste el enlace, para completar el acceso:");
+  }
+  if (!email) return;
+  try {
+    await signInWithEmailLink(auth, email, window.location.href);
+    localStorage.removeItem(EMAIL_KEY);
+  } catch (err) {
+    setAuthMsg("El enlace no es válido o ya expiró. Solicita uno nuevo.", "error");
+  } finally {
+    history.replaceState({}, document.title, window.location.pathname);
+  }
+}
+
+/* ---------- Migración única: adoptar entradas viejas sin uid ----------
+   Solo encuentra algo la primera vez que alguien inicia sesión, mientras
+   las reglas de Firestore todavía sean abiertas. IMPORTANTE: aplica las
+   reglas nuevas (restrictivas) DESPUÉS de que esto corra al menos una
+   vez, si no la entrada vieja queda huérfana e ilegible para siempre. */
+
+async function adoptOrphanEntries() {
+  try {
+    const snap = await getDocs(collection(db, "entries"));
+    const orphans = snap.docs.filter((d) => !d.data().uid);
+    for (const d of orphans) {
+      await updateDoc(doc(db, "entries", d.id), { uid: currentUid });
+    }
+    if (orphans.length) {
+      console.info("Migradas " + orphans.length + " entrada(s) vieja(s) a tu cuenta.");
+    }
+  } catch (err) {
+    console.warn("No se pudieron migrar entradas antiguas sin uid:", err);
+  }
+}
+
+/* ---------- Firestore: sincronización en tiempo real (solo tus entradas) ---------- */
 
 let unsubscribe = null;
 
-onAuthStateChanged(auth, (user) => {
-  if (!user) return;
+function subscribeEntries() {
   if (unsubscribe) return;
-
-  const q = query(collection(db, "entries"), orderBy("updatedAt", "desc"));
+  const q = query(
+    collection(db, "entries"),
+    where("uid", "==", currentUid),
+    orderBy("updatedAt", "desc")
+  );
   unsubscribe = onSnapshot(
     q,
     (snapshot) => {
@@ -797,12 +981,42 @@ onAuthStateChanged(auth, (user) => {
       console.error(err);
     }
   );
+}
+
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    currentUid = user.uid;
+    els.authGate.hidden = true;
+    els.app.hidden = false;
+    if (els.authUser) {
+      els.authUser.hidden = false;
+      els.authUser.textContent = user.email || "Sesión activa";
+    }
+    setConn("offline", "Conectando…");
+    render();
+    adoptOrphanEntries().then(subscribeEntries);
+  } else {
+    currentUid = null;
+    if (unsubscribe) {
+      unsubscribe();
+      unsubscribe = null;
+    }
+    state.entries = [];
+    state.ready = false;
+    els.app.hidden = true;
+    els.authGate.hidden = false;
+    if (els.authUser) els.authUser.hidden = true;
+  }
 });
 
-signInAnonymously(auth).catch((err) => {
-  setConn("error", "No se pudo conectar. Revisa tu conexión.");
-  console.error(err);
-});
+completeSignInIfNeeded();
 
-setConn("offline", "Conectando…");
-render();
+/* ---------- PWA: registrar service worker (requisito para instalar) ---------- */
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(() => {
+      /* si falla el registro, el cuaderno sigue funcionando igual en el navegador */
+    });
+  });
+}

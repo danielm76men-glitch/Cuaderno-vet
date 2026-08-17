@@ -23,10 +23,18 @@ import {
   serverTimestamp,
   enableIndexedDbPersistence
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const storage = getStorage(app);
 
 enableIndexedDbPersistence(db).catch((err) => {
   if (err.code === "failed-precondition") {
@@ -56,6 +64,12 @@ const SECTION_META = {
     emptyGlyph: "✚",
     emptyTitle: "Aún no hay casos clínicos",
     emptyBody: "Registra tu primer caso de prácticas o vinculación."
+  },
+  farmacos: {
+    label: "Fármaco",
+    emptyGlyph: "℞",
+    emptyTitle: "Aún no has registrado fármacos",
+    emptyBody: "Los fármacos que agregues en tus casos clínicos van a aparecer aquí automáticamente."
   }
 };
 
@@ -71,6 +85,7 @@ const els = {
   page: document.getElementById("page"),
   countMaterias: document.getElementById("countMaterias"),
   countCasos: document.getElementById("countCasos"),
+  countFarmacos: document.getElementById("countFarmacos"),
   toggleSidebar: document.getElementById("toggleSidebar"),
   mobileLabel: document.getElementById("mobileLabel"),
   connPill: document.getElementById("connPill"),
@@ -126,6 +141,45 @@ function matchesQuery(entry, q) {
   );
 }
 
+// Bitácora de fármacos: no es una colección propia, se arma "al vuelo"
+// aplanando el array `farmacos` de cada caso clínico. Así nunca se
+// desincroniza de lo que realmente registraste en cada caso.
+function getMedUsageList() {
+  const list = [];
+  entriesForSection("casos").forEach((entry) => {
+    (entry.farmacos || []).forEach((med, i) => {
+      if (!med || !med.nombre) return;
+      list.push({
+        id: entry.id + "::" + i,
+        entryId: entry.id,
+        nombre: med.nombre,
+        concentracion: med.concentracion || "",
+        dosis: med.dosis || "",
+        dosisAdministrada: med.dosisAdministrada || "",
+        frecuencia: med.frecuencia || "",
+        date: entry.date,
+        paciente: entry.meta,
+        especie: entry.especie,
+        caseTitle: entry.title,
+        _sortKey: entry._sortKey || 0
+      });
+    });
+  });
+  return list;
+}
+
+function matchesMedQuery(item, q) {
+  if (!q) return true;
+  q = q.toLowerCase();
+  return (
+    (item.nombre || "").toLowerCase().includes(q) ||
+    (item.concentracion || "").toLowerCase().includes(q) ||
+    (item.paciente || "").toLowerCase().includes(q) ||
+    (item.caseTitle || "").toLowerCase().includes(q) ||
+    (item.especie || "").toLowerCase().includes(q)
+  );
+}
+
 function setConn(state_, text) {
   els.connPill.setAttribute("data-state", state_);
   els.connText.textContent = text;
@@ -151,7 +205,10 @@ function showToast(text) {
 function updateCounts() {
   els.countMaterias.textContent = entriesForSection("materias").length;
   els.countCasos.textContent = entriesForSection("casos").length;
+  if (els.countFarmacos) els.countFarmacos.textContent = getMedUsageList().length;
 }
+
+const SECTION_LABELS = { materias: "Materias", casos: "Casos clínicos", farmacos: "Fármacos" };
 
 function setActiveTab() {
   els.tabs.forEach((t) => {
@@ -159,32 +216,42 @@ function setActiveTab() {
     t.setAttribute("aria-selected", sel ? "true" : "false");
   });
   els.app.setAttribute("data-active", state.section);
-  els.mobileLabel.textContent = state.section === "materias" ? "Materias" : "Casos clínicos";
+  els.mobileLabel.textContent = SECTION_LABELS[state.section] || "";
+  els.newEntry.style.display = state.section === "farmacos" ? "none" : "";
+}
+
+function renderSearchHint(otherSection, otherCount) {
+  if (otherCount <= 0) return;
+  const hint = document.createElement("button");
+  hint.type = "button";
+  hint.className = "search-hint";
+  hint.textContent = otherCount + " resultado" + (otherCount === 1 ? "" : "s") + " en " + SECTION_LABELS[otherSection];
+  hint.addEventListener("click", () => {
+    state.section = otherSection;
+    state.activeId = null;
+    render();
+  });
+  els.entryList.appendChild(hint);
 }
 
 function renderList() {
+  els.entryList.innerHTML = "";
+  if (state.section === "farmacos") {
+    renderMedUsageList();
+  } else {
+    renderEntryList();
+  }
+}
+
+function renderEntryList() {
   const list = entriesForSection(state.section)
     .filter((e) => matchesQuery(e, state.query))
     .sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
 
-  els.entryList.innerHTML = "";
-
   if (state.query) {
     const otherSection = state.section === "materias" ? "casos" : "materias";
     const otherCount = entriesForSection(otherSection).filter((e) => matchesQuery(e, state.query)).length;
-    if (otherCount > 0) {
-      const hint = document.createElement("button");
-      hint.type = "button";
-      hint.className = "search-hint";
-      const otherLabel = otherSection === "materias" ? "Materias" : "Casos clínicos";
-      hint.textContent = otherCount + " resultado" + (otherCount === 1 ? "" : "s") + " en " + otherLabel;
-      hint.addEventListener("click", () => {
-        state.section = otherSection;
-        state.activeId = null;
-        render();
-      });
-      els.entryList.appendChild(hint);
-    }
+    renderSearchHint(otherSection, otherCount);
   }
 
   if (list.length === 0) {
@@ -239,6 +306,56 @@ function renderList() {
   });
 }
 
+function renderMedUsageList() {
+  const list = getMedUsageList()
+    .filter((m) => matchesMedQuery(m, state.query))
+    .sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
+
+  if (list.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-list";
+    empty.textContent = state.query
+      ? "Sin resultados para “" + state.query + "”."
+      : "Aún no hay fármacos registrados.";
+    els.entryList.appendChild(empty);
+    return;
+  }
+
+  list.forEach((item) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "entry-item";
+    btn.setAttribute("aria-current", item.id === state.activeId ? "true" : "false");
+
+    const row1 = document.createElement("div");
+    row1.className = "row1";
+    const title = document.createElement("span");
+    title.className = "title";
+    title.textContent = item.nombre;
+    const date = document.createElement("span");
+    date.className = "date";
+    date.textContent = formatDate(item.date);
+    row1.appendChild(title);
+    row1.appendChild(date);
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const metaBits = [];
+    if (item.especie) metaBits.push(item.especie);
+    metaBits.push(item.paciente || item.caseTitle || "(sin título)");
+    meta.textContent = metaBits.join(" · ");
+
+    btn.appendChild(row1);
+    btn.appendChild(meta);
+
+    btn.addEventListener("click", () => {
+      state.activeId = item.id;
+      render();
+    });
+    els.entryList.appendChild(btn);
+  });
+}
+
 function renderEmptyPage() {
   const meta = SECTION_META[state.section];
   const total = state.entries.length;
@@ -267,6 +384,7 @@ function renderEmptyPage() {
     stats.innerHTML =
       '<div><span class="n">' + entriesForSection("materias").length + '</span><span class="l">Materias</span></div>' +
       '<div><span class="n">' + entriesForSection("casos").length + '</span><span class="l">Casos</span></div>' +
+      '<div><span class="n">' + getMedUsageList().length + '</span><span class="l">Fármacos</span></div>' +
       '<div><span class="n">' + total + '</span><span class="l">Total</span></div>';
     wrap.appendChild(stats);
   }
@@ -352,7 +470,7 @@ function buildMedsSection(entry, statusText) {
 
     const headerRow = document.createElement("div");
     headerRow.className = "meds-row meds-row-head";
-    ["Nombre", "Dosis", "Dosis administrada", "Frecuencia", ""].forEach((t) => {
+    ["Nombre", "Concentración", "Dosis", "Dosis administrada", "Frecuencia", ""].forEach((t) => {
       const s = document.createElement("span");
       s.textContent = t;
       headerRow.appendChild(s);
@@ -379,6 +497,14 @@ function buildMedsSection(entry, statusText) {
       nameInput.value = med.nombre || "";
       nameInput.addEventListener("input", () => {
         meds[i].nombre = nameInput.value;
+        commit();
+      });
+
+      const concInput = document.createElement("input");
+      concInput.placeholder = "Ej. 50 mg/mL";
+      concInput.value = med.concentracion || "";
+      concInput.addEventListener("input", () => {
+        meds[i].concentracion = concInput.value;
         commit();
       });
 
@@ -418,6 +544,7 @@ function buildMedsSection(entry, statusText) {
       });
 
       row.appendChild(medField("Nombre", nameInput));
+      row.appendChild(medField("Concentración", concInput));
       row.appendChild(medField("Dosis", doseInput));
       row.appendChild(medField("Dosis administrada", doseGivenInput));
       row.appendChild(medField("Frecuencia", freqInput));
@@ -429,13 +556,122 @@ function buildMedsSection(entry, statusText) {
   renderRows();
 
   addBtn.addEventListener("click", () => {
-    meds.push({ nombre: "", dosis: "", frecuencia: "" });
+    meds.push({ nombre: "", concentracion: "", dosis: "", dosisAdministrada: "", frecuencia: "" });
     renderRows();
     commit();
     const inputs = table.querySelectorAll(".meds-row:last-child input");
     if (inputs[0]) inputs[0].focus();
   });
 
+  return wrap;
+}
+
+function buildPhotosSection(entry, statusText) {
+  const wrap = document.createElement("div");
+  wrap.className = "photos";
+
+  const head = document.createElement("div");
+  head.className = "meds-head";
+  const label = document.createElement("span");
+  label.textContent = "Fotos (radiografías, ecografías, paciente)";
+  head.appendChild(label);
+  wrap.appendChild(head);
+
+  const grid = document.createElement("div");
+  grid.className = "photos-grid";
+  wrap.appendChild(grid);
+
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = "image/*";
+  fileInput.multiple = true;
+  fileInput.style.display = "none";
+  wrap.appendChild(fileInput);
+
+  const photos = Array.isArray(entry.fotos) ? entry.fotos.slice() : [];
+
+  function commit() {
+    scheduleSave(entry.id, { fotos: photos }, statusText);
+  }
+
+  function renderGrid() {
+    grid.innerHTML = "";
+
+    photos.forEach((photo, i) => {
+      const tile = document.createElement("div");
+      tile.className = "photo-tile";
+
+      const img = document.createElement("img");
+      img.src = photo.url;
+      img.alt = photo.name || "Foto";
+      img.loading = "lazy";
+      tile.appendChild(img);
+
+      if (photo.uploading) {
+        const spin = document.createElement("div");
+        spin.className = "photo-uploading";
+        spin.textContent = "Subiendo…";
+        tile.appendChild(spin);
+      } else {
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "photo-remove";
+        del.textContent = "×";
+        del.setAttribute("aria-label", "Eliminar foto");
+        del.addEventListener("click", async () => {
+          if (!confirm("¿Eliminar esta foto?")) return;
+          tile.style.opacity = "0.4";
+          try {
+            if (photo.path) await deleteObject(storageRef(storage, photo.path));
+          } catch (err) {
+            /* si ya no existe en Storage, igual la quitamos de la lista */
+          }
+          const idx = photos.indexOf(photo);
+          if (idx > -1) photos.splice(idx, 1);
+          renderGrid();
+          commit();
+        });
+        tile.appendChild(del);
+      }
+
+      grid.appendChild(tile);
+    });
+
+    const addTile = document.createElement("button");
+    addTile.type = "button";
+    addTile.className = "photo-add";
+    addTile.textContent = "+";
+    addTile.setAttribute("aria-label", "Agregar foto");
+    addTile.addEventListener("click", () => fileInput.click());
+    grid.appendChild(addTile);
+  }
+
+  fileInput.addEventListener("change", async () => {
+    const files = Array.from(fileInput.files || []);
+    fileInput.value = "";
+    for (const file of files) {
+      const placeholder = { url: URL.createObjectURL(file), name: file.name, uploading: true };
+      photos.push(placeholder);
+      renderGrid();
+      const path = "photos/" + currentUid + "/" + entry.id + "/" + Date.now() + "_" + file.name;
+      try {
+        const ref_ = storageRef(storage, path);
+        await uploadBytes(ref_, file);
+        const url = await getDownloadURL(ref_);
+        const idx = photos.indexOf(placeholder);
+        if (idx > -1) photos[idx] = { url, path, name: file.name };
+        renderGrid();
+        commit();
+      } catch (err) {
+        const idx = photos.indexOf(placeholder);
+        if (idx > -1) photos.splice(idx, 1);
+        renderGrid();
+        alert("No se pudo subir " + file.name + ". Revisa tu conexión (o si Storage sigue sin activarse en el proyecto).");
+      }
+    }
+  });
+
+  renderGrid();
   return wrap;
 }
 
@@ -619,6 +855,7 @@ function renderEditor(entry) {
   status.innerHTML = '<span class="dot"></span><span class="statusText">Sincronizado</span>';
   const statusText = status.querySelector(".statusText");
 
+  const photosSection = entry.section === "casos" ? buildPhotosSection(entry, statusText) : null;
   const medsSection = entry.section === "casos" ? buildMedsSection(entry, statusText) : null;
 
   const divider = document.createElement("hr");
@@ -665,6 +902,7 @@ function renderEditor(entry) {
   els.page.appendChild(titleInput);
   els.page.appendChild(fieldRow);
   if (detailsRow) els.page.appendChild(detailsRow);
+  if (photosSection) els.page.appendChild(photosSection);
   if (medsSection) els.page.appendChild(medsSection);
   els.page.appendChild(divider);
   els.page.appendChild(bodyToolbar);
@@ -685,10 +923,83 @@ function renderEditor(entry) {
   }
 }
 
+function renderMedDetail(item) {
+  els.page.innerHTML = "";
+
+  const tag = document.createElement("span");
+  tag.className = "section-tag farmacos";
+  tag.textContent = "Fármaco";
+
+  const head = document.createElement("div");
+  head.className = "editor-head";
+  head.appendChild(tag);
+
+  const title = document.createElement("h2");
+  title.className = "field-title";
+  title.textContent = item.nombre;
+
+  const fields = [
+    ["Concentración", item.concentracion],
+    ["Dosis", item.dosis],
+    ["Dosis administrada", item.dosisAdministrada],
+    ["Frecuencia", item.frecuencia],
+    ["Fecha", formatDate(item.date)],
+    ["Especie", item.especie],
+    ["Paciente", item.paciente]
+  ];
+
+  const fieldRow = document.createElement("div");
+  fieldRow.className = "field-row";
+  fields.forEach(([labelText, value]) => {
+    if (!value) return;
+    const group = document.createElement("div");
+    group.className = "field-group";
+    const lbl = document.createElement("label");
+    lbl.textContent = labelText;
+    const val = document.createElement("div");
+    val.className = "field-static";
+    val.textContent = value;
+    group.appendChild(lbl);
+    group.appendChild(val);
+    fieldRow.appendChild(group);
+  });
+
+  const divider = document.createElement("hr");
+  divider.className = "divider";
+
+  const goBtn = document.createElement("button");
+  goBtn.type = "button";
+  goBtn.className = "backup-btn";
+  goBtn.style.marginTop = "16px";
+  goBtn.textContent = "Ver caso clínico: " + (item.caseTitle || "(sin título)") + " →";
+  goBtn.addEventListener("click", () => {
+    state.section = "casos";
+    state.activeId = item.entryId;
+    render();
+  });
+
+  els.page.appendChild(head);
+  els.page.appendChild(title);
+  els.page.appendChild(fieldRow);
+  els.page.appendChild(divider);
+  els.page.appendChild(goBtn);
+}
+
 function render() {
   setActiveTab();
   updateCounts();
   renderList();
+
+  if (state.section === "farmacos") {
+    const item = getMedUsageList().find((m) => m.id === state.activeId);
+    if (item) {
+      renderMedDetail(item);
+    } else {
+      renderEmptyPage();
+    }
+    return;
+  }
+
   const active = state.entries.find((e) => e.id === state.activeId);
   if (active) {
     renderEditor(active);

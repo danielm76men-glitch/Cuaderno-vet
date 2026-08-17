@@ -364,15 +364,31 @@ function renderEmptyPage() {
   const wrap = document.createElement("div");
   wrap.className = "page-empty";
 
+  const collectionCount = state.section === "farmacos"
+    ? getMedUsageList().length
+    : entriesForSection(state.section).length;
+
   const glyph = document.createElement("div");
   glyph.className = "glyph";
   glyph.textContent = meta.emptyGlyph;
 
   const h2 = document.createElement("h2");
-  h2.textContent = state.ready ? meta.emptyTitle : "Conectando con el cuaderno…";
-
   const p = document.createElement("p");
-  p.textContent = state.ready ? meta.emptyBody : "Un momento, esto solo pasa la primera vez.";
+
+  if (!state.ready) {
+    h2.textContent = "Conectando con el cuaderno…";
+    p.textContent = "Un momento, esto solo pasa la primera vez.";
+  } else if (collectionCount > 0) {
+    // Hay entradas en esta sección, solo que ninguna está seleccionada
+    // todavía — este mensaje es distinto del de "colección vacía".
+    h2.textContent = "Selecciona una entrada de la lista";
+    p.textContent = state.section === "farmacos"
+      ? "O agrega fármacos desde cualquier caso clínico."
+      : "O crea una nueva con el botón de abajo.";
+  } else {
+    h2.textContent = meta.emptyTitle;
+    p.textContent = meta.emptyBody;
+  }
 
   wrap.appendChild(glyph);
   wrap.appendChild(h2);
@@ -566,6 +582,45 @@ function buildMedsSection(entry, statusText) {
   return wrap;
 }
 
+// Redimensiona/comprime en el navegador antes de subir (canvas nativo,
+// sin librerías): limita el lado más largo a maxDim y reexporta como
+// JPEG a la calidad indicada. Si el archivo no es una imagen decodificable
+// (o algo falla), se resuelve con el archivo original sin tocarlo.
+function compressImage(file, maxDim, quality) {
+  return new Promise((resolve) => {
+    if (!file.type || !file.type.startsWith("image/")) {
+      resolve(file);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        if (width >= height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => resolve(blob || file), "image/jpeg", quality);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+    img.src = url;
+  });
+}
+
 function buildPhotosSection(entry, statusText) {
   const wrap = document.createElement("div");
   wrap.className = "photos";
@@ -655,8 +710,9 @@ function buildPhotosSection(entry, statusText) {
       renderGrid();
       const path = "photos/" + currentUid + "/" + entry.id + "/" + Date.now() + "_" + file.name;
       try {
+        const compressed = await compressImage(file, 1600, 0.82);
         const ref_ = storageRef(storage, path);
-        await uploadBytes(ref_, file);
+        await uploadBytes(ref_, compressed, { contentType: "image/jpeg" });
         const url = await getDownloadURL(ref_);
         const idx = photos.indexOf(placeholder);
         if (idx > -1) photos[idx] = { url, path, name: file.name };

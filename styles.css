@@ -415,32 +415,40 @@ body {
 }
 .meds-add:hover { text-decoration: underline; }
 
-.meds-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
-.meds-table { min-width: 760px; }
+/* Tarjetas apiladas por fármaco (no tabla): con 5 campos clínicos
+   (Nombre, Concentración, Dosis, Dosis administrada, Frecuencia) una
+   tabla de columnas fijas solo cabe sin scroll horizontal en pantallas
+   muy anchas. Las tarjetas no tienen ancho mínimo — cada campo ocupa el
+   ancho completo disponible, así que caben igual de bien a 320px que a
+   720px sin recortar texto ni forzar scroll lateral. */
+.meds-table-wrap { border-radius: 8px; }
+.meds-table { min-width: 0; }
+.meds-row-head { display: none; }
 .meds-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr 1fr 28px;
-  gap: 8px;
-  align-items: center;
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--line-soft);
-}
-.meds-row:last-child { border-bottom: none; }
-.meds-row-head {
+  grid-template-columns: 1fr auto;
+  gap: 8px 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   background: var(--paper-raised);
-  font-size: 0.66rem;
+  margin-bottom: 8px;
+}
+.meds-row:last-child { margin-bottom: 0; }
+.meds-field { grid-column: 1 / 2; display: flex; flex-direction: column; min-width: 0; }
+.meds-field-label {
+  display: block;
+  font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--muted);
-  font-weight: 600;
+  margin-bottom: 2px;
 }
-.meds-field { display: flex; flex-direction: column; min-width: 0; }
-.meds-field-label { display: none; }
 .meds-row input {
   font: inherit;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
   border: none;
-  border-bottom: 1px solid transparent;
+  border-bottom: 1px solid var(--line);
   background: transparent;
   color: var(--ink);
   padding: 3px 2px;
@@ -449,16 +457,18 @@ body {
 }
 .meds-row input:focus-visible { outline: none; border-bottom-color: var(--teal); }
 .meds-remove {
+  grid-column: 2 / 3;
+  grid-row: 1 / -1;
+  align-self: start;
   appearance: none;
   border: none;
   background: transparent;
   color: var(--muted);
-  font-size: 1rem;
+  font-size: 1.1rem;
   line-height: 1;
   cursor: pointer;
-  padding: 2px;
+  padding: 2px 4px;
   border-radius: 4px;
-  justify-self: center;
 }
 .meds-remove:hover { color: var(--rust); }
 .meds-empty {
@@ -650,36 +660,4 @@ body {
   .sidebar.collapsed .backup { display: none; }
   .entry-list { max-height: 46vh; }
   .notebook { padding: 18px; }
-
-  /* Fármacos: de tabla con scroll horizontal a tarjetas apiladas */
-  .meds-row-head { display: none; }
-  .meds-table-wrap { overflow-x: visible; border: none; }
-  .meds-table { min-width: 0; }
-  .meds-row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 8px 10px;
-    padding: 12px;
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    background: var(--paper-raised);
-    margin-bottom: 8px;
-  }
-  .meds-row:last-child { margin-bottom: 0; }
-  .meds-field { grid-column: 1 / 2; }
-  .meds-field-label {
-    display: block;
-    font-size: 0.65rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--muted);
-    margin-bottom: 2px;
-  }
-  .meds-row input { border-bottom: 1px solid var(--line); }
-  .meds-remove {
-    grid-column: 2 / 3;
-    grid-row: 1 / -1;
-    align-self: start;
-    font-size: 1.1rem;
-  }
 }

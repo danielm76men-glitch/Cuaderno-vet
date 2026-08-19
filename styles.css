@@ -205,6 +205,7 @@ body {
 .conn-pill[data-state="error"] { color: var(--rust-ink); border-color: var(--rust-soft); }
 
 .tabs { display: flex; padding: 14px 14px 0; gap: 3px; }
+.page-tabs + .section-tabs { padding-top: 6px; }
 .tab {
   flex: 1;
   min-width: 0;
@@ -241,6 +242,7 @@ body {
 .tab[data-section="materias"][aria-selected="true"] { box-shadow: inset 0 3px 0 var(--teal); }
 .tab[data-section="casos"][aria-selected="true"] { box-shadow: inset 0 3px 0 var(--rust); }
 .tab[data-section="farmacos"][aria-selected="true"] { box-shadow: inset 0 3px 0 var(--amber); }
+.tab[data-section="formulario"][aria-selected="true"] { box-shadow: inset 0 3px 0 var(--ink); }
 .tab[aria-selected="true"] .count { color: var(--ink); }
 
 .search-wrap { padding: 12px 14px; background: var(--paper-raised); border-bottom: 1px solid var(--line); }
@@ -331,6 +333,22 @@ body {
 .app[data-active="casos"] .new-entry:hover { border-color: var(--rust); color: var(--rust-ink); background: var(--rust-soft); }
 .new-entry:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.calc-btn {
+  margin: 0 14px 14px;
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--paper-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.calc-btn:hover { border-color: var(--teal); color: var(--teal-ink); background: var(--teal-soft); }
+
 .backup { margin: 0 14px 16px; padding-top: 12px; border-top: 1px solid var(--line); }
 .backup-row { display: flex; flex-direction: column; gap: 8px; }
 .backup-btn {
@@ -380,6 +398,7 @@ body {
 .section-tag.materias { background: var(--teal-soft); color: var(--teal-ink); }
 .section-tag.casos { background: var(--rust-soft); color: var(--rust-ink); }
 .section-tag.farmacos { background: var(--amber-soft); color: var(--amber); }
+.section-tag.formulario { background: var(--paper-alt); color: var(--ink); border: 1px solid var(--line); }
 
 .field-title {
   width: 100%;
@@ -412,6 +431,11 @@ body {
 }
 .field-group select:focus-visible { outline: none; border-bottom-color: var(--teal); }
 
+.checkbox-group-label { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; margin: 10px 0 6px; }
+.checkbox-group { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 8px; }
+.checkbox-item { display: inline-flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--ink); cursor: pointer; }
+.checkbox-item input[type="checkbox"] { accent-color: var(--teal); width: 15px; height: 15px; cursor: pointer; }
+
 .meds { margin: 16px 0 4px; }
 .meds-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .meds-head > span { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
@@ -441,6 +465,7 @@ body {
   padding: 2px 0;
 }
 .meds-add:hover { text-decoration: underline; }
+.meds-head-actions { display: flex; align-items: center; gap: 14px; }
 
 /* Tarjetas apiladas por fármaco (no tabla): con 5 campos clínicos
    (Nombre, Concentración, Dosis, Dosis administrada, Frecuencia) una
@@ -691,6 +716,60 @@ body {
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+/* ---------- Overlay / calculadora de dosis ---------- */
+.overlay-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 100;
+}
+.overlay-card {
+  background: var(--paper-raised);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  width: 100%;
+  max-width: 480px;
+  max-height: 88vh;
+  overflow-y: auto;
+  padding: 22px;
+}
+.overlay-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.overlay-head h2 { font-family: var(--serif); font-size: 1.3rem; margin: 0; color: var(--ink); }
+.overlay-close {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.overlay-close:hover { color: var(--rust); }
+
+.calc-field { margin-bottom: 14px; }
+.calc-field label { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; margin-bottom: 4px; }
+.calc-field input, .calc-field select {
+  width: 100%;
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.calc-field input:focus-visible, .calc-field select:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.calc-result { margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
+.calc-result .calc-line { font-size: 0.83rem; color: var(--muted); font-family: var(--mono); margin-bottom: 4px; }
+.calc-result .calc-total { font-size: 1.1rem; font-weight: 700; color: var(--teal-ink); margin-top: 4px; margin-bottom: 10px; }
+.calc-empty { color: var(--muted); font-size: 0.85rem; }
+
 /* ---------- Mobile ---------- */
 .mobile-bar { display: none; }
 @media (max-width: 760px) {
@@ -718,6 +797,7 @@ body {
   .sidebar.collapsed .search-wrap,
   .sidebar.collapsed .entry-list,
   .sidebar.collapsed .new-entry,
+  .sidebar.collapsed .calc-btn,
   .sidebar.collapsed .backup { display: none; }
   .entry-list { max-height: 46vh; }
   .notebook { padding: 18px; }

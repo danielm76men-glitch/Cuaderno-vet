@@ -43,23 +43,32 @@
         <p class="auth-user" id="authUser" hidden></p>
         <button class="sign-out-btn" id="signOutBtn" type="button">Cerrar sesión</button>
       </div>
-      <div class="tabs" role="tablist">
-        <button class="tab" data-section="materias" role="tab" aria-selected="true">
+      <div class="tabs page-tabs" role="tablist" aria-label="Página">
+        <button class="tab" data-page="paciente" role="tab" aria-selected="false">Paciente</button>
+        <button class="tab" data-page="estudio" role="tab" aria-selected="true">Estudio</button>
+      </div>
+      <div class="tabs section-tabs" role="tablist" aria-label="Sección">
+        <button class="tab" data-section="materias" data-page="estudio" role="tab" aria-selected="true">
           Materias <span class="count" id="countMaterias">0</span>
         </button>
-        <button class="tab" data-section="casos" role="tab" aria-selected="false">
+        <button class="tab" data-section="casos" data-page="paciente" role="tab" aria-selected="false">
           Casos clínicos <span class="count" id="countCasos">0</span>
         </button>
-        <button class="tab" data-section="farmacos" role="tab" aria-selected="false">
+        <button class="tab" data-section="farmacos" data-page="paciente" role="tab" aria-selected="false">
           Fármacos <span class="count" id="countFarmacos">0</span>
+        </button>
+        <button class="tab" data-section="formulario" data-page="estudio" role="tab" aria-selected="false">
+          Formulario <span class="count" id="countFormulario">0</span>
         </button>
       </div>
       <div class="search-wrap">
         <input type="search" id="search" placeholder="Buscar en el cuaderno…" autocomplete="off" />
         <select id="areaFilter" class="area-filter" hidden></select>
+        <select id="formularioEspecieFilter" class="area-filter" hidden></select>
       </div>
       <div class="entry-list" id="entryList"></div>
       <button class="new-entry" id="newEntry" type="button">+ Nueva entrada</button>
+      <button class="calc-btn" id="calcBtn" type="button" hidden>🧮 Calculadora de dosis</button>
       <div class="backup">
         <div class="backup-row">
           <button class="backup-btn" id="exportBtn" type="button">↓ Descargar copia</button>

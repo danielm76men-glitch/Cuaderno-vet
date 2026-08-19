@@ -44,72 +44,22 @@ enableIndexedDbPersistence(db).catch((err) => {
   }
 });
 
-const SECTION_META = {
-  materias: {
-    label: "Materia",
-    metaLabel: "Materia / tema",
-    metaPlaceholder: "Ej. Patología General",
-    bodyPlaceholder: "Escribe tus apuntes de clase…",
-    titlePlaceholder: "Título del apunte",
-    emptyGlyph: "§",
-    emptyTitle: "Aún no hay apuntes de materias",
-    emptyBody: "Crea una entrada para empezar a registrar tus clases."
-  },
-  casos: {
-    label: "Caso clínico",
-    metaLabel: "Paciente",
-    metaPlaceholder: "Ej. Nombre del paciente",
-    bodyPlaceholder: "Anamnesis, examen físico, diagnóstico, tratamiento…",
-    titlePlaceholder: "Motivo de consulta",
-    emptyGlyph: "✚",
-    emptyTitle: "Aún no hay casos clínicos",
-    emptyBody: "Registra tu primer caso de prácticas o vinculación."
-  },
-  farmacos: {
-    label: "Fármaco",
-    emptyGlyph: "℞",
-    emptyTitle: "Aún no has registrado fármacos",
-    emptyBody: "Los fármacos que agregues en tus casos clínicos van a aparecer aquí automáticamente."
-  },
-  formulario: {
-    label: "Fármaco de referencia",
-    emptyGlyph: "📖",
-    emptyTitle: "Aún no hay fármacos en el formulario",
-    emptyBody: "Agrega fármacos con su dosis para consultarlos o calcular la dosis por peso."
-  }
-};
-
 const SPECIES_OPTIONS = ["Bovino", "Equino", "Porcino", "Aves", "Canino", "Felino", "Ovino", "Caprino", "Exótico", "Otro"];
 const AREA_OPTIONS = ["Cirugía", "Medicina interna", "Reproducción", "Emergencia", "Seguimiento", "Otro"];
-
-const PAGE_SECTIONS = { paciente: ["casos", "farmacos"], estudio: ["materias", "formulario"] };
-const PAGE_LABELS = { paciente: "Paciente", estudio: "Estudio" };
 
 const els = {
   app: document.getElementById("app"),
   sidebar: document.getElementById("sidebar"),
-  pageTabs: Array.prototype.slice.call(document.querySelectorAll(".page-tabs .tab")),
-  tabs: Array.prototype.slice.call(document.querySelectorAll(".section-tabs .tab")),
-  search: document.getElementById("search"),
-  areaFilter: document.getElementById("areaFilter"),
-  formularioEspecieFilter: document.getElementById("formularioEspecieFilter"),
-  entryList: document.getElementById("entryList"),
-  newEntry: document.getElementById("newEntry"),
-  calcBtn: document.getElementById("calcBtn"),
-  page: document.getElementById("page"),
-  countMaterias: document.getElementById("countMaterias"),
-  countCasos: document.getElementById("countCasos"),
+  pageNav: Array.prototype.slice.call(document.querySelectorAll("#pageNav .nav-item")),
+  countPatients: document.getElementById("countPatients"),
   countFarmacos: document.getElementById("countFarmacos"),
-  countFormulario: document.getElementById("countFormulario"),
+  countStudy: document.getElementById("countStudy"),
+  search: document.getElementById("search"),
+  content: document.getElementById("content"),
   toggleSidebar: document.getElementById("toggleSidebar"),
-  mobileLabel: document.getElementById("mobileLabel"),
   connPill: document.getElementById("connPill"),
   connText: document.getElementById("connText"),
   themeToggle: document.getElementById("themeToggle"),
-  exportBtn: document.getElementById("exportBtn"),
-  importBtn: document.getElementById("importBtn"),
-  importFile: document.getElementById("importFile"),
-  backupMsg: document.getElementById("backupMsg"),
   authGate: document.getElementById("authGate"),
   authEmail: document.getElementById("authEmail"),
   authSendBtn: document.getElementById("authSendBtn"),
@@ -118,15 +68,25 @@ const els = {
   signOutBtn: document.getElementById("signOutBtn")
 };
 
+const PAGE_LABELS = {
+  dashboard: "Dashboard",
+  patients: "Patients",
+  farmacos: "Fármacos",
+  study: "Study",
+  calendar: "Calendar",
+  reports: "Reports",
+  settings: "Settings"
+};
+
 const state = {
   entries: [],
   formulario: [],
-  page: "estudio",
-  section: "materias",
-  activeId: null,
-  query: "",
+  page: "dashboard",
+  studyTab: "materias",
   areaFilter: "",
   formularioEspecieFilter: "",
+  activeId: null,
+  query: "",
   ready: false
 };
 
@@ -145,6 +105,11 @@ function formatDate(iso) {
   return parts[2] + " " + months[m] + " " + parts[0];
 }
 
+function roundNice(n) {
+  if (!isFinite(n)) return "";
+  return String(Math.round(n * 100) / 100);
+}
+
 function entriesForSection(section) {
   return state.entries.filter((e) => e.section === section);
 }
@@ -157,6 +122,7 @@ function matchesQuery(entry, q) {
     (entry.meta || "").toLowerCase().includes(q) ||
     (entry.especie || "").toLowerCase().includes(q) ||
     (entry.area || "").toLowerCase().includes(q) ||
+    (entry.tutorNombre || "").toLowerCase().includes(q) ||
     (entry.body || "").toLowerCase().includes(q)
   );
 }
@@ -224,296 +190,11 @@ function showToast(text) {
     document.body.appendChild(toastEl);
   }
   toastEl.textContent = text;
-  // reflow para reiniciar la animación si el toast ya estaba visible
   toastEl.classList.remove("show");
   void toastEl.offsetWidth;
   toastEl.classList.add("show");
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toastEl.classList.remove("show"), 1500);
-}
-
-function updateCounts() {
-  els.countMaterias.textContent = entriesForSection("materias").length;
-  els.countCasos.textContent = entriesForSection("casos").length;
-  if (els.countFarmacos) els.countFarmacos.textContent = getMedUsageList().length;
-  if (els.countFormulario) els.countFormulario.textContent = state.formulario.length;
-}
-
-const SECTION_LABELS = { materias: "Materias", casos: "Casos clínicos", farmacos: "Fármacos", formulario: "Formulario" };
-
-function setActiveTab() {
-  els.pageTabs.forEach((t) => {
-    const sel = t.getAttribute("data-page") === state.page;
-    t.setAttribute("aria-selected", sel ? "true" : "false");
-  });
-  els.tabs.forEach((t) => {
-    const sel = t.getAttribute("data-section") === state.section;
-    t.setAttribute("aria-selected", sel ? "true" : "false");
-    t.hidden = t.getAttribute("data-page") !== state.page;
-  });
-  els.app.setAttribute("data-active", state.section);
-  els.mobileLabel.textContent = SECTION_LABELS[state.section] || "";
-  els.newEntry.style.display = state.section === "farmacos" ? "none" : "";
-  if (els.areaFilter) els.areaFilter.hidden = state.section !== "casos";
-  if (els.formularioEspecieFilter) els.formularioEspecieFilter.hidden = state.section !== "formulario";
-  if (els.calcBtn) els.calcBtn.hidden = state.section !== "formulario";
-}
-
-function renderSearchHint(otherSection, otherCount) {
-  if (otherCount <= 0) return;
-  const hint = document.createElement("button");
-  hint.type = "button";
-  hint.className = "search-hint";
-  hint.textContent = otherCount + " resultado" + (otherCount === 1 ? "" : "s") + " en " + SECTION_LABELS[otherSection];
-  hint.addEventListener("click", () => {
-    state.section = otherSection;
-    state.activeId = null;
-    render();
-  });
-  els.entryList.appendChild(hint);
-}
-
-function renderList() {
-  els.entryList.innerHTML = "";
-  if (state.section === "farmacos") {
-    renderMedUsageList();
-  } else if (state.section === "formulario") {
-    renderFormularioList();
-  } else {
-    renderEntryList();
-  }
-}
-
-function renderEntryList() {
-  const list = entriesForSection(state.section)
-    .filter((e) => matchesQuery(e, state.query))
-    .filter((e) => state.section !== "casos" || !state.areaFilter || e.area === state.areaFilter)
-    .sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
-
-  if (state.query) {
-    const otherSection = state.section === "materias" ? "casos" : "materias";
-    const otherCount = entriesForSection(otherSection).filter((e) => matchesQuery(e, state.query)).length;
-    renderSearchHint(otherSection, otherCount);
-  }
-
-  if (list.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty-list";
-    empty.textContent = state.query
-      ? "Sin resultados para “" + state.query + "”."
-      : "Aún no hay entradas.";
-    els.entryList.appendChild(empty);
-    return;
-  }
-
-  list.forEach((entry) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "entry-item";
-    btn.setAttribute("aria-current", entry.id === state.activeId ? "true" : "false");
-
-    const row1 = document.createElement("div");
-    row1.className = "row1";
-    const title = document.createElement("span");
-    title.className = "title";
-    title.textContent = entry.title || "(sin título)";
-    const date = document.createElement("span");
-    date.className = "date";
-    date.textContent = formatDate(entry.date);
-    row1.appendChild(title);
-    row1.appendChild(date);
-
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    const metaBits = [];
-    if (entry.section === "casos" && entry.especie) metaBits.push(entry.especie);
-    if (entry.section === "casos" && entry.area) metaBits.push(entry.area);
-    if (entry.meta) metaBits.push(entry.meta);
-    meta.textContent = metaBits.join(" · ");
-
-    btn.appendChild(row1);
-    btn.appendChild(meta);
-
-    if (entry._pending) {
-      const tag = document.createElement("div");
-      tag.className = "pending-tag";
-      tag.textContent = "● pendiente de sincronizar";
-      btn.appendChild(tag);
-    }
-
-    btn.addEventListener("click", () => {
-      state.activeId = entry.id;
-      render();
-    });
-    els.entryList.appendChild(btn);
-  });
-}
-
-function renderMedUsageList() {
-  const list = getMedUsageList()
-    .filter((m) => matchesMedQuery(m, state.query))
-    .sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
-
-  if (list.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty-list";
-    empty.textContent = state.query
-      ? "Sin resultados para “" + state.query + "”."
-      : "Aún no hay fármacos registrados.";
-    els.entryList.appendChild(empty);
-    return;
-  }
-
-  list.forEach((item) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "entry-item";
-    btn.setAttribute("aria-current", item.id === state.activeId ? "true" : "false");
-
-    const row1 = document.createElement("div");
-    row1.className = "row1";
-    const title = document.createElement("span");
-    title.className = "title";
-    title.textContent = item.nombre;
-    const date = document.createElement("span");
-    date.className = "date";
-    date.textContent = formatDate(item.date);
-    row1.appendChild(title);
-    row1.appendChild(date);
-
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    const metaBits = [];
-    if (item.especie) metaBits.push(item.especie);
-    metaBits.push(item.paciente || item.caseTitle || "(sin título)");
-    meta.textContent = metaBits.join(" · ");
-
-    btn.appendChild(row1);
-    btn.appendChild(meta);
-
-    btn.addEventListener("click", () => {
-      state.activeId = item.id;
-      render();
-    });
-    els.entryList.appendChild(btn);
-  });
-}
-
-function renderFormularioList() {
-  const list = state.formulario
-    .filter((f) => matchesFormularioQuery(f, state.query))
-    .filter((f) => !state.formularioEspecieFilter || (Array.isArray(f.especies) ? f.especies : []).includes(state.formularioEspecieFilter))
-    .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
-
-  if (list.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty-list";
-    empty.textContent = state.query
-      ? "Sin resultados para “" + state.query + "”."
-      : "Aún no hay fármacos en el formulario.";
-    els.entryList.appendChild(empty);
-    return;
-  }
-
-  list.forEach((item) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "entry-item";
-    btn.setAttribute("aria-current", item.id === state.activeId ? "true" : "false");
-
-    const row1 = document.createElement("div");
-    row1.className = "row1";
-    const title = document.createElement("span");
-    title.className = "title";
-    title.textContent = item.nombre || "(sin nombre)";
-    const dose = document.createElement("span");
-    dose.className = "date";
-    dose.textContent = item.dosisValor != null ? item.dosisValor + " " + (item.dosisUnidad || "") : "";
-    row1.appendChild(title);
-    row1.appendChild(dose);
-
-    const meta = document.createElement("div");
-    meta.className = "meta";
-    const metaBits = [];
-    if (Array.isArray(item.especies) && item.especies.length) metaBits.push(item.especies.join(", "));
-    if (item.via) metaBits.push(item.via);
-    meta.textContent = metaBits.join(" · ");
-
-    btn.appendChild(row1);
-    btn.appendChild(meta);
-
-    btn.addEventListener("click", () => {
-      state.activeId = item.id;
-      render();
-    });
-    els.entryList.appendChild(btn);
-  });
-}
-
-function renderEmptyPage() {
-  const meta = SECTION_META[state.section];
-  const total = state.entries.length + state.formulario.length;
-  els.page.innerHTML = "";
-
-  const wrap = document.createElement("div");
-  wrap.className = "page-empty";
-
-  const collectionCount = state.section === "farmacos"
-    ? getMedUsageList().length
-    : state.section === "formulario"
-    ? state.formulario.length
-    : entriesForSection(state.section).length;
-
-  const glyph = document.createElement("div");
-  glyph.className = "glyph";
-  glyph.textContent = meta.emptyGlyph;
-
-  const h2 = document.createElement("h2");
-  const p = document.createElement("p");
-
-  if (!state.ready) {
-    h2.textContent = "Conectando con el cuaderno…";
-    p.textContent = "Un momento, esto solo pasa la primera vez.";
-  } else if (collectionCount > 0) {
-    // Hay entradas en esta sección, solo que ninguna está seleccionada
-    // todavía — este mensaje es distinto del de "colección vacía".
-    h2.textContent = "Selecciona una entrada de la lista";
-    p.textContent = state.section === "farmacos"
-      ? "O agrega fármacos desde cualquier caso clínico."
-      : "O crea una nueva con el botón de abajo.";
-  } else {
-    h2.textContent = meta.emptyTitle;
-    p.textContent = meta.emptyBody;
-  }
-
-  wrap.appendChild(glyph);
-  wrap.appendChild(h2);
-  wrap.appendChild(p);
-
-  if (state.ready && state.section === "formulario") {
-    const calcShortcut = document.createElement("button");
-    calcShortcut.type = "button";
-    calcShortcut.className = "calc-btn";
-    calcShortcut.style.margin = "18px auto 0";
-    calcShortcut.style.maxWidth = "260px";
-    calcShortcut.textContent = "🧮 Abrir calculadora de dosis";
-    calcShortcut.addEventListener("click", () => openCalculatorOverlay());
-    wrap.appendChild(calcShortcut);
-  }
-
-  if (state.ready) {
-    const stats = document.createElement("div");
-    stats.className = "stats";
-    stats.innerHTML =
-      '<div><span class="n">' + entriesForSection("materias").length + '</span><span class="l">Materias</span></div>' +
-      '<div><span class="n">' + entriesForSection("casos").length + '</span><span class="l">Casos</span></div>' +
-      '<div><span class="n">' + getMedUsageList().length + '</span><span class="l">Fármacos</span></div>' +
-      '<div><span class="n">' + state.formulario.length + '</span><span class="l">Formulario</span></div>' +
-      '<div><span class="n">' + total + '</span><span class="l">Total</span></div>';
-    wrap.appendChild(stats);
-  }
-
-  els.page.appendChild(wrap);
 }
 
 // Un timer de debounce POR CAMPO (no uno global), para que editar un campo
@@ -554,26 +235,260 @@ function scheduleSave(collectionName, entryId, patch, statusEl) {
   saveTimers.set(key, timer);
 }
 
+function buildSpeciesCheckboxes(selected, onChange) {
+  const wrap = document.createElement("div");
+  wrap.className = "checkbox-group";
+  const values = new Set(Array.isArray(selected) ? selected : []);
+  SPECIES_OPTIONS.forEach((opt) => {
+    const label = document.createElement("label");
+    label.className = "checkbox-item";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = opt;
+    input.checked = values.has(opt);
+    input.addEventListener("change", () => {
+      if (input.checked) values.add(opt);
+      else values.delete(opt);
+      onChange(Array.from(values));
+    });
+    const span = document.createElement("span");
+    span.textContent = opt;
+    label.appendChild(input);
+    label.appendChild(span);
+    wrap.appendChild(label);
+  });
+  return wrap;
+}
+
+// Redimensiona/comprime en el navegador antes de subir (canvas nativo,
+// sin librerías): limita el lado más largo a maxDim y reexporta como
+// JPEG a la calidad indicada. Si el archivo no es una imagen decodificable
+// (o algo falla), se resuelve con el archivo original sin tocarlo.
+function compressImage(file, maxDim, quality) {
+  return new Promise((resolve) => {
+    if (!file.type || !file.type.startsWith("image/")) {
+      resolve(file);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      let { width, height } = img;
+      if (width > maxDim || height > maxDim) {
+        if (width >= height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, width, height);
+      canvas.toBlob((blob) => resolve(blob || file), "image/jpeg", quality);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file);
+    };
+    img.src = url;
+  });
+}
+
+function attachVoiceInput(button, targetEl) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const label = button.querySelector(".label");
+
+  if (!SpeechRecognition) {
+    button.style.display = "none";
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = "es-419";
+  recognition.continuous = true;
+  recognition.interimResults = false;
+
+  let listening = false;
+
+  function setListening(value) {
+    listening = value;
+    button.setAttribute("data-listening", value ? "true" : "false");
+    label.textContent = value ? "Escuchando… (clic para detener)" : "Dictar por voz";
+  }
+
+  recognition.addEventListener("result", (event) => {
+    let chunk = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      if (event.results[i].isFinal) {
+        chunk += event.results[i][0].transcript;
+      }
+    }
+    chunk = chunk.trim();
+    if (!chunk) return;
+    const current = targetEl.value;
+    const needsSpace = current && !/\s$/.test(current);
+    targetEl.value = current + (needsSpace ? " " : "") + chunk;
+    targetEl.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
+  recognition.addEventListener("end", () => setListening(false));
+
+  recognition.addEventListener("error", (event) => {
+    setListening(false);
+    if (event.error !== "no-speech" && event.error !== "aborted") {
+      alert("No se pudo usar el micrófono (" + event.error + "). Revisa los permisos del navegador.");
+    }
+  });
+
+  button.addEventListener("click", () => {
+    if (listening) {
+      recognition.stop();
+      return;
+    }
+    try {
+      recognition.start();
+      setListening(true);
+    } catch (err) {
+      /* recognition already active; ignore */
+    }
+  });
+}
+
+function buildPhotosSection(entry, statusText) {
+  const wrap = document.createElement("div");
+  wrap.className = "photos";
+
+  const head = document.createElement("div");
+  head.className = "subcard-head";
+  const label = document.createElement("span");
+  label.textContent = "Fotos (radiografías, ecografías, paciente)";
+  head.appendChild(label);
+  wrap.appendChild(head);
+
+  const grid = document.createElement("div");
+  grid.className = "photos-grid";
+  wrap.appendChild(grid);
+
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = "image/*";
+  fileInput.multiple = true;
+  fileInput.style.display = "none";
+  wrap.appendChild(fileInput);
+
+  const photos = Array.isArray(entry.fotos) ? entry.fotos.slice() : [];
+
+  function commit() {
+    scheduleSave("entries", entry.id, { fotos: photos }, statusText);
+  }
+
+  function renderGrid() {
+    grid.innerHTML = "";
+
+    photos.forEach((photo, i) => {
+      const tile = document.createElement("div");
+      tile.className = "photo-tile";
+
+      const img = document.createElement("img");
+      img.src = photo.url;
+      img.alt = photo.name || "Foto";
+      img.loading = "lazy";
+      tile.appendChild(img);
+
+      if (photo.uploading) {
+        const spin = document.createElement("div");
+        spin.className = "photo-uploading";
+        spin.textContent = "Subiendo…";
+        tile.appendChild(spin);
+      } else {
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "photo-remove";
+        del.textContent = "×";
+        del.setAttribute("aria-label", "Eliminar foto");
+        del.addEventListener("click", async () => {
+          if (!confirm("¿Eliminar esta foto?")) return;
+          tile.style.opacity = "0.4";
+          try {
+            if (photo.path) await deleteObject(storageRef(storage, photo.path));
+          } catch (err) {
+            /* si ya no existe en Storage, igual la quitamos de la lista */
+          }
+          const idx = photos.indexOf(photo);
+          if (idx > -1) photos.splice(idx, 1);
+          renderGrid();
+          commit();
+        });
+        tile.appendChild(del);
+      }
+
+      grid.appendChild(tile);
+    });
+
+    const addTile = document.createElement("button");
+    addTile.type = "button";
+    addTile.className = "photo-add";
+    addTile.textContent = "+";
+    addTile.setAttribute("aria-label", "Agregar foto");
+    addTile.addEventListener("click", () => fileInput.click());
+    grid.appendChild(addTile);
+  }
+
+  fileInput.addEventListener("change", async () => {
+    const files = Array.from(fileInput.files || []);
+    fileInput.value = "";
+    for (const file of files) {
+      const placeholder = { url: URL.createObjectURL(file), name: file.name, uploading: true };
+      photos.push(placeholder);
+      renderGrid();
+      const path = "photos/" + currentUid + "/" + entry.id + "/" + Date.now() + "_" + file.name;
+      try {
+        const compressed = await compressImage(file, 1600, 0.82);
+        const ref_ = storageRef(storage, path);
+        await uploadBytes(ref_, compressed, { contentType: "image/jpeg" });
+        const url = await getDownloadURL(ref_);
+        const idx = photos.indexOf(placeholder);
+        if (idx > -1) photos[idx] = { url, path, name: file.name };
+        renderGrid();
+        commit();
+      } catch (err) {
+        const idx = photos.indexOf(placeholder);
+        if (idx > -1) photos.splice(idx, 1);
+        renderGrid();
+        alert("No se pudo subir " + file.name + ". Revisa tu conexión (o si Storage sigue sin activarse en el proyecto).");
+      }
+    }
+  });
+
+  renderGrid();
+  return wrap;
+}
+
 function buildMedsSection(entry, statusText) {
   const wrap = document.createElement("div");
   wrap.className = "meds";
 
   const head = document.createElement("div");
-  head.className = "meds-head";
+  head.className = "subcard-head";
   const toggleBtn = document.createElement("button");
   toggleBtn.type = "button";
-  toggleBtn.className = "meds-toggle";
+  toggleBtn.className = "toggle-btn";
   const consultBtn = document.createElement("button");
   consultBtn.type = "button";
-  consultBtn.className = "meds-add";
+  consultBtn.className = "link-btn";
   consultBtn.textContent = "Consultar formulario";
-  consultBtn.addEventListener("click", () => openCalculatorOverlay());
+  consultBtn.addEventListener("click", () => openCalculatorOverlay({ caseEntry: entry }));
   const addBtn = document.createElement("button");
   addBtn.type = "button";
-  addBtn.className = "meds-add";
+  addBtn.className = "link-btn";
   addBtn.textContent = "+ Agregar fármaco";
   const headActions = document.createElement("div");
-  headActions.className = "meds-head-actions";
+  headActions.className = "subcard-actions";
   headActions.appendChild(consultBtn);
   headActions.appendChild(addBtn);
   head.appendChild(toggleBtn);
@@ -720,17 +635,27 @@ function buildMedsSection(entry, statusText) {
   return wrap;
 }
 
+// Agrega una entrada nueva al array `evoluciones` de un caso directamente
+// en Firestore (escritura inmediata, no debounced: se usa para acciones
+// puntuales de un clic — "+ Agregar evolución" y "Add to Case Notes" desde
+// la calculadora — no para campos que el usuario escribe letra por letra).
+async function addEvolutionToCase(caseEntry, texto) {
+  const current = Array.isArray(caseEntry.evoluciones) ? caseEntry.evoluciones.slice() : [];
+  current.push({ date: todayISO(), texto });
+  await updateDoc(doc(db, "entries", caseEntry.id), { evoluciones: current, updatedAt: serverTimestamp() });
+}
+
 function buildEvolucionesSection(entry, statusText) {
   const wrap = document.createElement("div");
   wrap.className = "evols";
 
   const head = document.createElement("div");
-  head.className = "meds-head";
+  head.className = "subcard-head";
   const label = document.createElement("span");
   label.textContent = "Evoluciones";
   const addBtn = document.createElement("button");
   addBtn.type = "button";
-  addBtn.className = "meds-add";
+  addBtn.className = "link-btn";
   addBtn.textContent = "+ Agregar evolución";
   head.appendChild(label);
   head.appendChild(addBtn);
@@ -757,10 +682,9 @@ function buildEvolucionesSection(entry, statusText) {
       return;
     }
 
-    // El array se guarda en orden de creación (igual que farmacos); para
-    // mostrarlo de más reciente a más antigua se calcula un orden de
-    // visualización aparte, sin reordenar el array real — así el índice
-    // real de cada fila no cambia mientras el usuario escribe en otra.
+    // El array se guarda en orden de creación; para mostrarlo de más
+    // reciente a más antigua se calcula un orden de visualización aparte,
+    // sin reordenar el array real.
     const order = evols
       .map((_, i) => i)
       .sort((a, b) => (evols[b].date || "").localeCompare(evols[a].date || "") || b - a);
@@ -824,42 +748,15 @@ function buildEvolucionesSection(entry, statusText) {
   return wrap;
 }
 
-function buildSpeciesCheckboxes(selected, onChange) {
-  const wrap = document.createElement("div");
-  wrap.className = "checkbox-group";
-  const values = new Set(Array.isArray(selected) ? selected : []);
-  SPECIES_OPTIONS.forEach((opt) => {
-    const label = document.createElement("label");
-    label.className = "checkbox-item";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.value = opt;
-    input.checked = values.has(opt);
-    input.addEventListener("change", () => {
-      if (input.checked) values.add(opt);
-      else values.delete(opt);
-      onChange(Array.from(values));
-    });
-    const span = document.createElement("span");
-    span.textContent = opt;
-    label.appendChild(input);
-    label.appendChild(span);
-    wrap.appendChild(label);
-  });
-  return wrap;
-}
-
-function roundNice(n) {
-  if (!isFinite(n)) return "";
-  return String(Math.round(n * 100) / 100);
-}
-
-// Núcleo de la calculadora de dosis: autónomo, sin ninguna referencia al
-// caso clínico ni a su tabla de fármacos. Es SOLO consulta — nunca debe
-// escribir en "Dosis administrada" ni en ningún otro campo de un caso.
-// Si se agrega algún día un botón para "enviar el cálculo al caso", debe
-// ser una decisión explícita del usuario, no algo que este componente haga.
-function buildDoseCalculator() {
+/* ================= Calculadora de dosis (overlay) =================
+   Puede abrirse SIN contexto de caso (desde Study o Dashboard, solo
+   consulta) o CON contexto de caso (desde la sección de fármacos de un
+   caso abierto). Solo cuando hay contexto de caso se muestra el botón
+   "Add to Case Notes", que agrega el resultado como una nueva evolución
+   del caso — nunca escribe en la tabla de fármacos ni en "Dosis
+   administrada". Esto fue una decisión explícita del usuario. */
+function buildDoseCalculator(context) {
+  const ctx = context || {};
   const wrap = document.createElement("div");
   wrap.className = "calc";
 
@@ -900,6 +797,10 @@ function buildDoseCalculator() {
   weightInput.step = "any";
   weightInput.min = "0";
   weightInput.placeholder = "Ej. 12.5";
+  if (ctx.caseEntry && ctx.caseEntry.peso) {
+    const parsedPeso = parseFloat(String(ctx.caseEntry.peso).replace(",", "."));
+    if (isFinite(parsedPeso)) weightInput.value = parsedPeso;
+  }
   weightField.appendChild(weightLabel);
   weightField.appendChild(weightInput);
 
@@ -907,6 +808,8 @@ function buildDoseCalculator() {
   result.className = "calc-result";
 
   let selectedDrug = null;
+  let lastSummaryLine = "";
+  let lastTotalLine = "";
 
   function findDrug(name) {
     const n = (name || "").trim().toLowerCase();
@@ -945,21 +848,37 @@ function buildDoseCalculator() {
     result.appendChild(line);
   }
 
+  let addBtn = null;
+  let addedMsg = null;
+
+  function updateAddButton(enabled) {
+    if (!addBtn) return;
+    addBtn.disabled = !enabled;
+    if (addedMsg) addedMsg.remove();
+    addedMsg = null;
+  }
+
   function renderResult() {
     result.innerHTML = "";
+    lastSummaryLine = "";
+    lastTotalLine = "";
+    updateAddButton(false);
 
     if (!selectedDrug) {
       showEmpty("Escribe el nombre de un fármaco del formulario para calcular.");
+      if (addBtn) result.appendChild(addBtn);
       return;
     }
     if (selectedDrug.dosisValor == null || !isFinite(selectedDrug.dosisValor)) {
       showEmpty("Este fármaco no tiene una dosis numérica cargada en el formulario.");
+      if (addBtn) result.appendChild(addBtn);
       return;
     }
 
     const weight = parseFloat(weightInput.value);
     if (!weight || weight <= 0) {
       showEmpty("Ingresa el peso del paciente para calcular la dosis.");
+      if (addBtn) result.appendChild(addBtn);
       return;
     }
 
@@ -968,21 +887,31 @@ function buildDoseCalculator() {
     const totalDose = weight * selectedDrug.dosisValor;
     const especieNote = speciesSelect.value ? " (" + speciesSelect.value + ")" : "";
 
-    addLine(
-      "Dosis total" + especieNote + " = peso × dosis = " + weight + " kg × " + selectedDrug.dosisValor + " " + dosisUnidad
-    );
-    addLine("= " + roundNice(totalDose) + " " + massUnit, "calc-total");
+    const formulaLine =
+      "Dosis total" + especieNote + " = peso × dosis = " + weight + " kg × " + selectedDrug.dosisValor + " " + dosisUnidad;
+    addLine(formulaLine);
+    const totalText = roundNice(totalDose) + " " + massUnit;
+    addLine("= " + totalText, "calc-total");
+
+    lastSummaryLine = selectedDrug.nombre + ": " + weight + " kg × " + selectedDrug.dosisValor + " " + dosisUnidad + especieNote;
+    lastTotalLine = "Dosis total = " + totalText;
 
     if (selectedDrug.concentracionValor && isFinite(selectedDrug.concentracionValor) && selectedDrug.concentracionValor > 0) {
       const concUnidad = selectedDrug.concentracionUnidad || "";
       const volUnit = concUnidad.includes("/") ? concUnidad.split("/")[1].trim() : "";
       const volume = totalDose / selectedDrug.concentracionValor;
+      const volText = roundNice(volume) + " " + volUnit;
 
       addLine(
-        "Volumen = dosis total ÷ concentración = " + roundNice(totalDose) + " " + massUnit +
-        " ÷ " + selectedDrug.concentracionValor + " " + concUnidad
+        "Volumen = dosis total ÷ concentración = " + totalText + " ÷ " + selectedDrug.concentracionValor + " " + concUnidad
       );
-      addLine("= " + roundNice(volume) + " " + volUnit, "calc-total");
+      addLine("= " + volText, "calc-total");
+      lastTotalLine += " · Volumen a administrar = " + volText;
+    }
+
+    if (addBtn) {
+      result.appendChild(addBtn);
+      updateAddButton(true);
     }
   }
 
@@ -998,6 +927,36 @@ function buildDoseCalculator() {
   wrap.appendChild(speciesField);
   wrap.appendChild(weightField);
   wrap.appendChild(result);
+
+  // "Add to Case Notes": solo existe cuando la calculadora se abrió desde
+  // un caso clínico específico. Escribe el resultado como una nueva
+  // evolución del caso — es lo único que este botón hace.
+  if (ctx.caseEntry) {
+    addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "calc-add-btn";
+    addBtn.textContent = "Add to Case Notes";
+    addBtn.disabled = true;
+    addBtn.addEventListener("click", async () => {
+      if (!lastSummaryLine) return;
+      addBtn.disabled = true;
+      addBtn.textContent = "Agregando…";
+      try {
+        await addEvolutionToCase(ctx.caseEntry, "Cálculo de dosis — " + lastSummaryLine + ". " + lastTotalLine + ".");
+        addBtn.textContent = "Add to Case Notes";
+        if (addedMsg) addedMsg.remove();
+        addedMsg = document.createElement("div");
+        addedMsg.className = "calc-added-msg";
+        addedMsg.textContent = "✓ Agregado a Case Notes";
+        result.appendChild(addedMsg);
+      } catch (err) {
+        addBtn.textContent = "Add to Case Notes";
+        alert("No se pudo agregar a las notas del caso. Revisa tu conexión e intenta de nuevo.");
+      } finally {
+        addBtn.disabled = false;
+      }
+    });
+  }
 
   renderResult();
 
@@ -1018,10 +977,10 @@ function closeCalculatorOverlay() {
   }
 }
 
-// El overlay no toca state.section/state.activeId ni llama a render(): al
+// El overlay no toca state.page/state.activeId ni llama a render(): al
 // cerrarlo, la página de abajo (p. ej. un caso clínico en edición) queda
 // exactamente como estaba, porque nunca se volvió a dibujar.
-function openCalculatorOverlay() {
+function openCalculatorOverlay(context) {
   closeCalculatorOverlay();
 
   const backdrop = document.createElement("div");
@@ -1036,7 +995,7 @@ function openCalculatorOverlay() {
   const head = document.createElement("div");
   head.className = "overlay-head";
   const h2 = document.createElement("h2");
-  h2.textContent = "Calculadora de dosis";
+  h2.textContent = "Drug Formulary & Calculator";
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "overlay-close";
@@ -1047,7 +1006,15 @@ function openCalculatorOverlay() {
   head.appendChild(closeBtn);
 
   card.appendChild(head);
-  card.appendChild(buildDoseCalculator());
+
+  if (context && context.caseEntry) {
+    const note = document.createElement("p");
+    note.className = "overlay-note";
+    note.textContent = "Caso: " + (context.caseEntry.meta || context.caseEntry.title || "(sin nombre)");
+    card.appendChild(note);
+  }
+
+  card.appendChild(buildDoseCalculator(context));
   backdrop.appendChild(card);
   document.body.appendChild(backdrop);
   calcOverlayEl = backdrop;
@@ -1058,407 +1025,358 @@ function openCalculatorOverlay() {
   document.addEventListener("keydown", calcOverlayEscHandler);
 }
 
-// Redimensiona/comprime en el navegador antes de subir (canvas nativo,
-// sin librerías): limita el lado más largo a maxDim y reexporta como
-// JPEG a la calidad indicada. Si el archivo no es una imagen decodificable
-// (o algo falla), se resuelve con el archivo original sin tocarlo.
-function compressImage(file, maxDim, quality) {
-  return new Promise((resolve) => {
-    if (!file.type || !file.type.startsWith("image/")) {
-      resolve(file);
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if (width > maxDim || height > maxDim) {
-        if (width >= height) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
-        }
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, width, height);
-      canvas.toBlob((blob) => resolve(blob || file), "image/jpeg", quality);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(file);
-    };
-    img.src = url;
-  });
+/* ================= Navegación / render principal ================= */
+
+function updateNavCounts() {
+  if (els.countPatients) els.countPatients.textContent = entriesForSection("casos").length;
+  if (els.countFarmacos) els.countFarmacos.textContent = getMedUsageList().length;
+  if (els.countStudy) els.countStudy.textContent = entriesForSection("materias").length + state.formulario.length;
 }
 
-function buildPhotosSection(entry, statusText) {
-  const wrap = document.createElement("div");
-  wrap.className = "photos";
-
-  const head = document.createElement("div");
-  head.className = "meds-head";
-  const label = document.createElement("span");
-  label.textContent = "Fotos (radiografías, ecografías, paciente)";
-  head.appendChild(label);
-  wrap.appendChild(head);
-
-  const grid = document.createElement("div");
-  grid.className = "photos-grid";
-  wrap.appendChild(grid);
-
-  const fileInput = document.createElement("input");
-  fileInput.type = "file";
-  fileInput.accept = "image/*";
-  fileInput.multiple = true;
-  fileInput.style.display = "none";
-  wrap.appendChild(fileInput);
-
-  const photos = Array.isArray(entry.fotos) ? entry.fotos.slice() : [];
-
-  function commit() {
-    scheduleSave("entries", entry.id, { fotos: photos }, statusText);
-  }
-
-  function renderGrid() {
-    grid.innerHTML = "";
-
-    photos.forEach((photo, i) => {
-      const tile = document.createElement("div");
-      tile.className = "photo-tile";
-
-      const img = document.createElement("img");
-      img.src = photo.url;
-      img.alt = photo.name || "Foto";
-      img.loading = "lazy";
-      tile.appendChild(img);
-
-      if (photo.uploading) {
-        const spin = document.createElement("div");
-        spin.className = "photo-uploading";
-        spin.textContent = "Subiendo…";
-        tile.appendChild(spin);
-      } else {
-        const del = document.createElement("button");
-        del.type = "button";
-        del.className = "photo-remove";
-        del.textContent = "×";
-        del.setAttribute("aria-label", "Eliminar foto");
-        del.addEventListener("click", async () => {
-          if (!confirm("¿Eliminar esta foto?")) return;
-          tile.style.opacity = "0.4";
-          try {
-            if (photo.path) await deleteObject(storageRef(storage, photo.path));
-          } catch (err) {
-            /* si ya no existe en Storage, igual la quitamos de la lista */
-          }
-          const idx = photos.indexOf(photo);
-          if (idx > -1) photos.splice(idx, 1);
-          renderGrid();
-          commit();
-        });
-        tile.appendChild(del);
-      }
-
-      grid.appendChild(tile);
-    });
-
-    const addTile = document.createElement("button");
-    addTile.type = "button";
-    addTile.className = "photo-add";
-    addTile.textContent = "+";
-    addTile.setAttribute("aria-label", "Agregar foto");
-    addTile.addEventListener("click", () => fileInput.click());
-    grid.appendChild(addTile);
-  }
-
-  fileInput.addEventListener("change", async () => {
-    const files = Array.from(fileInput.files || []);
-    fileInput.value = "";
-    for (const file of files) {
-      const placeholder = { url: URL.createObjectURL(file), name: file.name, uploading: true };
-      photos.push(placeholder);
-      renderGrid();
-      const path = "photos/" + currentUid + "/" + entry.id + "/" + Date.now() + "_" + file.name;
-      try {
-        const compressed = await compressImage(file, 1600, 0.82);
-        const ref_ = storageRef(storage, path);
-        await uploadBytes(ref_, compressed, { contentType: "image/jpeg" });
-        const url = await getDownloadURL(ref_);
-        const idx = photos.indexOf(placeholder);
-        if (idx > -1) photos[idx] = { url, path, name: file.name };
-        renderGrid();
-        commit();
-      } catch (err) {
-        const idx = photos.indexOf(placeholder);
-        if (idx > -1) photos.splice(idx, 1);
-        renderGrid();
-        alert("No se pudo subir " + file.name + ". Revisa tu conexión (o si Storage sigue sin activarse en el proyecto).");
-      }
-    }
+function setActiveNav() {
+  els.pageNav.forEach((btn) => {
+    btn.setAttribute("aria-current", btn.getAttribute("data-page") === state.page ? "true" : "false");
   });
+  updateNavCounts();
+}
 
-  renderGrid();
+function goToPage(page) {
+  state.page = page;
+  state.activeId = null;
+  state.query = "";
+  state.areaFilter = "";
+  state.formularioEspecieFilter = "";
+  if (els.search) els.search.value = "";
+  els.sidebar.classList.remove("open");
+  render();
+}
+
+function pageHead(title, subtitle) {
+  const head = document.createElement("div");
+  head.className = "page-head";
+  const left = document.createElement("div");
+  const h1 = document.createElement("h1");
+  h1.textContent = title;
+  left.appendChild(h1);
+  if (subtitle) {
+    const p = document.createElement("p");
+    p.textContent = subtitle;
+    left.appendChild(p);
+  }
+  head.appendChild(left);
+  return head;
+}
+
+function backLink(label, onClick) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "back-link";
+  btn.textContent = "← " + label;
+  btn.addEventListener("click", onClick);
+  return btn;
+}
+
+function emptyState(glyph, title, body, extra) {
+  const wrap = document.createElement("div");
+  wrap.className = "page-empty";
+  const g = document.createElement("div");
+  g.className = "glyph";
+  g.textContent = glyph;
+  const h2 = document.createElement("h2");
+  h2.textContent = title;
+  const p = document.createElement("p");
+  p.textContent = body;
+  wrap.appendChild(g);
+  wrap.appendChild(h2);
+  wrap.appendChild(p);
+  if (extra) wrap.appendChild(extra);
   return wrap;
 }
 
-function attachVoiceInput(button, targetEl) {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const label = button.querySelector(".label");
+function render() {
+  setActiveNav();
+  els.content.innerHTML = "";
 
-  if (!SpeechRecognition) {
-    button.style.display = "none";
+  const inner = document.createElement("div");
+  inner.className = "content-inner";
+  els.content.appendChild(inner);
+
+  if (!state.ready) {
+    inner.appendChild(emptyState("⏳", "Conectando con el cuaderno…", "Un momento, esto solo pasa la primera vez."));
     return;
   }
 
-  const recognition = new SpeechRecognition();
-  recognition.lang = "es-419";
-  recognition.continuous = true;
-  recognition.interimResults = false;
-
-  let listening = false;
-
-  function setListening(value) {
-    listening = value;
-    button.setAttribute("data-listening", value ? "true" : "false");
-    label.textContent = value ? "Escuchando… (clic para detener)" : "Dictar por voz";
-  }
-
-  recognition.addEventListener("result", (event) => {
-    let chunk = "";
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      if (event.results[i].isFinal) {
-        chunk += event.results[i][0].transcript;
-      }
-    }
-    chunk = chunk.trim();
-    if (!chunk) return;
-    const current = targetEl.value;
-    const needsSpace = current && !/\s$/.test(current);
-    targetEl.value = current + (needsSpace ? " " : "") + chunk;
-    targetEl.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-
-  recognition.addEventListener("end", () => setListening(false));
-
-  recognition.addEventListener("error", (event) => {
-    setListening(false);
-    if (event.error !== "no-speech" && event.error !== "aborted") {
-      alert("No se pudo usar el micrófono (" + event.error + "). Revisa los permisos del navegador.");
-    }
-  });
-
-  button.addEventListener("click", () => {
-    if (listening) {
-      recognition.stop();
-      return;
-    }
-    try {
-      recognition.start();
-      setListening(true);
-    } catch (err) {
-      /* recognition already active; ignore */
-    }
-  });
+  if (state.page === "dashboard") renderDashboardPage(inner);
+  else if (state.page === "patients") renderPatientsPage(inner);
+  else if (state.page === "farmacos") renderFarmacosPage(inner);
+  else if (state.page === "study") renderStudyPage(inner);
+  else if (state.page === "calendar") renderPlaceholderPage(inner, "📅", "Calendar", "Próximamente: agenda de citas y seguimientos.");
+  else if (state.page === "reports") renderPlaceholderPage(inner, "📈", "Reports", "Próximamente: reportes y estadísticas del cuaderno.");
+  else if (state.page === "settings") renderSettingsPage(inner);
 }
 
-function renderEditor(entry) {
-  const meta = SECTION_META[entry.section];
-  els.page.innerHTML = "";
+function renderPlaceholderPage(root, glyph, title, body) {
+  root.appendChild(pageHead(title));
+  root.appendChild(emptyState(glyph, "Próximamente", body));
+}
 
-  const tag = document.createElement("span");
-  tag.className = "section-tag " + entry.section;
-  tag.textContent = meta.label;
+/* ---------- Dashboard ---------- */
 
-  const head = document.createElement("div");
-  head.className = "editor-head";
-  head.appendChild(tag);
+function renderDashboardPage(root) {
+  root.appendChild(pageHead("Dashboard", "Resumen general de pacientes y herramientas de estudio."));
 
-  const titleInput = document.createElement("input");
-  titleInput.className = "field-title";
-  titleInput.placeholder = meta.titlePlaceholder;
-  titleInput.value = entry.title || "";
+  const stats = document.createElement("div");
+  stats.className = "stat-grid";
+  const statDefs = [
+    ["Casos activos", entriesForSection("casos").length],
+    ["Materias", entriesForSection("materias").length],
+    ["Fármacos usados", getMedUsageList().length],
+    ["Formulario", state.formulario.length]
+  ];
+  statDefs.forEach(([l, n]) => {
+    const c = document.createElement("div");
+    c.className = "stat-card";
+    c.innerHTML = '<span class="n">' + n + '</span><span class="l">' + l + "</span>";
+    stats.appendChild(c);
+  });
+  root.appendChild(stats);
 
-  const fieldRow = document.createElement("div");
-  fieldRow.className = "field-row";
+  const overviewCard = document.createElement("div");
+  overviewCard.className = "card";
+  const overviewHead = document.createElement("div");
+  overviewHead.className = "card-head";
+  const overviewTitle = document.createElement("h2");
+  overviewTitle.textContent = "Patient & Clinical Cases Overview";
+  const newCaseBtn = document.createElement("button");
+  newCaseBtn.type = "button";
+  newCaseBtn.className = "btn-primary";
+  newCaseBtn.textContent = "+ New Case";
+  newCaseBtn.addEventListener("click", () => createCase());
+  overviewHead.appendChild(overviewTitle);
+  overviewHead.appendChild(newCaseBtn);
+  overviewCard.appendChild(overviewHead);
 
-  let areaInput = null;
-  if (entry.section === "casos") {
-    const areaGroup = document.createElement("div");
-    areaGroup.className = "field-group";
-    areaGroup.style.maxWidth = "180px";
-    const areaLabel = document.createElement("label");
-    areaLabel.textContent = "Área";
-    areaInput = document.createElement("select");
-    areaInput.className = "field-select";
-    const blankAreaOpt = document.createElement("option");
-    blankAreaOpt.value = "";
-    blankAreaOpt.textContent = "— Sin especificar —";
-    areaInput.appendChild(blankAreaOpt);
-    AREA_OPTIONS.forEach((opt) => {
-      const o = document.createElement("option");
-      o.value = opt;
-      o.textContent = opt;
-      areaInput.appendChild(o);
+  const casos = entriesForSection("casos").sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0)).slice(0, 6);
+  overviewCard.appendChild(buildPatientsTable(casos, true));
+  root.appendChild(overviewCard);
+
+  const toolsRow = document.createElement("div");
+  toolsRow.className = "detail-grid";
+  toolsRow.style.marginTop = "18px";
+
+  const drugCard = document.createElement("div");
+  drugCard.className = "card";
+  const drugHead = document.createElement("div");
+  drugHead.className = "card-head";
+  const drugTitle = document.createElement("h2");
+  drugTitle.textContent = "Drug Reference Table";
+  drugHead.appendChild(drugTitle);
+  drugCard.appendChild(drugHead);
+  const drugList = state.formulario.slice().sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "")).slice(0, 5);
+  const drugTablePad = document.createElement("div");
+  drugTablePad.className = "card-pad";
+  drugTablePad.appendChild(buildFormularioTable(drugList, false));
+  drugCard.appendChild(drugTablePad);
+
+  const calcCard = document.createElement("div");
+  calcCard.className = "card card-pad";
+  const calcHead = document.createElement("h2");
+  calcHead.textContent = "Dose Calculator";
+  calcHead.style.margin = "0 0 10px";
+  calcHead.style.fontSize = "0.95rem";
+  const calcBody = document.createElement("p");
+  calcBody.style.color = "var(--muted)";
+  calcBody.style.fontSize = "0.85rem";
+  calcBody.style.margin = "0 0 14px";
+  calcBody.textContent = "Calcula la dosis de un fármaco del formulario por el peso del paciente.";
+  const calcOpenBtn = document.createElement("button");
+  calcOpenBtn.type = "button";
+  calcOpenBtn.className = "btn-primary";
+  calcOpenBtn.textContent = "🧮 Abrir calculadora";
+  calcOpenBtn.addEventListener("click", () => openCalculatorOverlay());
+  calcCard.appendChild(calcHead);
+  calcCard.appendChild(calcBody);
+  calcCard.appendChild(calcOpenBtn);
+
+  toolsRow.appendChild(drugCard);
+  toolsRow.appendChild(calcCard);
+  root.appendChild(toolsRow);
+}
+
+/* ---------- Patients (casos clínicos) ---------- */
+
+async function createCase() {
+  try {
+    const ref = await addDoc(collection(db, "entries"), {
+      uid: currentUid,
+      section: "casos",
+      title: "",
+      meta: "",
+      date: todayISO(),
+      body: "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
     });
-    areaInput.value = entry.area || "";
-    areaGroup.appendChild(areaLabel);
-    areaGroup.appendChild(areaInput);
-    fieldRow.appendChild(areaGroup);
+    state.page = "patients";
+    state.activeId = ref.id;
+    render();
+  } catch (err) {
+    alert("No se pudo crear el caso. Revisa tu conexión e intenta de nuevo.");
+  }
+}
+
+function evolutionSummary(entry) {
+  const evols = Array.isArray(entry.evoluciones) ? entry.evoluciones : [];
+  if (evols.length === 0) return { text: "Sin evoluciones", cls: "neutral" };
+  const latest = evols.slice().sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0];
+  return { text: evols.length + " registro" + (evols.length === 1 ? "" : "s") + " · " + formatDate(latest.date), cls: "ok" };
+}
+
+function buildPatientsTable(list, compact) {
+  const wrap = document.createElement("div");
+  wrap.className = "table-wrap";
+
+  if (list.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-table";
+    empty.textContent = "Aún no hay casos clínicos.";
+    wrap.appendChild(empty);
+    return wrap;
   }
 
-  let speciesInput = null;
-  if (entry.section === "casos") {
-    const speciesGroup = document.createElement("div");
-    speciesGroup.className = "field-group";
-    speciesGroup.style.maxWidth = "170px";
-    const speciesLabel = document.createElement("label");
-    speciesLabel.textContent = "Especie";
-    speciesInput = document.createElement("select");
-    speciesInput.className = "field-select";
-    const blankOpt = document.createElement("option");
-    blankOpt.value = "";
-    blankOpt.textContent = "— Sin especificar —";
-    speciesInput.appendChild(blankOpt);
-    SPECIES_OPTIONS.forEach((opt) => {
-      const o = document.createElement("option");
-      o.value = opt;
-      o.textContent = opt;
-      speciesInput.appendChild(o);
+  const table = document.createElement("table");
+  table.className = "data-table";
+  const thead = document.createElement("thead");
+  const cols = compact
+    ? ["Paciente", "Especie", "Área", "Ingreso", "Evoluciones"]
+    : ["Paciente", "Especie / Raza", "Fecha de ingreso", "Área", "Tutor", "Evoluciones"];
+  thead.innerHTML = "<tr>" + cols.map((c) => "<th>" + c + "</th>").join("") + "</tr>";
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  list.forEach((entry) => {
+    const tr = document.createElement("tr");
+    tr.addEventListener("click", () => {
+      state.page = "patients";
+      state.activeId = entry.id;
+      render();
     });
-    speciesInput.value = entry.especie || "";
-    speciesGroup.appendChild(speciesLabel);
-    speciesGroup.appendChild(speciesInput);
-    fieldRow.appendChild(speciesGroup);
+
+    const nameTd = document.createElement("td");
+    const nameStrong = document.createElement("div");
+    nameStrong.className = "cell-title";
+    nameStrong.textContent = entry.meta || "(sin nombre)";
+    nameTd.appendChild(nameStrong);
+    if (entry.title) {
+      const sub = document.createElement("div");
+      sub.className = "cell-muted";
+      sub.style.fontSize = "0.78rem";
+      sub.textContent = entry.title;
+      nameTd.appendChild(sub);
+    }
+    tr.appendChild(nameTd);
+
+    const speciesTd = document.createElement("td");
+    speciesTd.className = "cell-muted";
+    speciesTd.textContent = [entry.especie, entry.raza].filter(Boolean).join(" · ") || "—";
+    tr.appendChild(speciesTd);
+
+    if (!compact) {
+      const dateTd = document.createElement("td");
+      dateTd.className = "cell-muted";
+      dateTd.textContent = formatDate(entry.date);
+      tr.appendChild(dateTd);
+    }
+
+    const areaTd = document.createElement("td");
+    areaTd.textContent = entry.area || "—";
+    tr.appendChild(areaTd);
+
+    if (compact) {
+      const dateTd = document.createElement("td");
+      dateTd.className = "cell-muted";
+      dateTd.textContent = formatDate(entry.date);
+      tr.appendChild(dateTd);
+    } else {
+      const ownerTd = document.createElement("td");
+      ownerTd.className = "cell-muted";
+      ownerTd.textContent = [entry.tutorNombre, entry.tutorTelefono].filter(Boolean).join(" · ") || "—";
+      tr.appendChild(ownerTd);
+    }
+
+    const evoTd = document.createElement("td");
+    const summary = evolutionSummary(entry);
+    const badge = document.createElement("span");
+    badge.className = "badge " + summary.cls;
+    badge.textContent = summary.text;
+    evoTd.appendChild(badge);
+    tr.appendChild(evoTd);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  return wrap;
+}
+
+function renderPatientsPage(root) {
+  const active = state.activeId ? state.entries.find((e) => e.id === state.activeId && e.section === "casos") : null;
+  if (active) {
+    renderPatientDetail(root, active);
+    return;
   }
 
-  const metaGroup = document.createElement("div");
-  metaGroup.className = "field-group";
-  const metaLabel = document.createElement("label");
-  metaLabel.textContent = meta.metaLabel;
-  const metaInput = document.createElement("input");
-  metaInput.placeholder = meta.metaPlaceholder;
-  metaInput.value = entry.meta || "";
-  metaGroup.appendChild(metaLabel);
-  metaGroup.appendChild(metaInput);
+  const head = pageHead("Patients", "Casos clínicos registrados.");
+  const newBtn = document.createElement("button");
+  newBtn.type = "button";
+  newBtn.className = "btn-primary";
+  newBtn.textContent = "+ New Case";
+  newBtn.addEventListener("click", () => createCase());
+  head.appendChild(newBtn);
+  root.appendChild(head);
 
-  const dateGroup = document.createElement("div");
-  dateGroup.className = "field-group";
-  dateGroup.style.maxWidth = "170px";
-  const dateLabel = document.createElement("label");
-  dateLabel.textContent = entry.section === "casos" ? "Fecha de ingreso" : "Fecha";
-  const dateInput = document.createElement("input");
-  dateInput.type = "date";
-  dateInput.value = entry.date || todayISO();
-  dateGroup.appendChild(dateLabel);
-  dateGroup.appendChild(dateInput);
+  const filterRow = document.createElement("div");
+  filterRow.style.display = "flex";
+  filterRow.style.gap = "10px";
+  filterRow.style.marginBottom = "14px";
+  const areaSelect = document.createElement("select");
+  areaSelect.className = "btn-secondary";
+  const blankOpt = document.createElement("option");
+  blankOpt.value = "";
+  blankOpt.textContent = "Todas las áreas";
+  areaSelect.appendChild(blankOpt);
+  AREA_OPTIONS.forEach((opt) => {
+    const o = document.createElement("option");
+    o.value = opt;
+    o.textContent = opt;
+    areaSelect.appendChild(o);
+  });
+  areaSelect.value = state.areaFilter;
+  areaSelect.addEventListener("change", () => {
+    state.areaFilter = areaSelect.value;
+    render();
+  });
+  filterRow.appendChild(areaSelect);
+  root.appendChild(filterRow);
 
-  fieldRow.appendChild(metaGroup);
-  fieldRow.appendChild(dateGroup);
+  const list = entriesForSection("casos")
+    .filter((e) => matchesQuery(e, state.query))
+    .filter((e) => !state.areaFilter || e.area === state.areaFilter)
+    .sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
 
-  let razaInput = null;
-  let edadInput = null;
-  let pesoInput = null;
-  let detailsRow = null;
-  if (entry.section === "casos") {
-    detailsRow = document.createElement("div");
-    detailsRow.className = "field-row";
+  const card = document.createElement("div");
+  card.className = "card";
+  card.appendChild(buildPatientsTable(list, false));
+  root.appendChild(card);
+}
 
-    const razaGroup = document.createElement("div");
-    razaGroup.className = "field-group";
-    const razaLabel = document.createElement("label");
-    razaLabel.textContent = "Raza";
-    razaInput = document.createElement("input");
-    razaInput.placeholder = "Ej. Golden Retriever";
-    razaInput.value = entry.raza || "";
-    razaGroup.appendChild(razaLabel);
-    razaGroup.appendChild(razaInput);
-
-    const edadGroup = document.createElement("div");
-    edadGroup.className = "field-group";
-    edadGroup.style.maxWidth = "140px";
-    const edadLabel = document.createElement("label");
-    edadLabel.textContent = "Edad";
-    edadInput = document.createElement("input");
-    edadInput.placeholder = "Ej. 4 años";
-    edadInput.value = entry.edad || "";
-    edadGroup.appendChild(edadLabel);
-    edadGroup.appendChild(edadInput);
-
-    const pesoGroup = document.createElement("div");
-    pesoGroup.className = "field-group";
-    pesoGroup.style.maxWidth = "140px";
-    const pesoLabel = document.createElement("label");
-    pesoLabel.textContent = "Peso";
-    pesoInput = document.createElement("input");
-    pesoInput.placeholder = "Ej. 25 kg";
-    pesoInput.value = entry.peso || "";
-    pesoGroup.appendChild(pesoLabel);
-    pesoGroup.appendChild(pesoInput);
-
-    detailsRow.appendChild(razaGroup);
-    detailsRow.appendChild(edadGroup);
-    detailsRow.appendChild(pesoGroup);
-  }
-
-  // Datos del tutor: solo nombres, teléfono y correo. Sin cédula ni
-  // ningún otro identificador nacional — decisión explícita, no agregar
-  // sin preguntar primero aunque parezca un campo natural de completar.
-  let tutorNombreInput = null;
-  let tutorTelefonoInput = null;
-  let tutorCorreoInput = null;
-  let tutorLabel = null;
-  let tutorRow = null;
-  if (entry.section === "casos") {
-    tutorLabel = document.createElement("label");
-    tutorLabel.className = "checkbox-group-label";
-    tutorLabel.textContent = "Datos del tutor";
-
-    tutorRow = document.createElement("div");
-    tutorRow.className = "field-row";
-
-    const tutorNombreGroup = document.createElement("div");
-    tutorNombreGroup.className = "field-group";
-    const tutorNombreLabel = document.createElement("label");
-    tutorNombreLabel.textContent = "Nombres y apellidos";
-    tutorNombreInput = document.createElement("input");
-    tutorNombreInput.placeholder = "Ej. María Pérez";
-    tutorNombreInput.value = entry.tutorNombre || "";
-    tutorNombreGroup.appendChild(tutorNombreLabel);
-    tutorNombreGroup.appendChild(tutorNombreInput);
-
-    const tutorTelefonoGroup = document.createElement("div");
-    tutorTelefonoGroup.className = "field-group";
-    tutorTelefonoGroup.style.maxWidth = "170px";
-    const tutorTelefonoLabel = document.createElement("label");
-    tutorTelefonoLabel.textContent = "Teléfono";
-    tutorTelefonoInput = document.createElement("input");
-    tutorTelefonoInput.type = "tel";
-    tutorTelefonoInput.placeholder = "Ej. 099 999 9999";
-    tutorTelefonoInput.value = entry.tutorTelefono || "";
-    tutorTelefonoGroup.appendChild(tutorTelefonoLabel);
-    tutorTelefonoGroup.appendChild(tutorTelefonoInput);
-
-    const tutorCorreoGroup = document.createElement("div");
-    tutorCorreoGroup.className = "field-group";
-    const tutorCorreoLabel = document.createElement("label");
-    tutorCorreoLabel.textContent = "Correo electrónico";
-    tutorCorreoInput = document.createElement("input");
-    tutorCorreoInput.type = "email";
-    tutorCorreoInput.placeholder = "Ej. correo@ejemplo.com";
-    tutorCorreoInput.value = entry.tutorCorreo || "";
-    tutorCorreoGroup.appendChild(tutorCorreoLabel);
-    tutorCorreoGroup.appendChild(tutorCorreoInput);
-
-    tutorRow.appendChild(tutorNombreGroup);
-    tutorRow.appendChild(tutorTelefonoGroup);
-    tutorRow.appendChild(tutorCorreoGroup);
-  }
+function renderPatientDetail(root, entry) {
+  root.appendChild(
+    backLink("Patients", () => {
+      state.activeId = null;
+      render();
+    })
+  );
 
   const status = document.createElement("div");
   status.className = "status";
@@ -1466,15 +1384,270 @@ function renderEditor(entry) {
   status.innerHTML = '<span class="dot"></span><span class="statusText">Sincronizado</span>';
   const statusText = status.querySelector(".statusText");
 
-  const photosSection = entry.section === "casos" ? buildPhotosSection(entry, statusText) : null;
-  const medsSection = entry.section === "casos" ? buildMedsSection(entry, statusText) : null;
-  const evolucionesSection = entry.section === "casos" ? buildEvolucionesSection(entry, statusText) : null;
+  function save(field, value) {
+    scheduleSave("entries", entry.id, { [field]: value }, statusText);
+  }
 
-  const divider = document.createElement("hr");
-  divider.className = "divider";
+  const head = document.createElement("div");
+  head.className = "patient-head";
 
-  const divider2 = document.createElement("hr");
-  divider2.className = "divider";
+  const avatar = document.createElement("div");
+  avatar.className = "patient-avatar";
+  avatar.textContent = (entry.meta || "?").trim().charAt(0).toUpperCase() || "?";
+
+  const info = document.createElement("div");
+  info.className = "patient-head-info";
+  const nameRow = document.createElement("div");
+  nameRow.className = "name-row";
+  const nameInput = document.createElement("input");
+  nameInput.className = "field-title";
+  nameInput.placeholder = "Nombre del paciente";
+  nameInput.value = entry.meta || "";
+  nameInput.addEventListener("input", () => {
+    avatar.textContent = (nameInput.value || "?").trim().charAt(0).toUpperCase() || "?";
+    save("meta", nameInput.value);
+  });
+  const tag = document.createElement("span");
+  tag.className = "section-tag casos";
+  tag.textContent = "Caso clínico";
+  nameRow.appendChild(nameInput);
+  nameRow.appendChild(tag);
+
+  const sub = document.createElement("div");
+  sub.className = "sub";
+  sub.textContent = [entry.especie, entry.raza, entry.peso].filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
+
+  info.appendChild(nameRow);
+  info.appendChild(sub);
+
+  const actions = document.createElement("div");
+  actions.className = "patient-head-actions";
+  const calcBtn = document.createElement("button");
+  calcBtn.type = "button";
+  calcBtn.className = "btn-secondary";
+  calcBtn.textContent = "🧮 Calculate Dosage";
+  calcBtn.addEventListener("click", () => openCalculatorOverlay({ caseEntry: entry }));
+  actions.appendChild(calcBtn);
+
+  head.appendChild(avatar);
+  head.appendChild(info);
+  head.appendChild(actions);
+  root.appendChild(head);
+
+  const titleGroup = document.createElement("div");
+  titleGroup.className = "field-group";
+  titleGroup.style.marginBottom = "16px";
+  const titleLabel = document.createElement("label");
+  titleLabel.textContent = "Motivo de consulta";
+  const titleInput = document.createElement("input");
+  titleInput.placeholder = "Ej. Fractura de fémur";
+  titleInput.value = entry.title || "";
+  titleInput.addEventListener("input", () => save("title", titleInput.value));
+  titleGroup.appendChild(titleLabel);
+  titleGroup.appendChild(titleInput);
+  root.appendChild(titleGroup);
+
+  const grid = document.createElement("div");
+  grid.className = "detail-grid";
+
+  /* --- columna izquierda: datos clínicos base --- */
+  const leftCol = document.createElement("div");
+  leftCol.className = "detail-col";
+
+  const baseCard = document.createElement("div");
+  baseCard.className = "card card-pad";
+
+  const row1 = document.createElement("div");
+  row1.className = "field-row";
+
+  const areaGroup = document.createElement("div");
+  areaGroup.className = "field-group";
+  const areaLabel = document.createElement("label");
+  areaLabel.textContent = "Área";
+  const areaSelect = document.createElement("select");
+  const blankAreaOpt = document.createElement("option");
+  blankAreaOpt.value = "";
+  blankAreaOpt.textContent = "— Sin especificar —";
+  areaSelect.appendChild(blankAreaOpt);
+  AREA_OPTIONS.forEach((opt) => {
+    const o = document.createElement("option");
+    o.value = opt;
+    o.textContent = opt;
+    areaSelect.appendChild(o);
+  });
+  areaSelect.value = entry.area || "";
+  areaSelect.addEventListener("change", () => save("area", areaSelect.value));
+  areaGroup.appendChild(areaLabel);
+  areaGroup.appendChild(areaSelect);
+
+  const speciesGroup = document.createElement("div");
+  speciesGroup.className = "field-group";
+  const speciesLabel = document.createElement("label");
+  speciesLabel.textContent = "Especie";
+  const speciesSelect = document.createElement("select");
+  const blankSpOpt = document.createElement("option");
+  blankSpOpt.value = "";
+  blankSpOpt.textContent = "— Sin especificar —";
+  speciesSelect.appendChild(blankSpOpt);
+  SPECIES_OPTIONS.forEach((opt) => {
+    const o = document.createElement("option");
+    o.value = opt;
+    o.textContent = opt;
+    speciesSelect.appendChild(o);
+  });
+  speciesSelect.value = entry.especie || "";
+  speciesSelect.addEventListener("change", () => {
+    save("especie", speciesSelect.value);
+    sub.textContent = [speciesSelect.value, entry.raza, entry.peso].filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
+  });
+  speciesGroup.appendChild(speciesLabel);
+  speciesGroup.appendChild(speciesSelect);
+
+  row1.appendChild(areaGroup);
+  row1.appendChild(speciesGroup);
+
+  const row2 = document.createElement("div");
+  row2.className = "field-row";
+  const dateGroup = document.createElement("div");
+  dateGroup.className = "field-group";
+  const dateLabel = document.createElement("label");
+  dateLabel.textContent = "Fecha de ingreso";
+  const dateInput = document.createElement("input");
+  dateInput.type = "date";
+  dateInput.value = entry.date || todayISO();
+  dateInput.addEventListener("input", () => save("date", dateInput.value));
+  dateGroup.appendChild(dateLabel);
+  dateGroup.appendChild(dateInput);
+  row2.appendChild(dateGroup);
+
+  const row3 = document.createElement("div");
+  row3.className = "field-row";
+  const razaGroup = document.createElement("div");
+  razaGroup.className = "field-group";
+  const razaLabel = document.createElement("label");
+  razaLabel.textContent = "Raza";
+  const razaInput = document.createElement("input");
+  razaInput.placeholder = "Ej. Golden Retriever";
+  razaInput.value = entry.raza || "";
+  razaInput.addEventListener("input", () => {
+    save("raza", razaInput.value);
+    sub.textContent = [entry.especie, razaInput.value, entry.peso].filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
+  });
+  razaGroup.appendChild(razaLabel);
+  razaGroup.appendChild(razaInput);
+
+  const edadGroup = document.createElement("div");
+  edadGroup.className = "field-group";
+  const edadLabel = document.createElement("label");
+  edadLabel.textContent = "Edad";
+  const edadInput = document.createElement("input");
+  edadInput.placeholder = "Ej. 4 años";
+  edadInput.value = entry.edad || "";
+  edadInput.addEventListener("input", () => save("edad", edadInput.value));
+  edadGroup.appendChild(edadLabel);
+  edadGroup.appendChild(edadInput);
+
+  const pesoGroup = document.createElement("div");
+  pesoGroup.className = "field-group";
+  const pesoLabel = document.createElement("label");
+  pesoLabel.textContent = "Peso";
+  const pesoInput = document.createElement("input");
+  pesoInput.placeholder = "Ej. 25 kg";
+  pesoInput.value = entry.peso || "";
+  pesoInput.addEventListener("input", () => {
+    save("peso", pesoInput.value);
+    sub.textContent = [entry.especie, entry.raza, pesoInput.value].filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
+  });
+  pesoGroup.appendChild(pesoLabel);
+  pesoGroup.appendChild(pesoInput);
+
+  row3.appendChild(razaGroup);
+  row3.appendChild(edadGroup);
+  row3.appendChild(pesoGroup);
+
+  baseCard.appendChild(row1);
+  baseCard.appendChild(row2);
+  baseCard.appendChild(row3);
+  leftCol.appendChild(baseCard);
+
+  /* --- tutor: solo nombres, teléfono y correo. Sin cédula ni ningún
+     otro identificador nacional — decisión explícita, no agregar sin
+     preguntar primero. --- */
+  const tutorCard = document.createElement("div");
+  tutorCard.className = "card card-pad";
+  const tutorLabel = document.createElement("label");
+  tutorLabel.className = "checkbox-group-label";
+  tutorLabel.style.margin = "0 0 8px";
+  tutorLabel.textContent = "Datos del tutor";
+  const tutorRow = document.createElement("div");
+  tutorRow.className = "tutor-row";
+
+  const tutorNombreGroup = document.createElement("div");
+  tutorNombreGroup.className = "field-group";
+  const tutorNombreLabel = document.createElement("label");
+  tutorNombreLabel.textContent = "Nombres y apellidos";
+  const tutorNombreInput = document.createElement("input");
+  tutorNombreInput.placeholder = "Ej. María Pérez";
+  tutorNombreInput.value = entry.tutorNombre || "";
+  tutorNombreInput.addEventListener("input", () => save("tutorNombre", tutorNombreInput.value));
+  tutorNombreGroup.appendChild(tutorNombreLabel);
+  tutorNombreGroup.appendChild(tutorNombreInput);
+
+  const tutorTelefonoGroup = document.createElement("div");
+  tutorTelefonoGroup.className = "field-group";
+  const tutorTelefonoLabel = document.createElement("label");
+  tutorTelefonoLabel.textContent = "Teléfono";
+  const tutorTelefonoInput = document.createElement("input");
+  tutorTelefonoInput.type = "tel";
+  tutorTelefonoInput.placeholder = "Ej. 099 999 9999";
+  tutorTelefonoInput.value = entry.tutorTelefono || "";
+  tutorTelefonoInput.addEventListener("input", () => save("tutorTelefono", tutorTelefonoInput.value));
+  tutorTelefonoGroup.appendChild(tutorTelefonoLabel);
+  tutorTelefonoGroup.appendChild(tutorTelefonoInput);
+
+  tutorRow.appendChild(tutorNombreGroup);
+  tutorRow.appendChild(tutorTelefonoGroup);
+
+  const tutorRow2 = document.createElement("div");
+  tutorRow2.className = "tutor-row";
+  const tutorCorreoGroup = document.createElement("div");
+  tutorCorreoGroup.className = "field-group";
+  const tutorCorreoLabel = document.createElement("label");
+  tutorCorreoLabel.textContent = "Correo electrónico";
+  const tutorCorreoInput = document.createElement("input");
+  tutorCorreoInput.type = "email";
+  tutorCorreoInput.placeholder = "Ej. correo@ejemplo.com";
+  tutorCorreoInput.value = entry.tutorCorreo || "";
+  tutorCorreoInput.addEventListener("input", () => save("tutorCorreo", tutorCorreoInput.value));
+  tutorCorreoGroup.appendChild(tutorCorreoLabel);
+  tutorCorreoGroup.appendChild(tutorCorreoInput);
+  tutorRow2.appendChild(tutorCorreoGroup);
+
+  tutorCard.appendChild(tutorLabel);
+  tutorCard.appendChild(tutorRow);
+  tutorCard.appendChild(tutorRow2);
+  leftCol.appendChild(tutorCard);
+
+  const photosCard = document.createElement("div");
+  photosCard.className = "card card-pad";
+  photosCard.appendChild(buildPhotosSection(entry, statusText));
+  leftCol.appendChild(photosCard);
+
+  const medsCard = document.createElement("div");
+  medsCard.className = "card card-pad";
+  medsCard.appendChild(buildMedsSection(entry, statusText));
+  leftCol.appendChild(medsCard);
+
+  /* --- columna derecha: notas clínicas + evoluciones --- */
+  const rightCol = document.createElement("div");
+  rightCol.className = "detail-col";
+
+  const notesCard = document.createElement("div");
+  notesCard.className = "card card-pad";
+  const notesLabel = document.createElement("label");
+  notesLabel.className = "checkbox-group-label";
+  notesLabel.style.margin = "0 0 8px";
+  notesLabel.textContent = "Anamnesis, examen físico, diagnóstico, tratamiento";
 
   const bodyToolbar = document.createElement("div");
   bodyToolbar.className = "body-toolbar";
@@ -1487,19 +1660,33 @@ function renderEditor(entry) {
 
   const body = document.createElement("textarea");
   body.className = "field-body";
-  body.placeholder = meta.bodyPlaceholder;
+  body.placeholder = "Anamnesis, examen físico, diagnóstico, tratamiento…";
   body.value = entry.body || "";
+  body.addEventListener("input", () => save("body", body.value));
   attachVoiceInput(voiceBtn, body);
+
+  notesCard.appendChild(notesLabel);
+  notesCard.appendChild(bodyToolbar);
+  notesCard.appendChild(body);
+  rightCol.appendChild(notesCard);
+
+  const evolCard = document.createElement("div");
+  evolCard.className = "card card-pad";
+  evolCard.appendChild(buildEvolucionesSection(entry, statusText));
+  rightCol.appendChild(evolCard);
+
+  grid.appendChild(leftCol);
+  grid.appendChild(rightCol);
+  root.appendChild(grid);
 
   const foot = document.createElement("div");
   foot.className = "editor-foot";
-
   const del = document.createElement("button");
   del.className = "btn-delete";
   del.type = "button";
-  del.textContent = "Eliminar entrada";
+  del.textContent = "Eliminar caso";
   del.addEventListener("click", async () => {
-    if (confirm("¿Eliminar “" + (entry.title || "esta entrada") + "”? Esta acción no se puede deshacer.")) {
+    if (confirm("¿Eliminar el caso de “" + (entry.meta || "este paciente") + "”? Esta acción no se puede deshacer.")) {
       state.activeId = null;
       render();
       try {
@@ -1509,58 +1696,86 @@ function renderEditor(entry) {
       }
     }
   });
-
   foot.appendChild(status);
   foot.appendChild(del);
+  root.appendChild(foot);
 
-  els.page.appendChild(head);
-  els.page.appendChild(titleInput);
-  els.page.appendChild(fieldRow);
-  if (detailsRow) els.page.appendChild(detailsRow);
-  if (tutorLabel) els.page.appendChild(tutorLabel);
-  if (tutorRow) els.page.appendChild(tutorRow);
-  if (photosSection) els.page.appendChild(photosSection);
-  if (medsSection) els.page.appendChild(medsSection);
-  els.page.appendChild(divider);
-  els.page.appendChild(bodyToolbar);
-  els.page.appendChild(body);
-  if (evolucionesSection) {
-    els.page.appendChild(divider2);
-    els.page.appendChild(evolucionesSection);
-  }
-  els.page.appendChild(foot);
-
-  titleInput.addEventListener("input", () => scheduleSave("entries", entry.id, { title: titleInput.value }, statusText));
-  metaInput.addEventListener("input", () => scheduleSave("entries", entry.id, { meta: metaInput.value }, statusText));
-  dateInput.addEventListener("input", () => scheduleSave("entries", entry.id, { date: dateInput.value }, statusText));
-  body.addEventListener("input", () => scheduleSave("entries", entry.id, { body: body.value }, statusText));
-  if (areaInput) areaInput.addEventListener("change", () => scheduleSave("entries", entry.id, { area: areaInput.value }, statusText));
-  if (speciesInput) speciesInput.addEventListener("change", () => scheduleSave("entries", entry.id, { especie: speciesInput.value }, statusText));
-  if (razaInput) razaInput.addEventListener("input", () => scheduleSave("entries", entry.id, { raza: razaInput.value }, statusText));
-  if (edadInput) edadInput.addEventListener("input", () => scheduleSave("entries", entry.id, { edad: edadInput.value }, statusText));
-  if (pesoInput) pesoInput.addEventListener("input", () => scheduleSave("entries", entry.id, { peso: pesoInput.value }, statusText));
-  if (tutorNombreInput) tutorNombreInput.addEventListener("input", () => scheduleSave("entries", entry.id, { tutorNombre: tutorNombreInput.value }, statusText));
-  if (tutorTelefonoInput) tutorTelefonoInput.addEventListener("input", () => scheduleSave("entries", entry.id, { tutorTelefono: tutorTelefonoInput.value }, statusText));
-  if (tutorCorreoInput) tutorCorreoInput.addEventListener("input", () => scheduleSave("entries", entry.id, { tutorCorreo: tutorCorreoInput.value }, statusText));
-
-  if (!entry.title) {
-    setTimeout(() => titleInput.focus(), 0);
+  if (!entry.meta) {
+    setTimeout(() => nameInput.focus(), 0);
   }
 }
 
-function renderMedDetail(item) {
-  els.page.innerHTML = "";
+/* ---------- Fármacos (historial derivado) ---------- */
+
+function renderFarmacosPage(root) {
+  const list = getMedUsageList();
+  const active = state.activeId ? list.find((m) => m.id === state.activeId) : null;
+  if (active) {
+    renderFarmacoDetail(root, active);
+    return;
+  }
+
+  root.appendChild(pageHead("Fármacos", "Historial de fármacos usados en tus casos clínicos."));
+
+  const filtered = list.filter((m) => matchesMedQuery(m, state.query)).sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
+
+  const wrap = document.createElement("div");
+  wrap.className = "table-wrap";
+  if (filtered.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-table";
+    empty.textContent = "Aún no hay fármacos registrados. Se llenan automáticamente al agregarlos en un caso clínico.";
+    wrap.appendChild(empty);
+  } else {
+    const table = document.createElement("table");
+    table.className = "data-table";
+    table.innerHTML = "<thead><tr><th>Fármaco</th><th>Paciente</th><th>Dosis</th><th>Concentración</th><th>Frecuencia</th><th>Fecha</th></tr></thead>";
+    const tbody = document.createElement("tbody");
+    filtered.forEach((item) => {
+      const tr = document.createElement("tr");
+      tr.addEventListener("click", () => {
+        state.activeId = item.id;
+        render();
+      });
+      tr.innerHTML =
+        '<td class="cell-title">' + escapeHtml(item.nombre) + "</td>" +
+        '<td class="cell-muted">' + escapeHtml(item.paciente || item.caseTitle || "(sin título)") + "</td>" +
+        '<td>' + escapeHtml(item.dosis || "—") + "</td>" +
+        '<td class="cell-muted">' + escapeHtml(item.concentracion || "—") + "</td>" +
+        '<td class="cell-muted">' + escapeHtml(item.frecuencia || "—") + "</td>" +
+        '<td class="cell-muted">' + formatDate(item.date) + "</td>";
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+  }
+
+  const card = document.createElement("div");
+  card.className = "card";
+  card.appendChild(wrap);
+  root.appendChild(card);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str == null ? "" : String(str);
+  return div.innerHTML;
+}
+
+function renderFarmacoDetail(root, item) {
+  root.appendChild(
+    backLink("Fármacos", () => {
+      state.activeId = null;
+      render();
+    })
+  );
 
   const tag = document.createElement("span");
   tag.className = "section-tag farmacos";
   tag.textContent = "Fármaco";
 
-  const head = document.createElement("div");
-  head.className = "editor-head";
-  head.appendChild(tag);
-
-  const title = document.createElement("h2");
-  title.className = "field-title";
+  const title = document.createElement("h1");
+  title.style.margin = "10px 0 16px";
   title.textContent = item.nombre;
 
   const fields = [
@@ -1573,6 +1788,8 @@ function renderMedDetail(item) {
     ["Paciente", item.paciente]
   ];
 
+  const card = document.createElement("div");
+  card.className = "card card-pad";
   const fieldRow = document.createElement("div");
   fieldRow.className = "field-row";
   fields.forEach(([labelText, value]) => {
@@ -1588,43 +1805,388 @@ function renderMedDetail(item) {
     group.appendChild(val);
     fieldRow.appendChild(group);
   });
-
-  const divider = document.createElement("hr");
-  divider.className = "divider";
+  card.appendChild(fieldRow);
 
   const goBtn = document.createElement("button");
   goBtn.type = "button";
-  goBtn.className = "backup-btn";
+  goBtn.className = "btn-secondary";
   goBtn.style.marginTop = "16px";
-  goBtn.textContent = "Ver caso clínico: " + (item.caseTitle || "(sin título)") + " →";
+  goBtn.textContent = "Ver caso clínico: " + (item.caseTitle || item.paciente || "(sin título)") + " →";
   goBtn.addEventListener("click", () => {
-    state.section = "casos";
+    state.page = "patients";
     state.activeId = item.entryId;
     render();
   });
+  card.appendChild(goBtn);
 
-  els.page.appendChild(head);
-  els.page.appendChild(title);
-  els.page.appendChild(fieldRow);
-  els.page.appendChild(divider);
-  els.page.appendChild(goBtn);
+  root.appendChild(tag);
+  root.appendChild(title);
+  root.appendChild(card);
 }
 
-function renderFormularioEditor(item) {
-  els.page.innerHTML = "";
+/* ---------- Study (Materias + Formulario) ---------- */
+
+function renderStudyPage(root) {
+  const active = state.activeId
+    ? state.studyTab === "materias"
+      ? entriesForSection("materias").find((e) => e.id === state.activeId)
+      : state.formulario.find((f) => f.id === state.activeId)
+    : null;
+
+  if (active) {
+    if (state.studyTab === "materias") renderMateriaDetail(root, active);
+    else renderFormularioDetail(root, active);
+    return;
+  }
+
+  root.appendChild(pageHead("Study Center", "Reference materials and pharmacological data."));
+
+  const subtabs = document.createElement("div");
+  subtabs.className = "subtabs";
+  const tabMaterias = document.createElement("button");
+  tabMaterias.type = "button";
+  tabMaterias.className = "subtab";
+  tabMaterias.textContent = "Biblioteca de Materias";
+  tabMaterias.setAttribute("aria-selected", state.studyTab === "materias" ? "true" : "false");
+  tabMaterias.addEventListener("click", () => {
+    state.studyTab = "materias";
+    state.query = "";
+    if (els.search) els.search.value = "";
+    render();
+  });
+  const tabFormulario = document.createElement("button");
+  tabFormulario.type = "button";
+  tabFormulario.className = "subtab";
+  tabFormulario.textContent = "Formulario de Fármacos";
+  tabFormulario.setAttribute("aria-selected", state.studyTab === "formulario" ? "true" : "false");
+  tabFormulario.addEventListener("click", () => {
+    state.studyTab = "formulario";
+    state.query = "";
+    if (els.search) els.search.value = "";
+    render();
+  });
+  subtabs.appendChild(tabMaterias);
+  subtabs.appendChild(tabFormulario);
+  root.appendChild(subtabs);
+
+  if (state.studyTab === "materias") renderMateriasTab(root);
+  else renderFormularioTab(root);
+}
+
+async function createMateria() {
+  try {
+    const ref = await addDoc(collection(db, "entries"), {
+      uid: currentUid,
+      section: "materias",
+      title: "",
+      meta: "",
+      date: todayISO(),
+      body: "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    state.studyTab = "materias";
+    state.activeId = ref.id;
+    render();
+  } catch (err) {
+    alert("No se pudo crear la materia. Revisa tu conexión e intenta de nuevo.");
+  }
+}
+
+function renderMateriasTab(root) {
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "btn-primary";
+  addBtn.textContent = "+ Nueva materia";
+  addBtn.style.marginBottom = "14px";
+  addBtn.addEventListener("click", () => createMateria());
+  root.appendChild(addBtn);
+
+  const list = entriesForSection("materias")
+    .filter((e) => matchesQuery(e, state.query))
+    .sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
+
+  if (list.length === 0) {
+    root.appendChild(emptyState("§", "Aún no hay apuntes de materias", "Crea una entrada para empezar a registrar tus clases."));
+    return;
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "subject-grid";
+  list.forEach((entry) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "subject-card";
+    const ico = document.createElement("div");
+    ico.className = "ico";
+    ico.textContent = "📘";
+    const h3 = document.createElement("h3");
+    h3.textContent = entry.title || "(sin título)";
+    const p = document.createElement("p");
+    p.textContent = (entry.body || "Sin contenido todavía.").slice(0, 90);
+    const link = document.createElement("span");
+    link.className = "link";
+    link.textContent = "ABRIR →";
+    card.appendChild(ico);
+    card.appendChild(h3);
+    card.appendChild(p);
+    card.appendChild(link);
+    card.addEventListener("click", () => {
+      state.activeId = entry.id;
+      render();
+    });
+    grid.appendChild(card);
+  });
+  root.appendChild(grid);
+}
+
+function renderMateriaDetail(root, entry) {
+  root.appendChild(
+    backLink("Study Center", () => {
+      state.activeId = null;
+      render();
+    })
+  );
+
+  const status = document.createElement("div");
+  status.className = "status";
+  status.setAttribute("data-state", "ok");
+  status.innerHTML = '<span class="dot"></span><span class="statusText">Sincronizado</span>';
+  const statusText = status.querySelector(".statusText");
 
   const tag = document.createElement("span");
-  tag.className = "section-tag formulario";
-  tag.textContent = "Fármaco de referencia";
-
-  const head = document.createElement("div");
-  head.className = "editor-head";
-  head.appendChild(tag);
+  tag.className = "section-tag materias";
+  tag.textContent = "Materia";
+  tag.style.marginBottom = "10px";
+  tag.style.display = "inline-flex";
 
   const titleInput = document.createElement("input");
   titleInput.className = "field-title";
-  titleInput.placeholder = "Nombre del fármaco";
-  titleInput.value = item.nombre || "";
+  titleInput.placeholder = "Título del apunte";
+  titleInput.value = entry.title || "";
+  titleInput.style.margin = "10px 0 16px";
+  titleInput.addEventListener("input", () => scheduleSave("entries", entry.id, { title: titleInput.value }, statusText));
+
+  const card = document.createElement("div");
+  card.className = "card card-pad";
+  const body = document.createElement("textarea");
+  body.className = "field-body";
+  body.style.minHeight = "50vh";
+  body.placeholder = "Escribe tus apuntes de clase…";
+  body.value = entry.body || "";
+  body.addEventListener("input", () => scheduleSave("entries", entry.id, { body: body.value }, statusText));
+  card.appendChild(body);
+
+  const foot = document.createElement("div");
+  foot.className = "editor-foot";
+  const del = document.createElement("button");
+  del.className = "btn-delete";
+  del.type = "button";
+  del.textContent = "Eliminar entrada";
+  del.addEventListener("click", async () => {
+    if (confirm("¿Eliminar “" + (entry.title || "esta entrada") + "”? Esta acción no se puede deshacer.")) {
+      state.activeId = null;
+      render();
+      try {
+        await deleteDoc(doc(db, "entries", entry.id));
+      } catch (err) {
+        alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
+      }
+    }
+  });
+  foot.appendChild(status);
+  foot.appendChild(del);
+
+  root.appendChild(tag);
+  root.appendChild(titleInput);
+  root.appendChild(card);
+  root.appendChild(foot);
+
+  if (!entry.title) setTimeout(() => titleInput.focus(), 0);
+}
+
+function buildFormularioTable(list, withActions) {
+  const wrap = document.createElement("div");
+  wrap.className = "table-wrap";
+  if (list.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty-table";
+    empty.textContent = "Aún no hay fármacos en el formulario.";
+    wrap.appendChild(empty);
+    return wrap;
+  }
+  const table = document.createElement("table");
+  table.className = "data-table";
+  const cols = withActions ? ["Drug Name", "Dosis", "Vía", "Especies", "Acción"] : ["Drug Name", "Dosis", "Especies"];
+  table.innerHTML = "<thead><tr>" + cols.map((c) => "<th>" + c + "</th>").join("") + "</tr></thead>";
+  const tbody = document.createElement("tbody");
+  list.forEach((item) => {
+    const tr = document.createElement("tr");
+    if (!withActions) tr.style.cursor = "default";
+    else {
+      tr.addEventListener("click", (e) => {
+        if (e.target.closest(".row-actions")) return;
+        state.studyTab = "formulario";
+        state.activeId = item.id;
+        render();
+      });
+    }
+    const nameTd = document.createElement("td");
+    nameTd.className = "cell-title";
+    nameTd.textContent = item.nombre || "(sin nombre)";
+    const doseTd = document.createElement("td");
+    doseTd.className = "cell-muted";
+    doseTd.textContent = item.dosisValor != null ? item.dosisValor + " " + (item.dosisUnidad || "") : "—";
+    const specTd = document.createElement("td");
+    specTd.className = "cell-muted";
+    specTd.textContent = Array.isArray(item.especies) && item.especies.length ? item.especies.join(", ") : "—";
+    tr.appendChild(nameTd);
+    tr.appendChild(doseTd);
+    if (withActions) {
+      const viaTd = document.createElement("td");
+      viaTd.className = "cell-muted";
+      viaTd.textContent = item.via || "—";
+      tr.appendChild(viaTd);
+    }
+    tr.appendChild(specTd);
+    if (withActions) {
+      const actTd = document.createElement("td");
+      actTd.className = "row-actions";
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "icon-btn";
+      editBtn.textContent = "✎";
+      editBtn.setAttribute("aria-label", "Editar");
+      editBtn.addEventListener("click", () => {
+        state.studyTab = "formulario";
+        state.activeId = item.id;
+        render();
+      });
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "icon-btn danger";
+      delBtn.textContent = "🗑";
+      delBtn.setAttribute("aria-label", "Eliminar");
+      delBtn.addEventListener("click", async () => {
+        if (!confirm("¿Eliminar “" + (item.nombre || "este fármaco") + "” del formulario?")) return;
+        try {
+          await deleteDoc(doc(db, "formulario", item.id));
+        } catch (err) {
+          alert("No se pudo eliminar (sin conexión).");
+        }
+      });
+      actTd.appendChild(editBtn);
+      actTd.appendChild(delBtn);
+      tr.appendChild(actTd);
+    }
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  return wrap;
+}
+
+async function createFormularioEntry() {
+  try {
+    const ref = await addDoc(collection(db, "formulario"), {
+      uid: currentUid,
+      nombre: "",
+      especies: [],
+      dosisValor: null,
+      dosisUnidad: "mg/kg",
+      via: "",
+      frecuencia: "",
+      concentracionValor: null,
+      concentracionUnidad: "",
+      fuente: "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    state.studyTab = "formulario";
+    state.activeId = ref.id;
+    render();
+  } catch (err) {
+    alert("No se pudo crear la entrada. Revisa tu conexión e intenta de nuevo.");
+  }
+}
+
+function renderFormularioTab(root) {
+  const subjectGrid = document.createElement("div");
+  subjectGrid.className = "subject-grid";
+  const subjectDefs = [
+    ["📖", "Pharmacology", "Comprehensive drug interactions, pharmacokinetics, and dosing."],
+    ["🩺", "Internal Medicine", "Diagnostic protocols, endocrinology, and systemic diseases."],
+    ["✂️", "Surgery", "Surgical approaches, anesthesia protocols, & post-op care."],
+    ["🩻", "Diagnostic Imaging", "Radiographic interpretation and diagnostic imaging notes."]
+  ];
+  subjectDefs.forEach(([ico, title, desc]) => {
+    const card = document.createElement("div");
+    card.className = "subject-card";
+    card.innerHTML =
+      '<div class="ico">' + ico + "</div>" +
+      "<h3>" + title + "</h3>" +
+      "<p>" + desc + "</p>" +
+      '<span class="link">EXPLORE SUBJECT →</span>';
+    subjectGrid.appendChild(card);
+  });
+  root.appendChild(subjectGrid);
+
+  const card = document.createElement("div");
+  card.className = "card";
+  const cardHead = document.createElement("div");
+  cardHead.className = "card-head";
+  const cardTitle = document.createElement("h2");
+  cardTitle.textContent = "Formulario de Fármacos";
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "btn-primary";
+  addBtn.textContent = "+ ADD DRUG";
+  addBtn.addEventListener("click", () => createFormularioEntry());
+  cardHead.appendChild(cardTitle);
+  cardHead.appendChild(addBtn);
+  card.appendChild(cardHead);
+
+  const filterRow = document.createElement("div");
+  filterRow.style.padding = "14px 18px 0";
+  const especieSelect = document.createElement("select");
+  especieSelect.className = "btn-secondary";
+  const blankOpt = document.createElement("option");
+  blankOpt.value = "";
+  blankOpt.textContent = "Todas las especies";
+  especieSelect.appendChild(blankOpt);
+  SPECIES_OPTIONS.forEach((opt) => {
+    const o = document.createElement("option");
+    o.value = opt;
+    o.textContent = opt;
+    especieSelect.appendChild(o);
+  });
+  especieSelect.value = state.formularioEspecieFilter;
+  especieSelect.addEventListener("change", () => {
+    state.formularioEspecieFilter = especieSelect.value;
+    render();
+  });
+  filterRow.appendChild(especieSelect);
+  card.appendChild(filterRow);
+
+  const listWrap = document.createElement("div");
+  listWrap.style.padding = "14px 0 4px";
+  const list = state.formulario
+    .filter((f) => matchesFormularioQuery(f, state.query))
+    .filter((f) => !state.formularioEspecieFilter || (Array.isArray(f.especies) ? f.especies : []).includes(state.formularioEspecieFilter))
+    .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+  listWrap.appendChild(buildFormularioTable(list, true));
+  card.appendChild(listWrap);
+
+  root.appendChild(card);
+}
+
+function renderFormularioDetail(root, item) {
+  root.appendChild(
+    backLink("Study Center", () => {
+      state.activeId = null;
+      render();
+    })
+  );
 
   const status = document.createElement("div");
   status.className = "status";
@@ -1636,7 +2198,21 @@ function renderFormularioEditor(item) {
     scheduleSave("formulario", item.id, { [field]: value }, statusText);
   }
 
+  const tag = document.createElement("span");
+  tag.className = "section-tag formulario";
+  tag.textContent = "Fármaco de referencia";
+  tag.style.margin = "10px 0";
+  tag.style.display = "inline-flex";
+
+  const titleInput = document.createElement("input");
+  titleInput.className = "field-title";
+  titleInput.placeholder = "Nombre del fármaco";
+  titleInput.value = item.nombre || "";
+  titleInput.style.margin = "10px 0 16px";
   titleInput.addEventListener("input", () => save("nombre", titleInput.value));
+
+  const card = document.createElement("div");
+  card.className = "card card-pad";
 
   const especiesLabel = document.createElement("label");
   especiesLabel.className = "checkbox-group-label";
@@ -1645,119 +2221,62 @@ function renderFormularioEditor(item) {
 
   const doseRow = document.createElement("div");
   doseRow.className = "field-row";
+  doseRow.style.marginTop = "12px";
 
-  const dosisValorGroup = document.createElement("div");
-  dosisValorGroup.className = "field-group";
-  dosisValorGroup.style.maxWidth = "130px";
-  const dosisValorLabel = document.createElement("label");
-  dosisValorLabel.textContent = "Dosis";
-  const dosisValorInput = document.createElement("input");
-  dosisValorInput.type = "number";
-  dosisValorInput.step = "any";
-  dosisValorInput.placeholder = "Ej. 20";
-  dosisValorInput.value = item.dosisValor != null ? item.dosisValor : "";
-  dosisValorInput.addEventListener("input", () => {
-    const v = dosisValorInput.value;
-    save("dosisValor", v === "" ? null : Number(v));
-  });
-  dosisValorGroup.appendChild(dosisValorLabel);
-  dosisValorGroup.appendChild(dosisValorInput);
+  function numberField(labelText, value, onInput, placeholder) {
+    const group = document.createElement("div");
+    group.className = "field-group";
+    const lbl = document.createElement("label");
+    lbl.textContent = labelText;
+    const input = document.createElement("input");
+    input.type = "number";
+    input.step = "any";
+    input.placeholder = placeholder;
+    input.value = value != null ? value : "";
+    input.addEventListener("input", () => onInput(input.value));
+    group.appendChild(lbl);
+    group.appendChild(input);
+    return group;
+  }
+  function textField(labelText, value, onInput, placeholder) {
+    const group = document.createElement("div");
+    group.className = "field-group";
+    const lbl = document.createElement("label");
+    lbl.textContent = labelText;
+    const input = document.createElement("input");
+    input.placeholder = placeholder;
+    input.value = value || "";
+    input.addEventListener("input", () => onInput(input.value));
+    group.appendChild(lbl);
+    group.appendChild(input);
+    return group;
+  }
 
-  const dosisUnidadGroup = document.createElement("div");
-  dosisUnidadGroup.className = "field-group";
-  dosisUnidadGroup.style.maxWidth = "130px";
-  const dosisUnidadLabel = document.createElement("label");
-  dosisUnidadLabel.textContent = "Unidad";
-  const dosisUnidadInput = document.createElement("input");
-  dosisUnidadInput.placeholder = "Ej. mg/kg";
-  dosisUnidadInput.value = item.dosisUnidad || "";
-  dosisUnidadInput.addEventListener("input", () => save("dosisUnidad", dosisUnidadInput.value));
-  dosisUnidadGroup.appendChild(dosisUnidadLabel);
-  dosisUnidadGroup.appendChild(dosisUnidadInput);
-
-  const viaGroup = document.createElement("div");
-  viaGroup.className = "field-group";
-  const viaLabel = document.createElement("label");
-  viaLabel.textContent = "Vía";
-  const viaInput = document.createElement("input");
-  viaInput.placeholder = "Ej. Oral, IV, IM, SC…";
-  viaInput.value = item.via || "";
-  viaInput.addEventListener("input", () => save("via", viaInput.value));
-  viaGroup.appendChild(viaLabel);
-  viaGroup.appendChild(viaInput);
-
-  const frecGroup = document.createElement("div");
-  frecGroup.className = "field-group";
-  const frecLabel = document.createElement("label");
-  frecLabel.textContent = "Frecuencia";
-  const frecInput = document.createElement("input");
-  frecInput.placeholder = "Ej. c/12h";
-  frecInput.value = item.frecuencia || "";
-  frecInput.addEventListener("input", () => save("frecuencia", frecInput.value));
-  frecGroup.appendChild(frecLabel);
-  frecGroup.appendChild(frecInput);
-
-  doseRow.appendChild(dosisValorGroup);
-  doseRow.appendChild(dosisUnidadGroup);
-  doseRow.appendChild(viaGroup);
-  doseRow.appendChild(frecGroup);
+  doseRow.appendChild(numberField("Dosis", item.dosisValor, (v) => save("dosisValor", v === "" ? null : Number(v)), "Ej. 20"));
+  doseRow.appendChild(textField("Unidad", item.dosisUnidad, (v) => save("dosisUnidad", v), "Ej. mg/kg"));
+  doseRow.appendChild(textField("Vía", item.via, (v) => save("via", v), "Ej. Oral, IV, IM, SC…"));
+  doseRow.appendChild(textField("Frecuencia", item.frecuencia, (v) => save("frecuencia", v), "Ej. c/12h"));
 
   const concRow = document.createElement("div");
   concRow.className = "field-row";
-
-  const concValorGroup = document.createElement("div");
-  concValorGroup.className = "field-group";
-  concValorGroup.style.maxWidth = "160px";
-  const concValorLabel = document.createElement("label");
-  concValorLabel.textContent = "Concentración (opcional)";
-  const concValorInput = document.createElement("input");
-  concValorInput.type = "number";
-  concValorInput.step = "any";
-  concValorInput.placeholder = "Ej. 50";
-  concValorInput.value = item.concentracionValor != null ? item.concentracionValor : "";
-  concValorInput.addEventListener("input", () => {
-    const v = concValorInput.value;
-    save("concentracionValor", v === "" ? null : Number(v));
-  });
-  concValorGroup.appendChild(concValorLabel);
-  concValorGroup.appendChild(concValorInput);
-
-  const concUnidadGroup = document.createElement("div");
-  concUnidadGroup.className = "field-group";
-  concUnidadGroup.style.maxWidth = "160px";
-  const concUnidadLabel = document.createElement("label");
-  concUnidadLabel.textContent = "Unidad de concentración";
-  const concUnidadInput = document.createElement("input");
-  concUnidadInput.placeholder = "Ej. mg/mL";
-  concUnidadInput.value = item.concentracionUnidad || "";
-  concUnidadInput.addEventListener("input", () => save("concentracionUnidad", concUnidadInput.value));
-  concUnidadGroup.appendChild(concUnidadLabel);
-  concUnidadGroup.appendChild(concUnidadInput);
-
-  concRow.appendChild(concValorGroup);
-  concRow.appendChild(concUnidadGroup);
-
-  const fuenteGroup = document.createElement("div");
-  fuenteGroup.className = "field-group";
-  const fuenteLabel = document.createElement("label");
-  fuenteLabel.textContent = "Fuente / referencia";
-  const fuenteInput = document.createElement("input");
-  fuenteInput.placeholder = "Ej. Plumb's Veterinary Drug Handbook, 9na ed.";
-  fuenteInput.value = item.fuente || "";
-  fuenteInput.addEventListener("input", () => save("fuente", fuenteInput.value));
-  fuenteGroup.appendChild(fuenteLabel);
-  fuenteGroup.appendChild(fuenteInput);
+  concRow.appendChild(numberField("Concentración (opcional)", item.concentracionValor, (v) => save("concentracionValor", v === "" ? null : Number(v)), "Ej. 50"));
+  concRow.appendChild(textField("Unidad de concentración", item.concentracionUnidad, (v) => save("concentracionUnidad", v), "Ej. mg/mL"));
 
   const fuenteRow = document.createElement("div");
   fuenteRow.className = "field-row";
-  fuenteRow.appendChild(fuenteGroup);
+  fuenteRow.appendChild(textField("Fuente / referencia", item.fuente, (v) => save("fuente", v), "Ej. Plumb's Veterinary Drug Handbook, 9na ed."));
 
-  const divider = document.createElement("hr");
-  divider.className = "divider";
+  card.appendChild(especiesLabel);
+  card.appendChild(especiesBox);
+  card.appendChild(doseRow);
+  card.appendChild(concRow);
+  card.appendChild(fuenteRow);
+  root.appendChild(tag);
+  root.appendChild(titleInput);
+  root.appendChild(card);
 
   const foot = document.createElement("div");
   foot.className = "editor-foot";
-
   const del = document.createElement("button");
   del.className = "btn-delete";
   del.type = "button";
@@ -1773,176 +2292,191 @@ function renderFormularioEditor(item) {
       }
     }
   });
-
   foot.appendChild(status);
   foot.appendChild(del);
+  root.appendChild(foot);
 
-  els.page.appendChild(head);
-  els.page.appendChild(titleInput);
-  els.page.appendChild(especiesLabel);
-  els.page.appendChild(especiesBox);
-  els.page.appendChild(doseRow);
-  els.page.appendChild(concRow);
-  els.page.appendChild(fuenteRow);
-  els.page.appendChild(divider);
-  els.page.appendChild(foot);
-
-  if (!item.nombre) {
-    setTimeout(() => titleInput.focus(), 0);
-  }
+  if (!item.nombre) setTimeout(() => titleInput.focus(), 0);
 }
 
-function render() {
-  setActiveTab();
-  updateCounts();
-  renderList();
+/* ---------- Settings ---------- */
 
-  if (state.section === "farmacos") {
-    const item = getMedUsageList().find((m) => m.id === state.activeId);
-    if (item) {
-      renderMedDetail(item);
-    } else {
-      renderEmptyPage();
-    }
-    return;
-  }
+function renderSettingsPage(root) {
+  root.appendChild(pageHead("Settings"));
 
-  if (state.section === "formulario") {
-    const item = state.formulario.find((f) => f.id === state.activeId);
-    if (item) {
-      renderFormularioEditor(item);
-    } else {
-      renderEmptyPage();
-    }
-    return;
-  }
+  const list = document.createElement("div");
+  list.className = "settings-list";
 
-  const active = state.entries.find((e) => e.id === state.activeId);
-  if (active) {
-    renderEditor(active);
-  } else {
-    renderEmptyPage();
-  }
-}
-
-function resetSectionFilters() {
-  state.activeId = null;
-  state.areaFilter = "";
-  if (els.areaFilter) els.areaFilter.value = "";
-  state.formularioEspecieFilter = "";
-  if (els.formularioEspecieFilter) els.formularioEspecieFilter.value = "";
-}
-
-els.pageTabs.forEach((t) => {
-  t.addEventListener("click", () => {
-    const page = t.getAttribute("data-page");
-    if (page === state.page) return;
-    state.page = page;
-    state.section = PAGE_SECTIONS[page][0];
-    resetSectionFilters();
-    render();
+  // Tema
+  const themeRow = document.createElement("div");
+  themeRow.className = "settings-row";
+  themeRow.innerHTML = '<div><div class="lbl">Tema</div><div class="desc">Claro u oscuro para toda la app.</div></div>';
+  const themeBtn = document.createElement("button");
+  themeBtn.type = "button";
+  themeBtn.className = "btn-secondary";
+  themeBtn.textContent = currentTheme === "dark" ? "☀️ Modo claro" : "🌙 Modo oscuro";
+  themeBtn.addEventListener("click", () => {
+    toggleTheme();
+    themeBtn.textContent = currentTheme === "dark" ? "☀️ Modo claro" : "🌙 Modo oscuro";
   });
-});
+  themeRow.appendChild(themeBtn);
+  list.appendChild(themeRow);
 
-els.tabs.forEach((t) => {
-  t.addEventListener("click", () => {
-    state.section = t.getAttribute("data-section");
-    state.page = t.getAttribute("data-page");
-    resetSectionFilters();
-    render();
+  // Cuenta
+  const accountRow = document.createElement("div");
+  accountRow.className = "settings-row";
+  accountRow.innerHTML =
+    '<div><div class="lbl">Cuenta</div><div class="desc">' + (auth.currentUser ? escapeHtml(auth.currentUser.email || "") : "") + "</div></div>";
+  const signOutBtn2 = document.createElement("button");
+  signOutBtn2.type = "button";
+  signOutBtn2.className = "btn-secondary";
+  signOutBtn2.textContent = "Cerrar sesión";
+  signOutBtn2.addEventListener("click", () => {
+    if (confirm("¿Cerrar sesión en este dispositivo?")) signOut(auth);
   });
+  accountRow.appendChild(signOutBtn2);
+  list.appendChild(accountRow);
+
+  // Backup
+  const backupCard = document.createElement("div");
+  backupCard.className = "settings-row";
+  backupCard.style.flexDirection = "column";
+  backupCard.style.alignItems = "stretch";
+  const backupLbl = document.createElement("div");
+  backupLbl.className = "lbl";
+  backupLbl.textContent = "Copia de respaldo";
+  const backupDesc = document.createElement("div");
+  backupDesc.className = "desc";
+  backupDesc.style.marginBottom = "10px";
+  backupDesc.textContent = "Descarga o importa un respaldo manual de Materias y Casos clínicos.";
+  const backupBtns = document.createElement("div");
+  backupBtns.style.display = "flex";
+  backupBtns.style.gap = "8px";
+  const exportBtn = document.createElement("button");
+  exportBtn.type = "button";
+  exportBtn.className = "btn-secondary";
+  exportBtn.textContent = "↓ Descargar copia";
+  const importBtn = document.createElement("button");
+  importBtn.type = "button";
+  importBtn.className = "btn-secondary";
+  importBtn.textContent = "↑ Importar copia antigua";
+  const importFile = document.createElement("input");
+  importFile.type = "file";
+  importFile.accept = "application/json,.json";
+  importFile.style.display = "none";
+  const backupMsg = document.createElement("div");
+  backupMsg.className = "settings-msg";
+
+  function showBackupMsg(text, isError) {
+    backupMsg.textContent = text;
+    backupMsg.classList.toggle("error", !!isError);
+  }
+
+  exportBtn.addEventListener("click", () => {
+    const payload = JSON.stringify({ entries: state.entries, exportedAt: new Date().toISOString() }, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "cuaderno-vet-" + todayISO() + ".json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showBackupMsg("Copia descargada.");
+  });
+
+  importBtn.addEventListener("click", () => {
+    importFile.value = "";
+    importFile.click();
+  });
+
+  importFile.addEventListener("change", () => {
+    const file = importFile.files && importFile.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      let incoming;
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        incoming = Array.isArray(parsed) ? parsed : parsed.entries;
+      } catch (e) {
+        showBackupMsg("Ese archivo no es una copia válida.", true);
+        return;
+      }
+      if (!Array.isArray(incoming) || incoming.length === 0) {
+        showBackupMsg("Ese archivo no tiene entradas para importar.", true);
+        return;
+      }
+      if (!confirm("¿Agregar " + incoming.length + " entrada(s) de esta copia al cuaderno? Se omiten las que ya existan.")) {
+        return;
+      }
+      showBackupMsg("Importando…");
+
+      const validSections = { materias: true, casos: true };
+      const dupKey = (e) => (e.section || "") + "␟" + (e.title || "") + "␟" + (e.date || "");
+      const seenIds = new Set(state.entries.map((e) => e.id).filter(Boolean));
+      const seenKeys = new Set(state.entries.map(dupKey));
+
+      let ok = 0;
+      let skipped = 0;
+      for (const inc of incoming) {
+        if (!inc || !inc.section || !validSections[inc.section]) continue;
+        const isDup = (inc.id && seenIds.has(inc.id)) || seenKeys.has(dupKey(inc));
+        if (isDup) {
+          skipped++;
+          continue;
+        }
+        try {
+          await addDoc(collection(db, "entries"), {
+            uid: currentUid,
+            section: inc.section,
+            title: inc.title || "",
+            meta: inc.meta || "",
+            date: inc.date || todayISO(),
+            body: inc.body || "",
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp()
+          });
+          seenKeys.add(dupKey(inc));
+          if (inc.id) seenIds.add(inc.id);
+          ok++;
+        } catch (err) {
+          break;
+        }
+      }
+      showBackupMsg("Se importaron " + ok + " de " + incoming.length + " entrada(s)." + (skipped ? " " + skipped + " omitida(s) por ya existir." : ""));
+    };
+    reader.onerror = () => showBackupMsg("No se pudo leer el archivo.", true);
+    reader.readAsText(file);
+  });
+
+  backupBtns.appendChild(exportBtn);
+  backupBtns.appendChild(importBtn);
+  backupCard.appendChild(backupLbl);
+  backupCard.appendChild(backupDesc);
+  backupCard.appendChild(backupBtns);
+  backupCard.appendChild(importFile);
+  backupCard.appendChild(backupMsg);
+  list.appendChild(backupCard);
+
+  root.appendChild(list);
+}
+
+/* ================= Barra superior / navegación lateral ================= */
+
+els.pageNav.forEach((btn) => {
+  btn.addEventListener("click", () => goToPage(btn.getAttribute("data-page")));
 });
 
 els.search.addEventListener("input", () => {
   state.query = els.search.value;
-  renderList();
-});
-
-if (els.areaFilter) {
-  const blankAreaFilterOpt = document.createElement("option");
-  blankAreaFilterOpt.value = "";
-  blankAreaFilterOpt.textContent = "Todas las áreas";
-  els.areaFilter.appendChild(blankAreaFilterOpt);
-  AREA_OPTIONS.forEach((opt) => {
-    const o = document.createElement("option");
-    o.value = opt;
-    o.textContent = opt;
-    els.areaFilter.appendChild(o);
-  });
-  els.areaFilter.addEventListener("change", () => {
-    state.areaFilter = els.areaFilter.value;
-    renderList();
-  });
-}
-
-if (els.formularioEspecieFilter) {
-  const blankSpeciesFilterOpt = document.createElement("option");
-  blankSpeciesFilterOpt.value = "";
-  blankSpeciesFilterOpt.textContent = "Todas las especies";
-  els.formularioEspecieFilter.appendChild(blankSpeciesFilterOpt);
-  SPECIES_OPTIONS.forEach((opt) => {
-    const o = document.createElement("option");
-    o.value = opt;
-    o.textContent = opt;
-    els.formularioEspecieFilter.appendChild(o);
-  });
-  els.formularioEspecieFilter.addEventListener("change", () => {
-    state.formularioEspecieFilter = els.formularioEspecieFilter.value;
-    renderList();
-  });
-}
-
-if (els.calcBtn) {
-  els.calcBtn.addEventListener("click", () => openCalculatorOverlay());
-}
-
-els.newEntry.addEventListener("click", async () => {
-  try {
-    let ref;
-    if (state.section === "formulario") {
-      ref = await addDoc(collection(db, "formulario"), {
-        uid: currentUid,
-        nombre: "",
-        especies: [],
-        dosisValor: null,
-        dosisUnidad: "mg/kg",
-        via: "",
-        frecuencia: "",
-        concentracionValor: null,
-        concentracionUnidad: "",
-        fuente: "",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-    } else {
-      ref = await addDoc(collection(db, "entries"), {
-        uid: currentUid,
-        section: state.section,
-        title: "",
-        meta: "",
-        date: todayISO(),
-        body: "",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-    }
-    state.activeId = ref.id;
-    render();
-    if (window.innerWidth <= 760) {
-      els.sidebar.classList.add("collapsed");
-    }
-  } catch (err) {
-    alert("No se pudo crear la entrada. Revisa tu conexión e intenta de nuevo.");
-  }
+  render();
 });
 
 els.toggleSidebar.addEventListener("click", () => {
-  els.sidebar.classList.toggle("collapsed");
+  els.sidebar.classList.toggle("open");
 });
-
-if (window.innerWidth <= 760) {
-  els.sidebar.classList.add("collapsed");
-}
 
 /* ---------- Tema claro / oscuro ---------- */
 
@@ -1957,103 +2491,13 @@ function applyTheme(theme) {
 let currentTheme = localStorage.getItem(THEME_KEY) || "light";
 applyTheme(currentTheme);
 
-els.themeToggle.addEventListener("click", () => {
+function toggleTheme() {
   currentTheme = currentTheme === "dark" ? "light" : "dark";
   localStorage.setItem(THEME_KEY, currentTheme);
   applyTheme(currentTheme);
-});
-
-/* ---------- Backup: export / import (respaldo manual, además del sync automático) ---------- */
-
-function showBackupMsg(text, isError) {
-  els.backupMsg.textContent = text;
-  els.backupMsg.classList.toggle("error", !!isError);
 }
 
-els.exportBtn.addEventListener("click", () => {
-  const payload = JSON.stringify({ entries: state.entries, exportedAt: new Date().toISOString() }, null, 2);
-  const blob = new Blob([payload], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "cuaderno-vet-" + todayISO() + ".json";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  showBackupMsg("Copia descargada.");
-});
-
-els.importBtn.addEventListener("click", () => {
-  els.importFile.value = "";
-  els.importFile.click();
-});
-
-els.importFile.addEventListener("change", () => {
-  const file = els.importFile.files && els.importFile.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async () => {
-    let incoming;
-    try {
-      const parsed = JSON.parse(String(reader.result));
-      incoming = Array.isArray(parsed) ? parsed : parsed.entries;
-    } catch (e) {
-      showBackupMsg("Ese archivo no es una copia válida.", true);
-      return;
-    }
-    if (!Array.isArray(incoming) || incoming.length === 0) {
-      showBackupMsg("Ese archivo no tiene entradas para importar.", true);
-      return;
-    }
-    if (!confirm("¿Agregar " + incoming.length + " entrada(s) de esta copia al cuaderno? Se omiten las que ya existan.")) {
-      return;
-    }
-    showBackupMsg("Importando…");
-
-    // Evita duplicar: por id (re-importar el mismo export) o por
-    // section+título+fecha (migrar desde la versión vieja). El set se
-    // actualiza también con lo que se agrega EN ESTA misma importación,
-    // por si el propio archivo trae filas repetidas.
-    const dupKey = (e) => (e.section || "") + "␟" + (e.title || "") + "␟" + (e.date || "");
-    const seenIds = new Set(state.entries.map((e) => e.id).filter(Boolean));
-    const seenKeys = new Set(state.entries.map(dupKey));
-
-    let ok = 0;
-    let skipped = 0;
-    for (const inc of incoming) {
-      if (!inc || !inc.section || !SECTION_META[inc.section]) continue;
-      const isDup = (inc.id && seenIds.has(inc.id)) || seenKeys.has(dupKey(inc));
-      if (isDup) {
-        skipped++;
-        continue;
-      }
-      try {
-        await addDoc(collection(db, "entries"), {
-          uid: currentUid,
-          section: inc.section,
-          title: inc.title || "",
-          meta: inc.meta || "",
-          date: inc.date || todayISO(),
-          body: inc.body || "",
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        });
-        seenKeys.add(dupKey(inc));
-        if (inc.id) seenIds.add(inc.id);
-        ok++;
-      } catch (err) {
-        break;
-      }
-    }
-    showBackupMsg(
-      "Se importaron " + ok + " de " + incoming.length + " entrada(s)." +
-      (skipped ? " " + skipped + " omitida(s) por ya existir." : "")
-    );
-  };
-  reader.onerror = () => showBackupMsg("No se pudo leer el archivo.", true);
-  reader.readAsText(file);
-});
+els.themeToggle.addEventListener("click", toggleTheme);
 
 /* ---------- Conexión ---------- */
 
@@ -2152,7 +2596,7 @@ async function adoptOrphanEntries() {
   }
 }
 
-/* ---------- Firestore: sincronización en tiempo real (solo tus entradas) ---------- */
+/* ---------- Firestore: sincronización en tiempo real ---------- */
 
 let unsubscribe = null;
 

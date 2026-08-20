@@ -1,4 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#2e6659"/>
-  <text x="256" y="336" font-family="Georgia, 'Iowan Old Style', 'Palatino Linotype', serif" font-size="272" font-weight="700" fill="#f3f1e7" text-anchor="middle">C</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="VetDiario">
+  <title>VetDiario</title>
+
+  <!-- Disco de fondo en el verde de la app (variable teal) -->
+  <circle cx="256" cy="256" r="256" fill="#2e6659"/>
+
+  <!-- Huella en color papel: cuatro dedos y almohadilla.
+       Todo simetrico respecto al eje x=256. -->
+  <g fill="#f3f1e7">
+    <ellipse cx="152" cy="205" rx="37" ry="47" transform="rotate(-20 152 205)"/>
+    <ellipse cx="220" cy="165" rx="37" ry="51"/>
+    <ellipse cx="292" cy="165" rx="37" ry="51"/>
+    <ellipse cx="360" cy="205" rx="37" ry="47" transform="rotate(20 360 205)"/>
+    <ellipse cx="256" cy="332" rx="105" ry="80"/>
+  </g>
+
+  <!-- Cruz clinica recortada en la almohadilla: el cuidado veterinario y el
+       animal son la misma forma, no dos dibujos pegados. Va en el verde del
+       fondo para que se lea como hueco. Sin letras: legible a 32 px. -->
+  <g fill="#2e6659">
+    <rect x="239" y="284" width="34" height="96" rx="6"/>
+    <rect x="208" y="315" width="96" height="34" rx="6"/>
+  </g>
 </svg>

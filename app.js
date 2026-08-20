@@ -40,7 +40,7 @@ const storage = getStorage(app);
 
 enableIndexedDbPersistence(db).catch((err) => {
   if (err.code === "failed-precondition") {
-    console.warn("Persistencia offline no disponible: hay otra pestaña del cuaderno abierta.");
+    console.warn("Persistencia offline no disponible: hay otra pestaña de VetDiario abierta.");
   } else if (err.code === "unimplemented") {
     console.warn("Este navegador no soporta persistencia offline.");
   }
@@ -1373,7 +1373,7 @@ function render() {
   els.content.appendChild(inner);
 
   if (!state.ready) {
-    inner.appendChild(emptyState("⏳", "Conectando con el cuaderno…", "Un momento, esto solo pasa la primera vez."));
+    inner.appendChild(emptyState("⏳", "Conectando con VetDiario…", "Un momento, esto solo pasa la primera vez."));
     return;
   }
 
@@ -1646,11 +1646,15 @@ function buildPatientRow(entry, compact) {
     nameStrong.className = "cell-title";
     nameStrong.textContent = entry.meta || "(sin nombre)";
     nameTd.appendChild(nameStrong);
-    if (entry.title) {
+    // Bajo el nombre del paciente va el tutor, no el motivo de consulta:
+    // en la lista sirve mas para identificar de quien es el animal. Si no
+    // hay tutor cargado, no se dibuja la linea (mejor vacio que un guion).
+    const tutor = (entry.tutorNombre || "").trim();
+    if (tutor) {
       const sub = document.createElement("div");
       sub.className = "cell-muted";
       sub.style.fontSize = "0.78rem";
-      sub.textContent = entry.title;
+      sub.textContent = tutor;
       nameTd.appendChild(sub);
     }
     tr.appendChild(nameTd);
@@ -3028,7 +3032,7 @@ function renderSettingsPage(root) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "cuaderno-vet-" + todayISO() + ".json";
+    a.download = "vetdiario-" + todayISO() + ".json";
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -3405,9 +3409,9 @@ function renderSidebarIdentity() {
   const nombre = state.profile && state.profile.nombre ? String(state.profile.nombre).trim() : "";
   const titulo = state.profile && state.profile.titulo ? String(state.profile.titulo).trim() : "";
 
-  // La condición es tener NOMBRE, no título: ensureProfile() crea el perfil
-  // con "Médico Veterinario" por defecto, así que si bastara el título el
-  // bloque aparecería para todo el mundo sin haber llenado nada. Sin nombre
+  // La condicion es tener NOMBRE, no titulo: ensureProfile() crea el perfil
+  // con "Medico Veterinario" por defecto, asi que si bastara el titulo el
+  // bloque apareceria para todo el mundo sin haber llenado nada. Sin nombre
   // se deja el pie como estaba: solo el correo.
   if (!nombre) {
     els.sidebarIdentity.hidden = true;
@@ -3416,11 +3420,17 @@ function renderSidebarIdentity() {
     els.authUser.classList.remove("as-secondary");
     return;
   }
+
   els.sidebarIdentity.hidden = false;
-  els.sidName.textContent = nombre;
+  els.sidName.textContent = "Mv. " + nombre;
   els.sidName.hidden = false;
-  els.sidTitle.textContent = titulo;
-  els.sidTitle.hidden = !titulo;
+
+  // El titulo solo se muestra aparte cuando aporta algo: si quedo en el valor
+  // por defecto, "Mv." ya lo dice y repetirlo debajo seria ruido.
+  const tituloAporta = titulo && titulo !== TITULO_POR_DEFECTO;
+  els.sidTitle.textContent = tituloAporta ? titulo : "";
+  els.sidTitle.hidden = !tituloAporta;
+
   els.authUser.classList.add("as-secondary");
 }
 

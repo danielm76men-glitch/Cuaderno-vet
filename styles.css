@@ -140,7 +140,11 @@ button, input, select, textarea { font-family: inherit; }
 .auth-msg.ok { color: var(--teal-ink); }
 
 /* ---------- App shell ---------- */
-.app { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+/* Altura compartida por la marca del sidebar y la barra superior. Las dos
+   tienen border-bottom y juntas se leen como UNA sola linea horizontal
+   cruzando la cabecera; si sus alturas no coinciden, esa linea sale
+   quebrada. Antes median 67px y 62px, un desfase de 5px. */
+.app { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; --franja-sup: 62px; }
 
 /* ---------- Barra lateral (navegación por íconos) ---------- */
 .app-sidebar {
@@ -155,7 +159,8 @@ button, input, select, textarea { font-family: inherit; }
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 20px 18px;
+  padding: 0 18px;
+  min-height: var(--franja-sup);
   font-family: var(--serif);
   font-size: 1.05rem;
   font-weight: 700;
@@ -234,6 +239,7 @@ button, input, select, textarea { font-family: inherit; }
   align-items: center;
   gap: 14px;
   padding: 12px 24px;
+  min-height: var(--franja-sup);
   background: var(--paper-raised);
   border-bottom: 1px solid var(--line);
 }

@@ -1,7 +1,7 @@
 {
-  "name": "Cuaderno · Medicina Veterinaria",
-  "short_name": "Cuaderno Vet",
-  "description": "Cuaderno de materias y casos clínicos para Medicina Veterinaria.",
+  "name": "VetDiario · Medicina Veterinaria",
+  "short_name": "VetDiario",
+  "description": "Diario de materias y casos clínicos para Medicina Veterinaria.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -9,7 +9,17 @@
   "theme_color": "#f3f1e7",
   "lang": "es",
   "icons": [
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
   ]
 }

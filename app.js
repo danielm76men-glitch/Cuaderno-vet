@@ -92,6 +92,7 @@ const state = {
   entries: [],
   formulario: [],
   profile: null,
+  profileError: "",
   page: "dashboard",
   studyTab: "materias",
   areaFilter: "",
@@ -230,7 +231,27 @@ function showToast(text) {
 // colecciones de Firestore separadas (no dos "section" dentro de la misma).
 const saveTimers = new Map();
 
-function scheduleSave(collectionName, entryId, patch, statusEl) {
+// Traduce el error de Firestore a algo accionable. Antes TODO fallo decía
+// "Sin conexión — se guardará al reconectar", que es falso para los errores
+// que no se reintentan solos: con persistencia offline activada, estar sin
+// red NO lanza excepción (el escritura queda en cola), así que si llegamos
+// al catch casi siempre es permiso o documento inexistente.
+function mensajeDeErrorAlGuardar(err) {
+  const code = err && err.code ? err.code : "";
+  if (code === "permission-denied") return "Sin permiso para guardar — falta publicar las reglas";
+  if (code === "not-found") return "No se encontró el documento para guardar";
+  if (code === "unavailable") return "Sin conexión — se guardará al reconectar";
+  return "No se pudo guardar";
+}
+
+/* opciones.createIfMissing → escribe con setDoc(merge) en vez de updateDoc.
+   updateDoc falla si el documento todavía no existe; para el perfil eso es
+   un problema, porque se crea solo la primera vez que entras y si esa
+   creación falló, cada tecleo fallaba en silencio. Para casos y materias en
+   cambio SÍ conviene updateDoc: si el documento fue borrado, no queremos
+   revivirlo desde un editor abierto. El debounce por campo no cambia. */
+function scheduleSave(collectionName, entryId, patch, statusEl, opciones) {
+  const opts = opciones || {};
   const field = Object.keys(patch)[0] || "default";
   const key = collectionName + ":" + entryId + ":" + field;
 
@@ -245,16 +266,27 @@ function scheduleSave(collectionName, entryId, patch, statusEl) {
   const timer = setTimeout(async () => {
     saveTimers.delete(key);
     try {
-      await updateDoc(doc(db, collectionName, entryId), { ...patch, updatedAt: serverTimestamp() });
+      // doc() va DENTRO del try: si entryId es null (por ejemplo si la
+      // sesión se cerró con la pantalla de Configuración abierta) lanza, y
+      // fuera del try quedaba como promesa rechazada sin capturar: el
+      // estado se congelaba en "Escribiendo…" sin avisar nunca del fallo.
+      const ref = doc(db, collectionName, entryId);
+      const datos = { ...patch, updatedAt: serverTimestamp() };
+      if (opts.createIfMissing) {
+        await setDoc(ref, { uid: currentUid, ...datos }, { merge: true });
+      } else {
+        await updateDoc(ref, datos);
+      }
       if (statusEl) {
         statusEl.parentElement.setAttribute("data-state", "ok");
         statusEl.textContent = "Sincronizado";
       }
       showToast("Guardado");
     } catch (err) {
+      console.error("Fallo al guardar en " + collectionName + ":", err);
       if (statusEl) {
         statusEl.parentElement.setAttribute("data-state", "error");
-        statusEl.textContent = "Sin conexión — se guardará al reconectar";
+        statusEl.textContent = mensajeDeErrorAlGuardar(err);
       }
     }
   }, 450);
@@ -1355,11 +1387,23 @@ function render() {
 /* ---------- Inicio ---------- */
 
 function renderDashboardPage(root) {
-  // Se quitaron las tarjetas de conteo (stat-grid): repetían los mismos
-  // números que ya muestra el contador de cada sección en la barra lateral.
-  // Lo que queda en Inicio es contenido con el que se puede trabajar:
-  // los últimos casos, la referencia de fármacos y la calculadora.
   root.appendChild(pageHead("Inicio", "Tus últimos casos y las herramientas de consulta."));
+
+  const stats = document.createElement("div");
+  stats.className = "stat-grid";
+  const statDefs = [
+    ["Casos activos", entriesForSection("casos").length],
+    ["Materias", entriesForSection("materias").length],
+    ["Fármacos usados", getMedUsageList().length],
+    ["Formulario", state.formulario.length]
+  ];
+  statDefs.forEach(([l, n]) => {
+    const c = document.createElement("div");
+    c.className = "stat-card";
+    c.innerHTML = '<span class="n">' + n + '</span><span class="l">' + l + "</span>";
+    stats.appendChild(c);
+  });
+  root.appendChild(stats);
 
   const overviewCard = document.createElement("div");
   overviewCard.className = "card";
@@ -1469,6 +1513,11 @@ const ESPECIE_PLURAL = {
 };
 const SIN_ESPECIE = "Sin especificar";
 
+/* Qué grupos de especie están desplegados. Vive fuera de buildPatientsTable
+   porque render() reconstruye la tabla entera: si el estado viviera en el
+   closure, cualquier redibujado volvería a cerrar todos los grupos. */
+const gruposExpandidos = new Set();
+
 function grupoDeEspecie(entry) {
   const especie = (entry.especie || "").trim();
   if (!especie) return SIN_ESPECIE;
@@ -1515,20 +1564,61 @@ function buildPatientsTable(list, compact, grouped) {
       return a.localeCompare(b, "es");
     });
 
+    // Si hay una búsqueda o un filtro de especie activo, todos los grupos que
+    // sobrevivieron al filtro se abren solos: colapsarlos escondería
+    // justamente lo que el usuario está buscando.
+    const abrirTodo = !!state.query || !!state.especieFilter;
+
     nombres.forEach((nombre) => {
       const filas = grupos.get(nombre);
+      const expandido = abrirTodo || gruposExpandidos.has(nombre);
+
       const headTr = document.createElement("tr");
       headTr.className = "group-row";
       const headTd = document.createElement("td");
       headTd.colSpan = cols.length;
+      headTd.setAttribute("role", "button");
+      headTd.tabIndex = 0;
+      headTd.setAttribute("aria-expanded", expandido ? "true" : "false");
       headTd.innerHTML =
-        '<span class="group-name"></span><span class="group-count"></span>';
+        '<span class="group-caret"></span><span class="group-name"></span>' +
+        '<span class="group-sep">·</span><span class="group-count"></span>';
+      headTd.querySelector(".group-caret").textContent = expandido ? "▾" : "▸";
       headTd.querySelector(".group-name").textContent = nombre;
       headTd.querySelector(".group-count").textContent =
         filas.length + (filas.length === 1 ? " paciente" : " pacientes");
       headTr.appendChild(headTd);
       tbody.appendChild(headTr);
-      filas.forEach((entry) => tbody.appendChild(buildPatientRow(entry, compact)));
+
+      const filasTr = filas.map((entry) => {
+        const tr = buildPatientRow(entry, compact);
+        tr.hidden = !expandido;
+        tbody.appendChild(tr);
+        return tr;
+      });
+
+      function alternar() {
+        // Con búsqueda/filtro activo los grupos están abiertos a la fuerza;
+        // igual se permite cerrarlos manualmente, así que el estado se guarda
+        // siempre en el mismo sitio.
+        const abiertoAhora = headTd.getAttribute("aria-expanded") === "true";
+        const nuevo = !abiertoAhora;
+        if (nuevo) gruposExpandidos.add(nombre);
+        else gruposExpandidos.delete(nombre);
+        headTd.setAttribute("aria-expanded", nuevo ? "true" : "false");
+        headTd.querySelector(".group-caret").textContent = nuevo ? "▾" : "▸";
+        filasTr.forEach((tr) => {
+          tr.hidden = !nuevo;
+        });
+      }
+
+      headTr.addEventListener("click", alternar);
+      headTd.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          alternar();
+        }
+      });
     });
 
     table.appendChild(tbody);
@@ -1686,6 +1776,154 @@ function renderPatientsPage(root) {
   root.appendChild(card);
 }
 
+/* ================= Exportar un caso a PDF =================
+   Usa la impresión nativa del navegador (window.print → "Guardar como PDF"),
+   sin librerías extra. En vez de intentar imprimir la ficha de edición, se
+   arma un bloque aparte con el caso en texto plano y @media print muestra
+   solo ese bloque. El motivo es concreto: la ficha está hecha de <input> y
+   <textarea>, y un textarea al imprimirse NO crece hasta su contenido —
+   recorta el texto a la altura de la caja, así que las notas clínicas y las
+   evoluciones largas saldrían cortadas. */
+function campoImpreso(etiqueta, valor) {
+  const fila = document.createElement("div");
+  fila.className = "print-field";
+  const l = document.createElement("span");
+  l.className = "print-label";
+  l.textContent = etiqueta;
+  const v = document.createElement("span");
+  v.className = "print-value";
+  v.textContent = valor && String(valor).trim() ? valor : "—";
+  fila.appendChild(l);
+  fila.appendChild(v);
+  return fila;
+}
+
+function bloqueImpreso(titulo) {
+  const sec = document.createElement("section");
+  sec.className = "print-block";
+  const h = document.createElement("h2");
+  h.textContent = titulo;
+  sec.appendChild(h);
+  return sec;
+}
+
+function buildPrintableCase(entry) {
+  const caso = currentEntry(entry);
+  const root = document.createElement("div");
+  root.id = "printArea";
+
+  // Encabezado: nombre y título del perfil si están cargados.
+  const head = document.createElement("header");
+  head.className = "print-head";
+  const h1 = document.createElement("h1");
+  h1.textContent = caso.meta || "(paciente sin nombre)";
+  head.appendChild(h1);
+  const firma = [];
+  if (state.profile && state.profile.nombre) firma.push(state.profile.nombre);
+  if (state.profile && state.profile.titulo) firma.push(state.profile.titulo);
+  const meta = document.createElement("p");
+  meta.className = "print-head-meta";
+  meta.textContent =
+    (firma.length ? firma.join(" · ") + " — " : "") + "Emitido el " + formatDate(todayISO());
+  head.appendChild(meta);
+  root.appendChild(head);
+
+  const datos = bloqueImpreso("Datos del paciente");
+  datos.appendChild(campoImpreso("Especie / Raza", [caso.especie, caso.raza].filter(Boolean).join(" · ")));
+  datos.appendChild(campoImpreso("Edad", caso.edad));
+  datos.appendChild(campoImpreso("Peso", caso.peso));
+  datos.appendChild(campoImpreso("Fecha de ingreso", formatDate(caso.date)));
+  datos.appendChild(campoImpreso("Área", caso.area));
+  root.appendChild(datos);
+
+  const tutor = bloqueImpreso("Datos del tutor");
+  tutor.appendChild(campoImpreso("Nombres y apellidos", caso.tutorNombre));
+  tutor.appendChild(campoImpreso("Teléfono", caso.tutorTelefono));
+  tutor.appendChild(campoImpreso("Correo electrónico", caso.tutorCorreo));
+  root.appendChild(tutor);
+
+  const consulta = bloqueImpreso("Motivo de consulta");
+  const motivo = document.createElement("p");
+  motivo.className = "print-text";
+  motivo.textContent = caso.title && caso.title.trim() ? caso.title : "—";
+  consulta.appendChild(motivo);
+  root.appendChild(consulta);
+
+  if (caso.body && caso.body.trim()) {
+    const notas = bloqueImpreso("Anamnesis, examen físico, diagnóstico, tratamiento");
+    const p = document.createElement("p");
+    p.className = "print-text";
+    p.textContent = caso.body;
+    notas.appendChild(p);
+    root.appendChild(notas);
+  }
+
+  const meds = (Array.isArray(caso.farmacos) ? caso.farmacos : []).filter((m) => m && m.nombre);
+  if (meds.length) {
+    const sec = bloqueImpreso("Fármacos");
+    const tabla = document.createElement("table");
+    tabla.className = "print-table";
+    tabla.innerHTML =
+      "<thead><tr><th>Fármaco</th><th>Concentración</th><th>Dosis</th><th>Dosis administrada</th><th>Frecuencia</th></tr></thead>";
+    const tb = document.createElement("tbody");
+    meds.forEach((m) => {
+      const tr = document.createElement("tr");
+      [m.nombre, m.concentracion, m.dosis, m.dosisAdministrada, m.frecuencia].forEach((v) => {
+        const td = document.createElement("td");
+        td.textContent = v && String(v).trim() ? v : "—";
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    tabla.appendChild(tb);
+    sec.appendChild(tabla);
+    root.appendChild(sec);
+  }
+
+  const evols = (Array.isArray(caso.evoluciones) ? caso.evoluciones : []).filter((e) => e && (e.texto || e.date));
+  if (evols.length) {
+    const sec = bloqueImpreso("Evoluciones");
+    evols
+      .slice()
+      .sort((a, b) => (a.date || "").localeCompare(b.date || ""))
+      .forEach((e) => {
+        const item = document.createElement("div");
+        item.className = "print-evol";
+        const fecha = document.createElement("div");
+        fecha.className = "print-evol-date";
+        fecha.textContent = formatDate(e.date);
+        const texto = document.createElement("p");
+        texto.className = "print-text";
+        texto.textContent = e.texto || "—";
+        item.appendChild(fecha);
+        item.appendChild(texto);
+        sec.appendChild(item);
+      });
+    root.appendChild(sec);
+  }
+
+  return root;
+}
+
+function imprimirCaso(entry) {
+  const previo = document.getElementById("printArea");
+  if (previo) previo.remove();
+
+  const area = buildPrintableCase(entry);
+  document.body.appendChild(area);
+
+  function limpiar() {
+    const el = document.getElementById("printArea");
+    if (el) el.remove();
+    window.removeEventListener("afterprint", limpiar);
+  }
+  window.addEventListener("afterprint", limpiar);
+
+  window.print();
+  // Respaldo: algunos navegadores no disparan afterprint de forma fiable.
+  setTimeout(limpiar, 3000);
+}
+
 function renderPatientDetail(root, entry) {
   mountedDetailId = entry.id;
   root.appendChild(
@@ -1751,7 +1989,13 @@ function renderPatientDetail(root, entry) {
   calcBtn.className = "btn-secondary";
   calcBtn.textContent = "🧮 Calcular dosis";
   calcBtn.addEventListener("click", () => openCalculatorOverlay({ caseEntry: entry }));
+  const pdfBtn = document.createElement("button");
+  pdfBtn.type = "button";
+  pdfBtn.className = "btn-secondary";
+  pdfBtn.textContent = "📄 Descargar PDF";
+  pdfBtn.addEventListener("click", () => imprimirCaso(entry));
   actions.appendChild(calcBtn);
+  actions.appendChild(pdfBtn);
 
   head.appendChild(avatar);
   head.appendChild(info);
@@ -2449,26 +2693,10 @@ async function createFormularioEntry() {
 }
 
 function renderFormularioTab(root) {
-  const subjectGrid = document.createElement("div");
-  subjectGrid.className = "subject-grid";
-  const subjectDefs = [
-    ["📖", "Farmacología", "Interacciones farmacológicas, farmacocinética y dosificación."],
-    ["🩺", "Medicina interna", "Protocolos diagnósticos, endocrinología y enfermedades sistémicas."],
-    ["✂️", "Cirugía", "Abordajes quirúrgicos, protocolos de anestesia y cuidado posoperatorio."],
-    ["🩻", "Diagnóstico por imagen", "Interpretación radiográfica y apuntes de diagnóstico por imagen."]
-  ];
-  subjectDefs.forEach(([ico, title, desc]) => {
-    const card = document.createElement("div");
-    card.className = "subject-card";
-    card.innerHTML =
-      '<div class="ico">' + ico + "</div>" +
-      "<h3>" + title + "</h3>" +
-      "<p>" + desc + "</p>" +
-      '<span class="link">EXPLORAR →</span>';
-    subjectGrid.appendChild(card);
-  });
-  root.appendChild(subjectGrid);
-
+  // Aquí había 4 tarjetas fijas (Farmacología, Medicina interna, Cirugía,
+  // Diagnóstico por imagen) heredadas del mockup: eran <div> sin ningún
+  // listener, con un "EXPLORAR →" que no llevaba a ninguna parte y que no
+  // salía de tus datos. Se eliminaron por prometer secciones inexistentes.
   const card = document.createElement("div");
   card.className = "card";
   const cardHead = document.createElement("div");
@@ -2680,12 +2908,24 @@ function renderSettingsPage(root) {
   perfilDesc.style.marginBottom = "10px";
   perfilDesc.textContent = "Tu nombre y título, como aparecen en la barra lateral.";
 
+  // El estado arranca describiendo lo que REALMENTE pasó al cargar, no un
+  // "Sincronizado" fijo: antes decía que estaba sincronizado aunque el
+  // perfil nunca se hubiera podido leer ni guardar.
   const perfilStatus = document.createElement("div");
   perfilStatus.className = "status";
-  perfilStatus.setAttribute("data-state", "ok");
   perfilStatus.style.marginTop = "10px";
-  perfilStatus.innerHTML = '<span class="dot"></span><span class="statusText">Sincronizado</span>';
+  perfilStatus.innerHTML = '<span class="dot"></span><span class="statusText"></span>';
   const perfilStatusText = perfilStatus.querySelector(".statusText");
+  if (state.profileError) {
+    perfilStatus.setAttribute("data-state", "error");
+    perfilStatusText.textContent = "No se pudo cargar";
+  } else if (state.profile) {
+    perfilStatus.setAttribute("data-state", "ok");
+    perfilStatusText.textContent = "Sincronizado";
+  } else {
+    perfilStatus.setAttribute("data-state", "pending");
+    perfilStatusText.textContent = "Cargando…";
+  }
 
   const perfilFields = document.createElement("div");
   perfilFields.className = "field-row";
@@ -2699,7 +2939,9 @@ function renderSettingsPage(root) {
     input.placeholder = placeholder;
     input.value = value || "";
     input.addEventListener("input", () => {
-      scheduleSave("profiles", currentUid, { [campo]: input.value }, perfilStatusText);
+      // createIfMissing: el documento del perfil se crea al vuelo si todavía
+      // no existe, en vez de fallar con "not-found".
+      scheduleSave("profiles", currentUid, { [campo]: input.value }, perfilStatusText, { createIfMissing: true });
     });
     group.appendChild(lbl);
     group.appendChild(input);
@@ -2715,6 +2957,13 @@ function renderSettingsPage(root) {
   perfilRow.appendChild(perfilLbl);
   perfilRow.appendChild(perfilDesc);
   perfilRow.appendChild(perfilFields);
+  if (state.profileError) {
+    const aviso = document.createElement("div");
+    aviso.className = "settings-msg error";
+    aviso.style.marginTop = "10px";
+    aviso.textContent = state.profileError;
+    perfilRow.appendChild(aviso);
+  }
   perfilRow.appendChild(perfilStatus);
   list.appendChild(perfilRow);
 
@@ -2891,6 +3140,16 @@ function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   els.themeToggle.textContent = theme === "dark" ? "☀️" : "🌙";
   els.themeToggle.setAttribute("aria-label", theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro");
+
+  // La franja del borde superior no la dibuja la página: es el navegador
+  // coloreando su propia barra con theme-color. Como la app tiene su propio
+  // interruptor de tema, el valor se actualiza aquí para que la barra
+  // acompañe al fondo en vez de quedarse en un color fijo que no cuadra.
+  const meta = document.getElementById("themeColorMeta");
+  if (meta) {
+    const fondo = getComputedStyle(document.documentElement).getPropertyValue("--paper").trim();
+    if (fondo) meta.setAttribute("content", fondo);
+  }
 }
 
 let currentTheme = localStorage.getItem(THEME_KEY) || "light";
@@ -3096,8 +3355,15 @@ async function ensureProfile() {
         { merge: true }
       );
     }
+    state.profileError = "";
   } catch (err) {
-    console.warn("No se pudo preparar el perfil:", err);
+    // Se guarda el motivo para mostrarlo en Configuración. Antes solo se
+    // escribía en la consola, así que el perfil fallaba de forma invisible.
+    console.error("No se pudo preparar el perfil:", err);
+    state.profileError =
+      err && err.code === "permission-denied"
+        ? "Las reglas de seguridad todavía no permiten la colección “profiles”. Publica firestore.rules en la consola de Firebase para que el perfil se pueda guardar."
+        : "No se pudo preparar el perfil (" + ((err && err.code) || "error desconocido") + ").";
   }
 }
 
@@ -3109,6 +3375,9 @@ function subscribeProfile() {
     doc(db, "profiles", currentUid),
     (snap) => {
       state.profile = snap.exists() ? { id: snap.id, ...snap.data({ serverTimestamps: "estimate" }) } : null;
+      // Si el snapshot llega, la lectura funciona: se limpia cualquier error
+      // anterior (por ejemplo si acabas de publicar las reglas).
+      state.profileError = "";
       renderSidebarIdentity();
       // Configuración muestra los campos del perfil, así que hay que
       // redibujarla cuando el perfil llega por primera vez. Pero NO mientras
@@ -3118,7 +3387,12 @@ function subscribeProfile() {
       if (state.page === "settings" && !detailIsBeingEdited() && !isTypingInContent()) render();
     },
     (err) => {
-      console.warn("No se pudo leer el perfil:", err);
+      console.error("No se pudo leer el perfil:", err);
+      state.profileError =
+        err && err.code === "permission-denied"
+          ? "Las reglas de seguridad todavía no permiten la colección “profiles”. Publica firestore.rules en la consola de Firebase para que el perfil se pueda guardar."
+          : "No se pudo leer el perfil (" + ((err && err.code) || "error desconocido") + ").";
+      if (state.page === "settings" && !detailIsBeingEdited() && !isTypingInContent()) render();
     }
   );
 }
@@ -3131,14 +3405,20 @@ function renderSidebarIdentity() {
   const nombre = state.profile && state.profile.nombre ? String(state.profile.nombre).trim() : "";
   const titulo = state.profile && state.profile.titulo ? String(state.profile.titulo).trim() : "";
 
-  if (!nombre && !titulo) {
+  // La condición es tener NOMBRE, no título: ensureProfile() crea el perfil
+  // con "Médico Veterinario" por defecto, así que si bastara el título el
+  // bloque aparecería para todo el mundo sin haber llenado nada. Sin nombre
+  // se deja el pie como estaba: solo el correo.
+  if (!nombre) {
     els.sidebarIdentity.hidden = true;
+    els.sidName.textContent = "";
+    els.sidTitle.textContent = "";
     els.authUser.classList.remove("as-secondary");
     return;
   }
   els.sidebarIdentity.hidden = false;
   els.sidName.textContent = nombre;
-  els.sidName.hidden = !nombre;
+  els.sidName.hidden = false;
   els.sidTitle.textContent = titulo;
   els.sidTitle.hidden = !titulo;
   els.authUser.classList.add("as-secondary");
@@ -3175,6 +3455,7 @@ onAuthStateChanged(auth, (user) => {
     state.entries = [];
     state.formulario = [];
     state.profile = null;
+    state.profileError = "";
     state.ready = false;
     els.app.hidden = true;
     els.authGate.hidden = false;

@@ -346,6 +346,11 @@ button, input, select, textarea { font-family: inherit; }
 .card-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--line); }
 .card-head h2 { font-family: var(--serif); font-size: 1.02rem; font-weight: 700; margin: 0; color: var(--ink); }
 
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.stat-card { background: var(--paper-raised); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
+.stat-card .n { font-family: var(--serif); font-size: 1.7rem; font-weight: 700; color: var(--ink); display: block; line-height: 1.15; }
+.stat-card .l { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
 .subject-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-bottom: 22px; }
 .subject-card {
   background: var(--paper-raised);
@@ -418,8 +423,16 @@ button, input, select, textarea { font-family: inherit; }
 .empty-table { padding: 40px 16px; text-align: center; color: var(--muted); font-size: 0.86rem; }
 
 /* Encabezado de grupo por especie dentro de la tabla de pacientes. */
-.data-table tbody tr.group-row { cursor: default; }
-.data-table tbody tr.group-row:hover { background: var(--paper-alt); }
+.data-table tbody tr.group-row { cursor: pointer; }
+.data-table tbody tr.group-row:hover td { background: var(--line-soft); }
+.data-table tbody tr.group-row td:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.data-table tbody tr.group-row .group-caret {
+  display: inline-block;
+  width: 1em;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.data-table tbody tr.group-row .group-sep { margin: 0 6px; color: var(--muted); }
 .data-table tbody tr.group-row td {
   background: var(--paper-alt);
   padding: 8px 16px;
@@ -433,7 +446,6 @@ button, input, select, textarea { font-family: inherit; }
   color: var(--ink);
 }
 .data-table tbody tr.group-row .group-count {
-  margin-left: 10px;
   font-size: 0.7rem;
   color: var(--muted);
   text-transform: uppercase;
@@ -813,4 +825,85 @@ button, input, select, textarea { font-family: inherit; }
   .content { padding: 16px; }
   .detail-grid { grid-template-columns: 1fr; }
   .topbar-search { max-width: none; }
+}
+
+/* ---------- Impresión / Guardar como PDF ---------- */
+/* El bloque imprimible solo existe mientras dura la impresión, y en pantalla
+   nunca se ve. */
+#printArea { display: none; }
+
+@media print {
+  /* Se oculta TODO lo que cuelga de <body> salvo la ficha imprimible: eso
+     cubre de una sola vez la barra lateral, la barra superior, los botones
+     de edición, los overlays de la calculadora y el modal, y los toasts. */
+  body > *:not(#printArea) { display: none !important; }
+
+  html, body {
+    background: #fff;
+    color: #000;
+    height: auto;
+  }
+
+  #printArea {
+    display: block;
+    font-family: var(--serif);
+    font-size: 11pt;
+    line-height: 1.45;
+    color: #000;
+    padding: 0;
+  }
+
+  @page { margin: 18mm 16mm; }
+
+  .print-head { border-bottom: 1.5pt solid #000; padding-bottom: 6pt; margin-bottom: 14pt; }
+  .print-head h1 { font-size: 20pt; margin: 0 0 3pt; font-weight: 700; }
+  .print-head-meta { font-size: 9pt; margin: 0; color: #444; font-family: var(--sans); }
+
+  .print-block { margin-bottom: 14pt; }
+  /* Un bloque no se parte a la mitad entre dos páginas si se puede evitar. */
+  .print-block { break-inside: avoid; page-break-inside: avoid; }
+  .print-block h2 {
+    font-family: var(--sans);
+    font-size: 8.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #444;
+    border-bottom: 0.5pt solid #999;
+    padding-bottom: 2pt;
+    margin: 0 0 7pt;
+    font-weight: 700;
+  }
+
+  .print-field { display: flex; gap: 8pt; margin-bottom: 3pt; }
+  .print-label {
+    font-family: var(--sans);
+    font-size: 8.5pt;
+    color: #555;
+    min-width: 42mm;
+    flex-shrink: 0;
+  }
+  .print-value { font-size: 11pt; }
+  .print-text { margin: 0; white-space: pre-wrap; font-size: 11pt; }
+
+  .print-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+  .print-table th {
+    text-align: left;
+    font-family: var(--sans);
+    font-size: 8pt;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #555;
+    border-bottom: 0.75pt solid #000;
+    padding: 3pt 4pt;
+  }
+  .print-table td { padding: 3pt 4pt; border-bottom: 0.5pt solid #bbb; vertical-align: top; }
+
+  .print-evol { margin-bottom: 8pt; break-inside: avoid; page-break-inside: avoid; }
+  .print-evol-date {
+    font-family: var(--sans);
+    font-size: 8.5pt;
+    font-weight: 700;
+    color: #555;
+    margin-bottom: 2pt;
+  }
 }

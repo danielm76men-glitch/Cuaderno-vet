@@ -6,7 +6,7 @@
   "scope": "./",
   "display": "standalone",
   "background_color": "#f3f1e7",
-  "theme_color": "#2e6659",
+  "theme_color": "#f3f1e7",
   "lang": "es",
   "icons": [
     { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },

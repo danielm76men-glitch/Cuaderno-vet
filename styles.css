@@ -20,15 +20,18 @@
   --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
 }
 
+/* Modo oscuro: grises neutros/fríos. Los valores anteriores (#171813,
+   #9c9686, #38362c) tenían matiz oliva y teñían toda la pantalla de
+   amarillo-verdoso. El modo claro NO se toca: ese ya quedó bien. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #171813;
-    --paper-alt: #201f19;
-    --paper-raised: #242319;
+    --paper: #15161a;
+    --paper-alt: #1b1c21;
+    --paper-raised: #202126;
     --ink: #ece7d6;
-    --muted: #9c9686;
-    --line: #38362c;
-    --line-soft: #29281f;
+    --muted: #8f95a3;
+    --line: #2b2d33;
+    --line-soft: #24262b;
     --teal: #948d78;
     --teal-ink: #dcd7c7;
     --teal-soft: #2b2a22;
@@ -41,9 +44,9 @@
   }
 }
 :root[data-theme="dark"] {
-  --paper: #171813; --paper-alt: #201f19; --paper-raised: #242319;
-  --ink: #ece7d6; --muted: #9c9686;
-  --line: #38362c; --line-soft: #29281f;
+  --paper: #15161a; --paper-alt: #1b1c21; --paper-raised: #202126;
+  --ink: #ece7d6; --muted: #8f95a3;
+  --line: #2b2d33; --line-soft: #24262b;
   --teal: #948d78; --teal-ink: #dcd7c7; --teal-soft: #2b2a22;
   --rust: #e38a5c; --rust-ink: #eeab84; --rust-soft: #3a281d;
   --amber: #dcb24b; --amber-soft: #362c17;
@@ -196,7 +199,19 @@ button, input, select, textarea { font-family: inherit; }
 .nav-item[aria-current="true"] .count { background: rgba(0, 0, 0, 0.18); border-color: transparent; color: var(--paper); }
 
 .sidebar-foot { padding: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.sidebar-identity { display: flex; flex-direction: column; padding: 8px 12px 0; gap: 1px; }
+.sidebar-identity .sid-name {
+  font-family: var(--serif);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.25;
+}
+.sidebar-identity .sid-title { font-size: 0.72rem; color: var(--muted); }
 .sidebar-user { padding: 8px 12px; font-size: 0.72rem; color: var(--muted); word-break: break-all; }
+/* Cuando ya hay nombre y título arriba, el correo pasa a ser la línea
+   secundaria: más chico y con menos peso visual. */
+.sidebar-user.as-secondary { padding-top: 2px; font-size: 0.66rem; opacity: 0.8; }
 .sign-out-btn {
   appearance: none;
   border: none;
@@ -331,11 +346,6 @@ button, input, select, textarea { font-family: inherit; }
 .card-head { display: flex; justify-content: space-between; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--line); }
 .card-head h2 { font-family: var(--serif); font-size: 1.02rem; font-weight: 700; margin: 0; color: var(--ink); }
 
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
-.stat-card { background: var(--paper-raised); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
-.stat-card .n { font-family: var(--serif); font-size: 1.7rem; font-weight: 700; color: var(--ink); display: block; line-height: 1.15; }
-.stat-card .l { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-
 .subject-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-bottom: 22px; }
 .subject-card {
   background: var(--paper-raised);
@@ -406,6 +416,30 @@ button, input, select, textarea { font-family: inherit; }
 .icon-btn:hover { color: var(--teal-ink); background: var(--teal-soft); }
 .icon-btn.danger:hover { color: var(--rust); background: var(--rust-soft); }
 .empty-table { padding: 40px 16px; text-align: center; color: var(--muted); font-size: 0.86rem; }
+
+/* Encabezado de grupo por especie dentro de la tabla de pacientes. */
+.data-table tbody tr.group-row { cursor: default; }
+.data-table tbody tr.group-row:hover { background: var(--paper-alt); }
+.data-table tbody tr.group-row td {
+  background: var(--paper-alt);
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+}
+.data-table tbody tr.group-row .group-name {
+  font-family: var(--serif);
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+.data-table tbody tr.group-row .group-count {
+  margin-left: 10px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.data-table tbody tr.group-row:first-child td { border-top: none; }
 
 /* ---------- Badges / estados ---------- */
 .badge {
@@ -706,6 +740,26 @@ button, input, select, textarea { font-family: inherit; }
 }
 .overlay-close:hover { color: var(--rust); }
 .overlay-note { font-size: 0.78rem; color: var(--muted); margin: -8px 0 16px; }
+
+/* ---------- Modal de confirmación (reemplaza al confirm() del navegador) ---------- */
+.confirm-card { max-width: 400px; border: 1px solid var(--line); }
+.confirm-title {
+  font-family: var(--serif);
+  font-size: 1.12rem;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0 0 8px;
+}
+.confirm-msg {
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0 0 20px;
+}
+.confirm-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.confirm-actions button { min-width: 104px; }
+.btn-primary.btn-danger { background: var(--rust); }
+.btn-primary.btn-danger:hover { background: var(--rust-ink); }
 
 .calc-field { margin-bottom: 14px; }
 .calc-field label { display: block; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 700; margin-bottom: 4px; }

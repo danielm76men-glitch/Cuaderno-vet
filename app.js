@@ -13,6 +13,8 @@ import {
   collection,
   doc,
   addDoc,
+  setDoc,
+  getDoc,
   updateDoc,
   deleteDoc,
   onSnapshot,
@@ -26,7 +28,7 @@ import {
 import {
   getStorage,
   ref as storageRef,
-  uploadBytes,
+  uploadBytesResumable,
   getDownloadURL,
   deleteObject
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
@@ -50,7 +52,12 @@ const AREA_OPTIONS = ["Cirugía", "Medicina interna", "Reproducción", "Emergenc
 const els = {
   app: document.getElementById("app"),
   sidebar: document.getElementById("sidebar"),
-  pageNav: Array.prototype.slice.call(document.querySelectorAll("#pageNav .nav-item")),
+  // Todos los botones de navegación del sidebar, estén dentro de #pageNav o
+  // no: el de Configuración vive en .sidebar-foot, fuera de ese contenedor.
+  // Con el selector anterior ("#pageNav .nav-item") quedaba excluido, así que
+  // nunca recibía el listener de clic ni el resaltado de sección activa.
+  // El filtro por [data-page] evita recoger botones que no navegan.
+  pageNav: Array.prototype.slice.call(document.querySelectorAll(".app-sidebar .nav-item[data-page]")),
   countPatients: document.getElementById("countPatients"),
   countFarmacos: document.getElementById("countFarmacos"),
   countStudy: document.getElementById("countStudy"),
@@ -65,6 +72,9 @@ const els = {
   authSendBtn: document.getElementById("authSendBtn"),
   authMsg: document.getElementById("authMsg"),
   authUser: document.getElementById("authUser"),
+  sidebarIdentity: document.getElementById("sidebarIdentity"),
+  sidName: document.getElementById("sidName"),
+  sidTitle: document.getElementById("sidTitle"),
   signOutBtn: document.getElementById("signOutBtn")
 };
 
@@ -76,12 +86,16 @@ const PAGE_LABELS = {
   settings: "Configuración"
 };
 
+const TITULO_POR_DEFECTO = "Médico Veterinario";
+
 const state = {
   entries: [],
   formulario: [],
+  profile: null,
   page: "dashboard",
   studyTab: "materias",
   areaFilter: "",
+  especieFilter: "",
   formularioEspecieFilter: "",
   activeId: null,
   query: "",
@@ -112,16 +126,31 @@ function entriesForSection(section) {
   return state.entries.filter((e) => e.section === section);
 }
 
+// Normaliza para buscar: minusculas y SIN tildes ni diereses, en los dos
+// lados de la comparacion. Sin esto, escribir "area" no encontraba "Area"
+// con tilde ni "diagnostico" encontraba "diagnostico" acentuado, que es
+// justo como se escriben los terminos clinicos.
+function normalizarBusqueda(texto) {
+  return String(texto == null ? "" : texto)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
+function incluyeNormalizado(campo, q) {
+  return normalizarBusqueda(campo).includes(q);
+}
+
 function matchesQuery(entry, q) {
   if (!q) return true;
-  q = q.toLowerCase();
+  q = normalizarBusqueda(q);
   return (
-    (entry.title || "").toLowerCase().includes(q) ||
-    (entry.meta || "").toLowerCase().includes(q) ||
-    (entry.especie || "").toLowerCase().includes(q) ||
-    (entry.area || "").toLowerCase().includes(q) ||
-    (entry.tutorNombre || "").toLowerCase().includes(q) ||
-    (entry.body || "").toLowerCase().includes(q)
+    incluyeNormalizado(entry.title, q) ||
+    incluyeNormalizado(entry.meta, q) ||
+    incluyeNormalizado(entry.especie, q) ||
+    incluyeNormalizado(entry.area, q) ||
+    incluyeNormalizado(entry.tutorNombre, q) ||
+    incluyeNormalizado(entry.body, q)
   );
 }
 
@@ -154,23 +183,23 @@ function getMedUsageList() {
 
 function matchesMedQuery(item, q) {
   if (!q) return true;
-  q = q.toLowerCase();
+  q = normalizarBusqueda(q);
   return (
-    (item.nombre || "").toLowerCase().includes(q) ||
-    (item.concentracion || "").toLowerCase().includes(q) ||
-    (item.paciente || "").toLowerCase().includes(q) ||
-    (item.caseTitle || "").toLowerCase().includes(q) ||
-    (item.especie || "").toLowerCase().includes(q)
+    incluyeNormalizado(item.nombre, q) ||
+    incluyeNormalizado(item.concentracion, q) ||
+    incluyeNormalizado(item.paciente, q) ||
+    incluyeNormalizado(item.caseTitle, q) ||
+    incluyeNormalizado(item.especie, q)
   );
 }
 
 function matchesFormularioQuery(item, q) {
   if (!q) return true;
-  q = q.toLowerCase();
+  q = normalizarBusqueda(q);
   return (
-    (item.nombre || "").toLowerCase().includes(q) ||
-    (item.via || "").toLowerCase().includes(q) ||
-    (Array.isArray(item.especies) ? item.especies : []).some((e) => (e || "").toLowerCase().includes(q))
+    incluyeNormalizado(item.nombre, q) ||
+    incluyeNormalizado(item.via, q) ||
+    (Array.isArray(item.especies) ? item.especies : []).some((e) => incluyeNormalizado(e, q))
   );
 }
 
@@ -357,6 +386,57 @@ function attachVoiceInput(button, targetEl) {
   });
 }
 
+/* Sube un archivo a Storage informando el avance real. Antes se usaba
+   uploadBytes(), que no da progreso: si la subida se quedaba colgada (sin
+   red, Storage no habilitado, reglas que no responden) la promesa nunca se
+   resolvía ni fallaba y la foto se quedaba en "Subiendo…" para siempre.
+   Con uploadBytesResumable sí hay eventos de avance, y un vigilante corta
+   la subida si pasa un minuto sin transferir un solo byte. */
+function uploadPhoto(path, blob, onProgress) {
+  return new Promise((resolve, reject) => {
+    const task = uploadBytesResumable(storageRef(storage, path), blob, { contentType: "image/jpeg" });
+    let lastBytes = -1;
+    let lastMovedAt = Date.now();
+
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastMovedAt > 60000) {
+        clearInterval(watchdog);
+        try {
+          task.cancel();
+        } catch (e) {
+          /* ya terminó o ya estaba cancelada */
+        }
+        reject(new Error("sin-progreso"));
+      }
+    }, 5000);
+
+    task.on(
+      "state_changed",
+      (snap) => {
+        if (snap.bytesTransferred !== lastBytes) {
+          lastBytes = snap.bytesTransferred;
+          lastMovedAt = Date.now();
+        }
+        if (snap.totalBytes > 0) {
+          onProgress(Math.min(99, Math.round((snap.bytesTransferred / snap.totalBytes) * 100)));
+        }
+      },
+      (err) => {
+        clearInterval(watchdog);
+        reject(err);
+      },
+      async () => {
+        clearInterval(watchdog);
+        try {
+          resolve(await getDownloadURL(task.snapshot.ref));
+        } catch (err) {
+          reject(err);
+        }
+      }
+    );
+  });
+}
+
 function buildPhotosSection(entry, statusText) {
   const wrap = document.createElement("div");
   wrap.className = "photos";
@@ -379,10 +459,20 @@ function buildPhotosSection(entry, statusText) {
   fileInput.style.display = "none";
   wrap.appendChild(fileInput);
 
-  const photos = Array.isArray(entry.fotos) ? entry.fotos.slice() : [];
+  /* Al leer se descartan los marcadores de "subiendo": son temporales, su
+     `url` es un blob: local que muere al recargar la página. Si alguno
+     quedó guardado en Firestore por una subida interrumpida, se ve como
+     una foto eternamente "Subiendo…" que nunca carga; al filtrarlos aquí
+     desaparecen y el siguiente commit() limpia el documento. */
+  const photos = (Array.isArray(entry.fotos) ? entry.fotos : []).filter(
+    (p) => p && p.url && !p.uploading && !String(p.url).startsWith("blob:")
+  );
 
+  // Nunca se persiste un marcador en curso: solo fotos ya subidas a
+  // Storage, que son las que tienen una URL definitiva.
   function commit() {
-    scheduleSave("entries", entry.id, { fotos: photos }, statusText);
+    const persistible = photos.filter((p) => p && p.url && !p.uploading && !String(p.url).startsWith("blob:"));
+    scheduleSave("entries", entry.id, { fotos: persistible }, statusText);
   }
 
   function renderGrid() {
@@ -401,7 +491,7 @@ function buildPhotosSection(entry, statusText) {
       if (photo.uploading) {
         const spin = document.createElement("div");
         spin.className = "photo-uploading";
-        spin.textContent = "Subiendo…";
+        spin.textContent = photo.progress != null ? "Subiendo… " + photo.progress + "%" : "Subiendo…";
         tile.appendChild(spin);
       } else {
         const del = document.createElement("button");
@@ -410,7 +500,12 @@ function buildPhotosSection(entry, statusText) {
         del.textContent = "×";
         del.setAttribute("aria-label", "Eliminar foto");
         del.addEventListener("click", async () => {
-          if (!confirm("¿Eliminar esta foto?")) return;
+          const ok = await askConfirm({
+            title: "¿Eliminar esta foto?",
+            message: "Se borra también del almacenamiento y no se puede deshacer.",
+            confirmLabel: "Eliminar"
+          });
+          if (!ok) return;
           tile.style.opacity = "0.4";
           try {
             if (photo.path) await deleteObject(storageRef(storage, photo.path));
@@ -441,15 +536,17 @@ function buildPhotosSection(entry, statusText) {
     const files = Array.from(fileInput.files || []);
     fileInput.value = "";
     for (const file of files) {
-      const placeholder = { url: URL.createObjectURL(file), name: file.name, uploading: true };
+      const objectUrl = URL.createObjectURL(file);
+      const placeholder = { url: objectUrl, name: file.name, uploading: true, progress: 0 };
       photos.push(placeholder);
       renderGrid();
       const path = "photos/" + currentUid + "/" + entry.id + "/" + Date.now() + "_" + file.name;
       try {
         const compressed = await compressImage(file, 1600, 0.82);
-        const ref_ = storageRef(storage, path);
-        await uploadBytes(ref_, compressed, { contentType: "image/jpeg" });
-        const url = await getDownloadURL(ref_);
+        const url = await uploadPhoto(path, compressed, (pct) => {
+          placeholder.progress = pct;
+          renderGrid();
+        });
         const idx = photos.indexOf(placeholder);
         if (idx > -1) photos[idx] = { url, path, name: file.name };
         renderGrid();
@@ -458,7 +555,13 @@ function buildPhotosSection(entry, statusText) {
         const idx = photos.indexOf(placeholder);
         if (idx > -1) photos.splice(idx, 1);
         renderGrid();
-        alert("No se pudo subir " + file.name + ". Revisa tu conexión (o si Storage sigue sin activarse en el proyecto).");
+        alert(
+          err && err.message === "sin-progreso"
+            ? "La subida de " + file.name + " se quedó sin avanzar y se canceló. Revisa tu conexión o si Storage está activado en el proyecto de Firebase."
+            : "No se pudo subir " + file.name + ". Revisa tu conexión (o si Storage sigue sin activarse en el proyecto)."
+        );
+      } finally {
+        URL.revokeObjectURL(objectUrl);
       }
     }
   });
@@ -637,8 +740,20 @@ function buildMedsSection(entry, statusText) {
 // en Firestore (escritura inmediata, no debounced: se usa para acciones
 // puntuales de un clic — "+ Agregar evolución" y "Agregar a las notas del caso" desde
 // la calculadora — no para campos que el usuario escribe letra por letra).
+/* Devuelve la versión más reciente de una entrada. Mientras una ficha está
+   abierta ya no se redibuja con cada snapshot, así que el objeto `entry`
+   que capturaron los manejadores puede haber quedado viejo; state.entries
+   en cambio sí se actualiza siempre. Importa sobre todo antes de escribir
+   un array completo (evoluciones), porque partir de una copia vieja
+   borraría lo que se haya agregado desde que se abrió la ficha. */
+function currentEntry(entry) {
+  if (!entry || !entry.id) return entry;
+  return state.entries.find((e) => e.id === entry.id) || entry;
+}
+
 async function addEvolutionToCase(caseEntry, texto) {
-  const current = Array.isArray(caseEntry.evoluciones) ? caseEntry.evoluciones.slice() : [];
+  const fresh = currentEntry(caseEntry);
+  const current = Array.isArray(fresh.evoluciones) ? fresh.evoluciones.slice() : [];
   current.push({ date: todayISO(), texto });
   await updateDoc(doc(db, "entries", caseEntry.id), { evoluciones: current, updatedAt: serverTimestamp() });
 }
@@ -795,8 +910,9 @@ function buildDoseCalculator(context) {
   weightInput.step = "any";
   weightInput.min = "0";
   weightInput.placeholder = "Ej. 12.5";
-  if (ctx.caseEntry && ctx.caseEntry.peso) {
-    const parsedPeso = parseFloat(String(ctx.caseEntry.peso).replace(",", "."));
+  const ctxCase = ctx.caseEntry ? currentEntry(ctx.caseEntry) : null;
+  if (ctxCase && ctxCase.peso) {
+    const parsedPeso = parseFloat(String(ctxCase.peso).replace(",", "."));
     if (isFinite(parsedPeso)) weightInput.value = parsedPeso;
   }
   weightField.appendChild(weightLabel);
@@ -961,6 +1077,105 @@ function buildDoseCalculator(context) {
   return wrap;
 }
 
+/* ================= Modal de confirmación =================
+   Reemplaza al confirm() nativo, que se dibuja con el estilo del navegador
+   y rompe la identidad visual de la app. Devuelve una promesa que resuelve
+   true/false, así que en el código se usa igual que antes pero con await:
+       if (!(await askConfirm({...}))) return;
+   Soporta además callback (onConfirm) para los casos que solo quieren
+   ejecutar algo al aceptar. */
+let confirmOverlayEl = null;
+let confirmEscHandler = null;
+
+function closeConfirm() {
+  if (confirmOverlayEl) {
+    confirmOverlayEl.remove();
+    confirmOverlayEl = null;
+  }
+  if (confirmEscHandler) {
+    document.removeEventListener("keydown", confirmEscHandler);
+    confirmEscHandler = null;
+  }
+}
+
+function askConfirm(options) {
+  const opts = options || {};
+  const titulo = opts.title || "¿Confirmar?";
+  const mensaje = opts.message || "";
+  const etiquetaOk = opts.confirmLabel || "Aceptar";
+  const etiquetaCancelar = opts.cancelLabel || "Cancelar";
+  const peligroso = opts.danger !== false;
+
+  closeConfirm();
+
+  return new Promise((resolve) => {
+    let resuelto = false;
+    function terminar(valor) {
+      if (resuelto) return;
+      resuelto = true;
+      closeConfirm();
+      if (valor && typeof opts.onConfirm === "function") opts.onConfirm();
+      resolve(valor);
+    }
+
+    const backdrop = document.createElement("div");
+    backdrop.className = "overlay-backdrop";
+    backdrop.addEventListener("click", (e) => {
+      if (e.target === backdrop) terminar(false);
+    });
+
+    const card = document.createElement("div");
+    card.className = "overlay-card confirm-card";
+    card.setAttribute("role", "alertdialog");
+    card.setAttribute("aria-modal", "true");
+
+    const h2 = document.createElement("h2");
+    h2.className = "confirm-title";
+    h2.textContent = titulo;
+    card.appendChild(h2);
+
+    if (mensaje) {
+      const p = document.createElement("p");
+      p.className = "confirm-msg";
+      p.textContent = mensaje;
+      card.appendChild(p);
+    }
+
+    const acciones = document.createElement("div");
+    acciones.className = "confirm-actions";
+
+    const btnCancelar = document.createElement("button");
+    btnCancelar.type = "button";
+    btnCancelar.className = "btn-secondary";
+    btnCancelar.textContent = etiquetaCancelar;
+    btnCancelar.addEventListener("click", () => terminar(false));
+
+    const btnOk = document.createElement("button");
+    btnOk.type = "button";
+    btnOk.className = peligroso ? "btn-primary btn-danger" : "btn-primary";
+    btnOk.textContent = etiquetaOk;
+    btnOk.addEventListener("click", () => terminar(true));
+
+    acciones.appendChild(btnCancelar);
+    acciones.appendChild(btnOk);
+    card.appendChild(acciones);
+
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+    confirmOverlayEl = backdrop;
+
+    confirmEscHandler = (e) => {
+      if (e.key === "Escape") terminar(false);
+      if (e.key === "Enter" && document.activeElement === btnOk) terminar(true);
+    };
+    document.addEventListener("keydown", confirmEscHandler);
+
+    // El foco arranca en Cancelar: si alguien viene tecleando Enter, la
+    // acción destructiva no se dispara sola.
+    setTimeout(() => btnCancelar.focus(), 0);
+  });
+}
+
 let calcOverlayEl = null;
 let calcOverlayEscHandler = null;
 
@@ -1008,7 +1223,8 @@ function openCalculatorOverlay(context) {
   if (context && context.caseEntry) {
     const note = document.createElement("p");
     note.className = "overlay-note";
-    note.textContent = "Caso: " + (context.caseEntry.meta || context.caseEntry.title || "(sin nombre)");
+    const fresh = currentEntry(context.caseEntry);
+    note.textContent = "Caso: " + (fresh.meta || fresh.title || "(sin nombre)");
     card.appendChild(note);
   }
 
@@ -1043,6 +1259,7 @@ function goToPage(page) {
   state.activeId = null;
   state.query = "";
   state.areaFilter = "";
+  state.especieFilter = "";
   state.formularioEspecieFilter = "";
   if (els.search) els.search.value = "";
   els.sidebar.classList.remove("open");
@@ -1091,7 +1308,31 @@ function emptyState(glyph, title, body, extra) {
   return wrap;
 }
 
+/* Ficha de edición actualmente montada en pantalla (caso, materia o
+   fármaco del formulario). Cada guardado dispara dos snapshots de
+   Firestore — uno local inmediato por serverTimestamp() y otro cuando el
+   servidor confirma — y antes cada snapshot llamaba a render(), que borra
+   y reconstruye todo el contenido. Eso destruía el <input> que estabas
+   escribiendo (se perdía el foco y saltaba el cursor) y reiniciaba el
+   estado local de la ficha (la tabla de fármacos se volvía a cerrar sola).
+   Con esta bandera, mientras una ficha esté abierta los snapshots
+   actualizan los datos en memoria pero NO la redibujan. */
+let mountedDetailId = null;
+
+function detailIsBeingEdited() {
+  return mountedDetailId !== null && mountedDetailId === state.activeId;
+}
+
+// ¿El cursor está dentro de un campo del área de contenido? Se usa para no
+// redibujar por debajo de alguien que está escribiendo.
+function isTypingInContent() {
+  const el = document.activeElement;
+  if (!el || !els.content.contains(el)) return false;
+  return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT";
+}
+
 function render() {
+  mountedDetailId = null;
   setActiveNav();
   els.content.innerHTML = "";
 
@@ -1114,23 +1355,11 @@ function render() {
 /* ---------- Inicio ---------- */
 
 function renderDashboardPage(root) {
-  root.appendChild(pageHead("Inicio", "Resumen general de pacientes y herramientas de estudio."));
-
-  const stats = document.createElement("div");
-  stats.className = "stat-grid";
-  const statDefs = [
-    ["Casos activos", entriesForSection("casos").length],
-    ["Materias", entriesForSection("materias").length],
-    ["Fármacos usados", getMedUsageList().length],
-    ["Formulario", state.formulario.length]
-  ];
-  statDefs.forEach(([l, n]) => {
-    const c = document.createElement("div");
-    c.className = "stat-card";
-    c.innerHTML = '<span class="n">' + n + '</span><span class="l">' + l + "</span>";
-    stats.appendChild(c);
-  });
-  root.appendChild(stats);
+  // Se quitaron las tarjetas de conteo (stat-grid): repetían los mismos
+  // números que ya muestra el contador de cada sección en la barra lateral.
+  // Lo que queda en Inicio es contenido con el que se puede trabajar:
+  // los últimos casos, la referencia de fármacos y la calculadora.
+  root.appendChild(pageHead("Inicio", "Tus últimos casos y las herramientas de consulta."));
 
   const overviewCard = document.createElement("div");
   overviewCard.className = "card";
@@ -1223,7 +1452,30 @@ function evolutionSummary(entry) {
   return { text: evols.length + " registro" + (evols.length === 1 ? "" : "s") + " · " + formatDate(latest.date), cls: "ok" };
 }
 
-function buildPatientsTable(list, compact) {
+/* Nombre del grupo al que pertenece un caso en la vista agrupada. Las
+   especies se guardan en singular ("Canino"); aquí se muestran en plural
+   porque titulan un conjunto de pacientes. */
+const ESPECIE_PLURAL = {
+  Bovino: "Bovinos",
+  Equino: "Equinos",
+  Porcino: "Porcinos",
+  Aves: "Aves",
+  Canino: "Caninos",
+  Felino: "Felinos",
+  Ovino: "Ovinos",
+  Caprino: "Caprinos",
+  "Exótico": "Exóticos",
+  Otro: "Otros"
+};
+const SIN_ESPECIE = "Sin especificar";
+
+function grupoDeEspecie(entry) {
+  const especie = (entry.especie || "").trim();
+  if (!especie) return SIN_ESPECIE;
+  return ESPECIE_PLURAL[especie] || especie;
+}
+
+function buildPatientsTable(list, compact, grouped) {
   const wrap = document.createElement("div");
   wrap.className = "table-wrap";
 
@@ -1245,7 +1497,53 @@ function buildPatientsTable(list, compact) {
   table.appendChild(thead);
 
   const tbody = document.createElement("tbody");
-  list.forEach((entry) => {
+
+  if (grouped) {
+    // Se agrupa respetando el orden en que aparecen las especies en la lista
+    // ya ordenada, de modo que el orden interno de cada grupo sigue siendo el
+    // de fecha de ingreso que traía la lista. "Sin especificar" va al final.
+    const grupos = new Map();
+    list.forEach((entry) => {
+      const g = grupoDeEspecie(entry);
+      if (!grupos.has(g)) grupos.set(g, []);
+      grupos.get(g).push(entry);
+    });
+
+    const nombres = Array.from(grupos.keys()).sort((a, b) => {
+      if (a === SIN_ESPECIE) return 1;
+      if (b === SIN_ESPECIE) return -1;
+      return a.localeCompare(b, "es");
+    });
+
+    nombres.forEach((nombre) => {
+      const filas = grupos.get(nombre);
+      const headTr = document.createElement("tr");
+      headTr.className = "group-row";
+      const headTd = document.createElement("td");
+      headTd.colSpan = cols.length;
+      headTd.innerHTML =
+        '<span class="group-name"></span><span class="group-count"></span>';
+      headTd.querySelector(".group-name").textContent = nombre;
+      headTd.querySelector(".group-count").textContent =
+        filas.length + (filas.length === 1 ? " paciente" : " pacientes");
+      headTr.appendChild(headTd);
+      tbody.appendChild(headTr);
+      filas.forEach((entry) => tbody.appendChild(buildPatientRow(entry, compact)));
+    });
+
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    return wrap;
+  }
+
+  list.forEach((entry) => tbody.appendChild(buildPatientRow(entry, compact)));
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  return wrap;
+}
+
+function buildPatientRow(entry, compact) {
+  {
     const tr = document.createElement("tr");
     tr.addEventListener("click", () => {
       state.page = "patients";
@@ -1303,11 +1601,8 @@ function buildPatientsTable(list, compact) {
     evoTd.appendChild(badge);
     tr.appendChild(evoTd);
 
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  wrap.appendChild(table);
-  return wrap;
+    return tr;
+  }
 }
 
 function renderPatientsPage(root) {
@@ -1348,20 +1643,51 @@ function renderPatientsPage(root) {
     render();
   });
   filterRow.appendChild(areaSelect);
+
+  const especieSelect = document.createElement("select");
+  especieSelect.className = "btn-secondary";
+  const blankEspOpt = document.createElement("option");
+  blankEspOpt.value = "";
+  blankEspOpt.textContent = "Todas las especies";
+  especieSelect.appendChild(blankEspOpt);
+  SPECIES_OPTIONS.forEach((opt) => {
+    const o = document.createElement("option");
+    o.value = opt;
+    o.textContent = opt;
+    especieSelect.appendChild(o);
+  });
+  // Opción extra para aislar los casos a los que todavía no se les cargó
+  // especie, que en la vista agrupada forman su propio grupo.
+  const sinEspOpt = document.createElement("option");
+  sinEspOpt.value = "__sin__";
+  sinEspOpt.textContent = SIN_ESPECIE;
+  especieSelect.appendChild(sinEspOpt);
+  especieSelect.value = state.especieFilter;
+  especieSelect.addEventListener("change", () => {
+    state.especieFilter = especieSelect.value;
+    render();
+  });
+  filterRow.appendChild(especieSelect);
   root.appendChild(filterRow);
 
   const list = entriesForSection("casos")
     .filter((e) => matchesQuery(e, state.query))
     .filter((e) => !state.areaFilter || e.area === state.areaFilter)
+    .filter((e) => {
+      if (!state.especieFilter) return true;
+      if (state.especieFilter === "__sin__") return !(e.especie || "").trim();
+      return e.especie === state.especieFilter;
+    })
     .sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
 
   const card = document.createElement("div");
   card.className = "card";
-  card.appendChild(buildPatientsTable(list, false));
+  card.appendChild(buildPatientsTable(list, false, true));
   root.appendChild(card);
 }
 
 function renderPatientDetail(root, entry) {
+  mountedDetailId = entry.id;
   root.appendChild(
     backLink("Pacientes", () => {
       state.activeId = null;
@@ -1406,6 +1732,13 @@ function renderPatientDetail(root, entry) {
 
   const sub = document.createElement("div");
   sub.className = "sub";
+  // Se arma desde los inputs vivos, no desde el objeto entry, que ya no se
+  // refresca mientras la ficha está abierta.
+  function refreshSub() {
+    sub.textContent =
+      [speciesSelect.value, razaInput.value, pesoInput.value].filter(Boolean).join(" · ") ||
+      "Especie, raza y peso sin especificar";
+  }
   sub.textContent = [entry.especie, entry.raza, entry.peso].filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
 
   info.appendChild(nameRow);
@@ -1489,7 +1822,7 @@ function renderPatientDetail(root, entry) {
   speciesSelect.value = entry.especie || "";
   speciesSelect.addEventListener("change", () => {
     save("especie", speciesSelect.value);
-    sub.textContent = [speciesSelect.value, entry.raza, entry.peso].filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
+    refreshSub();
   });
   speciesGroup.appendChild(speciesLabel);
   speciesGroup.appendChild(speciesSelect);
@@ -1522,7 +1855,7 @@ function renderPatientDetail(root, entry) {
   razaInput.value = entry.raza || "";
   razaInput.addEventListener("input", () => {
     save("raza", razaInput.value);
-    sub.textContent = [entry.especie, razaInput.value, entry.peso].filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
+    refreshSub();
   });
   razaGroup.appendChild(razaLabel);
   razaGroup.appendChild(razaInput);
@@ -1547,7 +1880,7 @@ function renderPatientDetail(root, entry) {
   pesoInput.value = entry.peso || "";
   pesoInput.addEventListener("input", () => {
     save("peso", pesoInput.value);
-    sub.textContent = [entry.especie, entry.raza, pesoInput.value].filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
+    refreshSub();
   });
   pesoGroup.appendChild(pesoLabel);
   pesoGroup.appendChild(pesoInput);
@@ -1677,14 +2010,18 @@ function renderPatientDetail(root, entry) {
   del.type = "button";
   del.textContent = "Eliminar caso";
   del.addEventListener("click", async () => {
-    if (confirm("¿Eliminar el caso de “" + (entry.meta || "este paciente") + "”? Esta acción no se puede deshacer.")) {
-      state.activeId = null;
-      render();
-      try {
-        await deleteDoc(doc(db, "entries", entry.id));
-      } catch (err) {
-        alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
-      }
+    const ok = await askConfirm({
+      title: "¿Eliminar este caso clínico?",
+      message: "Se borrará el caso de " + (entry.meta || "este paciente") + " con sus fármacos, fotos y evoluciones. No se puede deshacer.",
+      confirmLabel: "Eliminar caso"
+    });
+    if (!ok) return;
+    state.activeId = null;
+    render();
+    try {
+      await deleteDoc(doc(db, "entries", entry.id));
+    } catch (err) {
+      alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
     }
   });
   foot.appendChild(status);
@@ -1932,6 +2269,7 @@ function renderMateriasTab(root) {
 }
 
 function renderMateriaDetail(root, entry) {
+  mountedDetailId = entry.id;
   root.appendChild(
     backLink("Centro de estudio", () => {
       state.activeId = null;
@@ -1975,14 +2313,18 @@ function renderMateriaDetail(root, entry) {
   del.type = "button";
   del.textContent = "Eliminar entrada";
   del.addEventListener("click", async () => {
-    if (confirm("¿Eliminar “" + (entry.title || "esta entrada") + "”? Esta acción no se puede deshacer.")) {
-      state.activeId = null;
-      render();
-      try {
-        await deleteDoc(doc(db, "entries", entry.id));
-      } catch (err) {
-        alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
-      }
+    const ok = await askConfirm({
+      title: "¿Eliminar esta entrada?",
+      message: "Se borrará “" + (entry.title || "esta entrada") + "” con todos sus apuntes. No se puede deshacer.",
+      confirmLabel: "Eliminar"
+    });
+    if (!ok) return;
+    state.activeId = null;
+    render();
+    try {
+      await deleteDoc(doc(db, "entries", entry.id));
+    } catch (err) {
+      alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
     }
   });
   foot.appendChild(status);
@@ -2059,7 +2401,12 @@ function buildFormularioTable(list, withActions) {
       delBtn.textContent = "🗑";
       delBtn.setAttribute("aria-label", "Eliminar");
       delBtn.addEventListener("click", async () => {
-        if (!confirm("¿Eliminar “" + (item.nombre || "este fármaco") + "” del formulario?")) return;
+        const ok = await askConfirm({
+          title: "¿Eliminar del formulario?",
+          message: "Se quitará “" + (item.nombre || "este fármaco") + "” del formulario de referencia.",
+          confirmLabel: "Eliminar"
+        });
+        if (!ok) return;
         try {
           await deleteDoc(doc(db, "formulario", item.id));
         } catch (err) {
@@ -2172,6 +2519,7 @@ function renderFormularioTab(root) {
 }
 
 function renderFormularioDetail(root, item) {
+  mountedDetailId = item.id;
   root.appendChild(
     backLink("Centro de estudio", () => {
       state.activeId = null;
@@ -2273,14 +2621,18 @@ function renderFormularioDetail(root, item) {
   del.type = "button";
   del.textContent = "Eliminar entrada";
   del.addEventListener("click", async () => {
-    if (confirm("¿Eliminar “" + (item.nombre || "este fármaco") + "” del formulario? Esta acción no se puede deshacer.")) {
-      state.activeId = null;
-      render();
-      try {
-        await deleteDoc(doc(db, "formulario", item.id));
-      } catch (err) {
-        alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
-      }
+    const ok = await askConfirm({
+      title: "¿Eliminar del formulario?",
+      message: "Se borrará “" + (item.nombre || "este fármaco") + "” del formulario de referencia. No se puede deshacer.",
+      confirmLabel: "Eliminar"
+    });
+    if (!ok) return;
+    state.activeId = null;
+    render();
+    try {
+      await deleteDoc(doc(db, "formulario", item.id));
+    } catch (err) {
+      alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
     }
   });
   foot.appendChild(status);
@@ -2313,6 +2665,59 @@ function renderSettingsPage(root) {
   themeRow.appendChild(themeBtn);
   list.appendChild(themeRow);
 
+  // Perfil: se guarda con el mismo debounce por campo del resto de la app,
+  // sobre la colección "profiles" (el id del documento es el uid).
+  const perfilRow = document.createElement("div");
+  perfilRow.className = "settings-row";
+  perfilRow.style.flexDirection = "column";
+  perfilRow.style.alignItems = "stretch";
+
+  const perfilLbl = document.createElement("div");
+  perfilLbl.className = "lbl";
+  perfilLbl.textContent = "Perfil";
+  const perfilDesc = document.createElement("div");
+  perfilDesc.className = "desc";
+  perfilDesc.style.marginBottom = "10px";
+  perfilDesc.textContent = "Tu nombre y título, como aparecen en la barra lateral.";
+
+  const perfilStatus = document.createElement("div");
+  perfilStatus.className = "status";
+  perfilStatus.setAttribute("data-state", "ok");
+  perfilStatus.style.marginTop = "10px";
+  perfilStatus.innerHTML = '<span class="dot"></span><span class="statusText">Sincronizado</span>';
+  const perfilStatusText = perfilStatus.querySelector(".statusText");
+
+  const perfilFields = document.createElement("div");
+  perfilFields.className = "field-row";
+
+  function perfilField(labelText, value, placeholder, campo) {
+    const group = document.createElement("div");
+    group.className = "field-group";
+    const lbl = document.createElement("label");
+    lbl.textContent = labelText;
+    const input = document.createElement("input");
+    input.placeholder = placeholder;
+    input.value = value || "";
+    input.addEventListener("input", () => {
+      scheduleSave("profiles", currentUid, { [campo]: input.value }, perfilStatusText);
+    });
+    group.appendChild(lbl);
+    group.appendChild(input);
+    return group;
+  }
+
+  const perfil = state.profile || {};
+  perfilFields.appendChild(perfilField("Nombre completo", perfil.nombre, "Ej. Daniel Mendoza", "nombre"));
+  perfilFields.appendChild(
+    perfilField("Título profesional", perfil.titulo != null ? perfil.titulo : TITULO_POR_DEFECTO, TITULO_POR_DEFECTO, "titulo")
+  );
+
+  perfilRow.appendChild(perfilLbl);
+  perfilRow.appendChild(perfilDesc);
+  perfilRow.appendChild(perfilFields);
+  perfilRow.appendChild(perfilStatus);
+  list.appendChild(perfilRow);
+
   // Cuenta
   const accountRow = document.createElement("div");
   accountRow.className = "settings-row";
@@ -2323,7 +2728,12 @@ function renderSettingsPage(root) {
   signOutBtn2.className = "btn-secondary";
   signOutBtn2.textContent = "Cerrar sesión";
   signOutBtn2.addEventListener("click", () => {
-    if (confirm("¿Cerrar sesión en este dispositivo?")) signOut(auth);
+    askConfirm({
+      title: "¿Cerrar sesión?",
+      message: "Se cerrará la sesión en este dispositivo. Tus datos siguen guardados en la nube.",
+      confirmLabel: "Cerrar sesión",
+      onConfirm: () => signOut(auth)
+    });
   });
   accountRow.appendChild(signOutBtn2);
   list.appendChild(accountRow);
@@ -2399,9 +2809,13 @@ function renderSettingsPage(root) {
         showBackupMsg("Ese archivo no tiene entradas para importar.", true);
         return;
       }
-      if (!confirm("¿Agregar " + incoming.length + " entrada(s) de esta copia al cuaderno? Se omiten las que ya existan.")) {
-        return;
-      }
+      const confirmado = await askConfirm({
+        title: "¿Importar esta copia?",
+        message: "Se agregarán " + incoming.length + " entrada(s) al cuaderno. Las que ya existan se omiten.",
+        confirmLabel: "Importar",
+        danger: false
+      });
+      if (!confirmado) return;
       showBackupMsg("Importando…");
 
       const validSections = { materias: true, casos: true };
@@ -2545,7 +2959,12 @@ els.authEmail.addEventListener("keydown", (event) => {
 
 if (els.signOutBtn) {
   els.signOutBtn.addEventListener("click", () => {
-    if (confirm("¿Cerrar sesión en este dispositivo?")) signOut(auth);
+    askConfirm({
+      title: "¿Cerrar sesión?",
+      message: "Se cerrará la sesión en este dispositivo. Tus datos siguen guardados en la nube.",
+      confirmLabel: "Cerrar sesión",
+      onConfirm: () => signOut(auth)
+    });
   });
 }
 
@@ -2613,6 +3032,10 @@ function subscribeEntries() {
       });
       state.ready = true;
       setConn(navigator.onLine ? "online" : "offline", navigator.onLine ? "En línea" : "Sin conexión — se guardará al reconectar");
+      if (detailIsBeingEdited()) {
+        updateNavCounts();
+        return;
+      }
       render();
     },
     (err) => {
@@ -2638,12 +3061,87 @@ function subscribeFormulario() {
         const data = d.data({ serverTimestamps: "estimate" });
         return { id: d.id, ...data, _pending: d.metadata.hasPendingWrites };
       });
+      if (detailIsBeingEdited()) {
+        updateNavCounts();
+        return;
+      }
       render();
     },
     (err) => {
       console.error(err);
     }
   );
+}
+
+/* ---------- Perfil del veterinario ----------
+   Un documento por usuario en "profiles/{uid}". El id del documento ES el
+   uid, así que no hace falta consultar por campo: se lee directo.
+   Se crea con setDoc(merge) la primera vez que entras, para que después
+   scheduleSave() pueda usar updateDoc() igual que en el resto de la app
+   (updateDoc falla si el documento todavía no existe). */
+async function ensureProfile() {
+  const ref = doc(db, "profiles", currentUid);
+  try {
+    const snap = await getDoc(ref);
+    if (!snap.exists()) {
+      await setDoc(
+        ref,
+        {
+          uid: currentUid,
+          nombre: "",
+          titulo: TITULO_POR_DEFECTO,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+    }
+  } catch (err) {
+    console.warn("No se pudo preparar el perfil:", err);
+  }
+}
+
+let unsubscribeProfile = null;
+
+function subscribeProfile() {
+  if (unsubscribeProfile) return;
+  unsubscribeProfile = onSnapshot(
+    doc(db, "profiles", currentUid),
+    (snap) => {
+      state.profile = snap.exists() ? { id: snap.id, ...snap.data({ serverTimestamps: "estimate" }) } : null;
+      renderSidebarIdentity();
+      // Configuración muestra los campos del perfil, así que hay que
+      // redibujarla cuando el perfil llega por primera vez. Pero NO mientras
+      // el usuario está escribiendo en ella: cada tecla dispara un guardado,
+      // el guardado dispara este snapshot, y redibujar le quitaría el foco
+      // (el mismo problema que ya se corrigió en las fichas de edición).
+      if (state.page === "settings" && !detailIsBeingEdited() && !isTypingInContent()) render();
+    },
+    (err) => {
+      console.warn("No se pudo leer el perfil:", err);
+    }
+  );
+}
+
+// Pie del sidebar: nombre y título si el perfil ya está lleno, con el correo
+// como línea secundaria. Si no ha llenado nada, se ve solo el correo, igual
+// que antes — no se le obliga a completar el perfil.
+function renderSidebarIdentity() {
+  if (!els.sidebarIdentity) return;
+  const nombre = state.profile && state.profile.nombre ? String(state.profile.nombre).trim() : "";
+  const titulo = state.profile && state.profile.titulo ? String(state.profile.titulo).trim() : "";
+
+  if (!nombre && !titulo) {
+    els.sidebarIdentity.hidden = true;
+    els.authUser.classList.remove("as-secondary");
+    return;
+  }
+  els.sidebarIdentity.hidden = false;
+  els.sidName.textContent = nombre;
+  els.sidName.hidden = !nombre;
+  els.sidTitle.textContent = titulo;
+  els.sidTitle.hidden = !titulo;
+  els.authUser.classList.add("as-secondary");
 }
 
 onAuthStateChanged(auth, (user) => {
@@ -2659,6 +3157,7 @@ onAuthStateChanged(auth, (user) => {
     render();
     adoptOrphanEntries().then(subscribeEntries);
     subscribeFormulario();
+    ensureProfile().then(subscribeProfile);
   } else {
     currentUid = null;
     if (unsubscribe) {
@@ -2669,12 +3168,18 @@ onAuthStateChanged(auth, (user) => {
       unsubscribeFormulario();
       unsubscribeFormulario = null;
     }
+    if (unsubscribeProfile) {
+      unsubscribeProfile();
+      unsubscribeProfile = null;
+    }
     state.entries = [];
     state.formulario = [];
+    state.profile = null;
     state.ready = false;
     els.app.hidden = true;
     els.authGate.hidden = false;
     if (els.authUser) els.authUser.hidden = true;
+    renderSidebarIdentity();
   }
 });
 

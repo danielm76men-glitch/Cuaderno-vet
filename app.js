@@ -69,13 +69,11 @@ const els = {
 };
 
 const PAGE_LABELS = {
-  dashboard: "Dashboard",
-  patients: "Patients",
+  dashboard: "Inicio",
+  patients: "Pacientes",
   farmacos: "Fármacos",
-  study: "Study",
-  calendar: "Calendar",
-  reports: "Reports",
-  settings: "Settings"
+  study: "Estudio",
+  settings: "Configuración"
 };
 
 const state = {
@@ -637,7 +635,7 @@ function buildMedsSection(entry, statusText) {
 
 // Agrega una entrada nueva al array `evoluciones` de un caso directamente
 // en Firestore (escritura inmediata, no debounced: se usa para acciones
-// puntuales de un clic — "+ Agregar evolución" y "Add to Case Notes" desde
+// puntuales de un clic — "+ Agregar evolución" y "Agregar a las notas del caso" desde
 // la calculadora — no para campos que el usuario escribe letra por letra).
 async function addEvolutionToCase(caseEntry, texto) {
   const current = Array.isArray(caseEntry.evoluciones) ? caseEntry.evoluciones.slice() : [];
@@ -749,10 +747,10 @@ function buildEvolucionesSection(entry, statusText) {
 }
 
 /* ================= Calculadora de dosis (overlay) =================
-   Puede abrirse SIN contexto de caso (desde Study o Dashboard, solo
+   Puede abrirse SIN contexto de caso (desde Estudio o Inicio, solo
    consulta) o CON contexto de caso (desde la sección de fármacos de un
    caso abierto). Solo cuando hay contexto de caso se muestra el botón
-   "Add to Case Notes", que agrega el resultado como una nueva evolución
+   "Agregar a las notas del caso", que agrega el resultado como una nueva evolución
    del caso — nunca escribe en la tabla de fármacos ni en "Dosis
    administrada". Esto fue una decisión explícita del usuario. */
 function buildDoseCalculator(context) {
@@ -928,14 +926,14 @@ function buildDoseCalculator(context) {
   wrap.appendChild(weightField);
   wrap.appendChild(result);
 
-  // "Add to Case Notes": solo existe cuando la calculadora se abrió desde
+  // "Agregar a las notas del caso": solo existe cuando la calculadora se abrió desde
   // un caso clínico específico. Escribe el resultado como una nueva
   // evolución del caso — es lo único que este botón hace.
   if (ctx.caseEntry) {
     addBtn = document.createElement("button");
     addBtn.type = "button";
     addBtn.className = "calc-add-btn";
-    addBtn.textContent = "Add to Case Notes";
+    addBtn.textContent = "Agregar a las notas del caso";
     addBtn.disabled = true;
     addBtn.addEventListener("click", async () => {
       if (!lastSummaryLine) return;
@@ -943,14 +941,14 @@ function buildDoseCalculator(context) {
       addBtn.textContent = "Agregando…";
       try {
         await addEvolutionToCase(ctx.caseEntry, "Cálculo de dosis — " + lastSummaryLine + ". " + lastTotalLine + ".");
-        addBtn.textContent = "Add to Case Notes";
+        addBtn.textContent = "Agregar a las notas del caso";
         if (addedMsg) addedMsg.remove();
         addedMsg = document.createElement("div");
         addedMsg.className = "calc-added-msg";
-        addedMsg.textContent = "✓ Agregado a Case Notes";
+        addedMsg.textContent = "✓ Agregado a las notas del caso";
         result.appendChild(addedMsg);
       } catch (err) {
-        addBtn.textContent = "Add to Case Notes";
+        addBtn.textContent = "Agregar a las notas del caso";
         alert("No se pudo agregar a las notas del caso. Revisa tu conexión e intenta de nuevo.");
       } finally {
         addBtn.disabled = false;
@@ -995,7 +993,7 @@ function openCalculatorOverlay(context) {
   const head = document.createElement("div");
   head.className = "overlay-head";
   const h2 = document.createElement("h2");
-  h2.textContent = "Drug Formulary & Calculator";
+  h2.textContent = "Formulario y calculadora de dosis";
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
   closeBtn.className = "overlay-close";
@@ -1106,24 +1104,17 @@ function render() {
     return;
   }
 
-  if (state.page === "dashboard") renderDashboardPage(inner);
-  else if (state.page === "patients") renderPatientsPage(inner);
+  if (state.page === "patients") renderPatientsPage(inner);
   else if (state.page === "farmacos") renderFarmacosPage(inner);
   else if (state.page === "study") renderStudyPage(inner);
-  else if (state.page === "calendar") renderPlaceholderPage(inner, "📅", "Calendar", "Próximamente: agenda de citas y seguimientos.");
-  else if (state.page === "reports") renderPlaceholderPage(inner, "📈", "Reports", "Próximamente: reportes y estadísticas del cuaderno.");
   else if (state.page === "settings") renderSettingsPage(inner);
+  else renderDashboardPage(inner);
 }
 
-function renderPlaceholderPage(root, glyph, title, body) {
-  root.appendChild(pageHead(title));
-  root.appendChild(emptyState(glyph, "Próximamente", body));
-}
-
-/* ---------- Dashboard ---------- */
+/* ---------- Inicio ---------- */
 
 function renderDashboardPage(root) {
-  root.appendChild(pageHead("Dashboard", "Resumen general de pacientes y herramientas de estudio."));
+  root.appendChild(pageHead("Inicio", "Resumen general de pacientes y herramientas de estudio."));
 
   const stats = document.createElement("div");
   stats.className = "stat-grid";
@@ -1146,11 +1137,11 @@ function renderDashboardPage(root) {
   const overviewHead = document.createElement("div");
   overviewHead.className = "card-head";
   const overviewTitle = document.createElement("h2");
-  overviewTitle.textContent = "Patient & Clinical Cases Overview";
+  overviewTitle.textContent = "Pacientes y casos clínicos";
   const newCaseBtn = document.createElement("button");
   newCaseBtn.type = "button";
   newCaseBtn.className = "btn-primary";
-  newCaseBtn.textContent = "+ New Case";
+  newCaseBtn.textContent = "+ Nuevo caso";
   newCaseBtn.addEventListener("click", () => createCase());
   overviewHead.appendChild(overviewTitle);
   overviewHead.appendChild(newCaseBtn);
@@ -1169,7 +1160,7 @@ function renderDashboardPage(root) {
   const drugHead = document.createElement("div");
   drugHead.className = "card-head";
   const drugTitle = document.createElement("h2");
-  drugTitle.textContent = "Drug Reference Table";
+  drugTitle.textContent = "Tabla de referencia de fármacos";
   drugHead.appendChild(drugTitle);
   drugCard.appendChild(drugHead);
   const drugList = state.formulario.slice().sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "")).slice(0, 5);
@@ -1181,7 +1172,7 @@ function renderDashboardPage(root) {
   const calcCard = document.createElement("div");
   calcCard.className = "card card-pad";
   const calcHead = document.createElement("h2");
-  calcHead.textContent = "Dose Calculator";
+  calcHead.textContent = "Calculadora de dosis";
   calcHead.style.margin = "0 0 10px";
   calcHead.style.fontSize = "0.95rem";
   const calcBody = document.createElement("p");
@@ -1203,7 +1194,7 @@ function renderDashboardPage(root) {
   root.appendChild(toolsRow);
 }
 
-/* ---------- Patients (casos clínicos) ---------- */
+/* ---------- Pacientes (casos clínicos) ---------- */
 
 async function createCase() {
   try {
@@ -1326,11 +1317,11 @@ function renderPatientsPage(root) {
     return;
   }
 
-  const head = pageHead("Patients", "Casos clínicos registrados.");
+  const head = pageHead("Pacientes", "Casos clínicos registrados.");
   const newBtn = document.createElement("button");
   newBtn.type = "button";
   newBtn.className = "btn-primary";
-  newBtn.textContent = "+ New Case";
+  newBtn.textContent = "+ Nuevo caso";
   newBtn.addEventListener("click", () => createCase());
   head.appendChild(newBtn);
   root.appendChild(head);
@@ -1372,7 +1363,7 @@ function renderPatientsPage(root) {
 
 function renderPatientDetail(root, entry) {
   root.appendChild(
-    backLink("Patients", () => {
+    backLink("Pacientes", () => {
       state.activeId = null;
       render();
     })
@@ -1425,7 +1416,7 @@ function renderPatientDetail(root, entry) {
   const calcBtn = document.createElement("button");
   calcBtn.type = "button";
   calcBtn.className = "btn-secondary";
-  calcBtn.textContent = "🧮 Calculate Dosage";
+  calcBtn.textContent = "🧮 Calcular dosis";
   calcBtn.addEventListener("click", () => openCalculatorOverlay({ caseEntry: entry }));
   actions.appendChild(calcBtn);
 
@@ -1824,7 +1815,7 @@ function renderFarmacoDetail(root, item) {
   root.appendChild(card);
 }
 
-/* ---------- Study (Materias + Formulario) ---------- */
+/* ---------- Estudio (Materias + Formulario) ---------- */
 
 function renderStudyPage(root) {
   const active = state.activeId
@@ -1839,7 +1830,7 @@ function renderStudyPage(root) {
     return;
   }
 
-  root.appendChild(pageHead("Study Center", "Reference materials and pharmacological data."));
+  root.appendChild(pageHead("Centro de estudio", "Material de referencia y datos farmacológicos."));
 
   const subtabs = document.createElement("div");
   subtabs.className = "subtabs";
@@ -1942,7 +1933,7 @@ function renderMateriasTab(root) {
 
 function renderMateriaDetail(root, entry) {
   root.appendChild(
-    backLink("Study Center", () => {
+    backLink("Centro de estudio", () => {
       state.activeId = null;
       render();
     })
@@ -2017,7 +2008,7 @@ function buildFormularioTable(list, withActions) {
   }
   const table = document.createElement("table");
   table.className = "data-table";
-  const cols = withActions ? ["Drug Name", "Dosis", "Vía", "Especies", "Acción"] : ["Drug Name", "Dosis", "Especies"];
+  const cols = withActions ? ["Fármaco", "Dosis", "Vía", "Especies", "Acción"] : ["Fármaco", "Dosis", "Especies"];
   table.innerHTML = "<thead><tr>" + cols.map((c) => "<th>" + c + "</th>").join("") + "</tr></thead>";
   const tbody = document.createElement("tbody");
   list.forEach((item) => {
@@ -2114,10 +2105,10 @@ function renderFormularioTab(root) {
   const subjectGrid = document.createElement("div");
   subjectGrid.className = "subject-grid";
   const subjectDefs = [
-    ["📖", "Pharmacology", "Comprehensive drug interactions, pharmacokinetics, and dosing."],
-    ["🩺", "Internal Medicine", "Diagnostic protocols, endocrinology, and systemic diseases."],
-    ["✂️", "Surgery", "Surgical approaches, anesthesia protocols, & post-op care."],
-    ["🩻", "Diagnostic Imaging", "Radiographic interpretation and diagnostic imaging notes."]
+    ["📖", "Farmacología", "Interacciones farmacológicas, farmacocinética y dosificación."],
+    ["🩺", "Medicina interna", "Protocolos diagnósticos, endocrinología y enfermedades sistémicas."],
+    ["✂️", "Cirugía", "Abordajes quirúrgicos, protocolos de anestesia y cuidado posoperatorio."],
+    ["🩻", "Diagnóstico por imagen", "Interpretación radiográfica y apuntes de diagnóstico por imagen."]
   ];
   subjectDefs.forEach(([ico, title, desc]) => {
     const card = document.createElement("div");
@@ -2126,7 +2117,7 @@ function renderFormularioTab(root) {
       '<div class="ico">' + ico + "</div>" +
       "<h3>" + title + "</h3>" +
       "<p>" + desc + "</p>" +
-      '<span class="link">EXPLORE SUBJECT →</span>';
+      '<span class="link">EXPLORAR →</span>';
     subjectGrid.appendChild(card);
   });
   root.appendChild(subjectGrid);
@@ -2140,7 +2131,7 @@ function renderFormularioTab(root) {
   const addBtn = document.createElement("button");
   addBtn.type = "button";
   addBtn.className = "btn-primary";
-  addBtn.textContent = "+ ADD DRUG";
+  addBtn.textContent = "+ Agregar fármaco";
   addBtn.addEventListener("click", () => createFormularioEntry());
   cardHead.appendChild(cardTitle);
   cardHead.appendChild(addBtn);
@@ -2182,7 +2173,7 @@ function renderFormularioTab(root) {
 
 function renderFormularioDetail(root, item) {
   root.appendChild(
-    backLink("Study Center", () => {
+    backLink("Centro de estudio", () => {
       state.activeId = null;
       render();
     })
@@ -2299,10 +2290,10 @@ function renderFormularioDetail(root, item) {
   if (!item.nombre) setTimeout(() => titleInput.focus(), 0);
 }
 
-/* ---------- Settings ---------- */
+/* ---------- Configuración ---------- */
 
 function renderSettingsPage(root) {
-  root.appendChild(pageHead("Settings"));
+  root.appendChild(pageHead("Configuración"));
 
   const list = document.createElement("div");
   list.className = "settings-list";

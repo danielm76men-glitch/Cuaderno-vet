@@ -77,6 +77,23 @@ button, input, select, textarea { font-family: inherit; }
   * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
 }
 
+/* ---------- Arranque ----------
+   Mismo fondo que la pantalla de acceso para que el cambio de una a otra no
+   se vea como un parpadeo. Deliberadamente sin spinner animado: sin
+   conexion esto dura milisegundos y un spinner que aparece y desaparece
+   llama mas la atencion que un texto quieto. */
+.boot-gate {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--paper-alt);
+  padding: 24px;
+}
+.boot-gate p { margin: 0; color: var(--muted); font-size: 0.85rem; }
+
 /* ---------- Acceso (login por enlace de correo) ---------- */
 .auth-gate {
   min-height: 100vh;

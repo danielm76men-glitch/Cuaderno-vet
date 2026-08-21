@@ -67,6 +67,8 @@ const els = {
   connPill: document.getElementById("connPill"),
   connText: document.getElementById("connText"),
   themeToggle: document.getElementById("themeToggle"),
+  bootGate: document.getElementById("bootGate"),
+  bootMsg: document.getElementById("bootMsg"),
   authGate: document.getElementById("authGate"),
   authEmail: document.getElementById("authEmail"),
   authSendBtn: document.getElementById("authSendBtn"),
@@ -3512,18 +3514,39 @@ if (els.signOutBtn) {
   });
 }
 
+/* Se llama cuando el enlace del correo no llega a dar sesion. Sin esto, la
+   pantalla de arranque se quedaria en "Completando acceso…" para siempre.
+   No se puede resolver con un .finally() sobre completeSignInIfNeeded():
+   cuando NO hay enlace esa funcion retorna al instante, antes de que auth
+   haya respondido, y soltaria el login justo en el hueco que este cambio
+   pretende tapar. */
+function soltarArranqueSinSesion() {
+  if (authResuelto) return;
+  logAuth("el enlace no dio sesion: muestro el login");
+  mostrarPantalla("login");
+  authResuelto = true;
+}
+
 async function completeSignInIfNeeded() {
   if (!isSignInWithEmailLink(auth, window.location.href)) return;
   let email = localStorage.getItem(EMAIL_KEY);
   if (!email) {
     email = window.prompt("Confirma el correo con el que solicitaste el enlace, para completar el acceso:");
   }
-  if (!email) return;
+  if (!email) {
+    soltarArranqueSinSesion();
+    return;
+  }
   try {
     await signInWithEmailLink(auth, email, window.location.href);
     localStorage.removeItem(EMAIL_KEY);
+    // No se suelta la pantalla aqui: onAuthStateChanged va a disparar con
+    // el usuario y mostrara la app. Soltarla ahora enseñaria el login un
+    // instante justo antes de entrar.
   } catch (err) {
+    logAuth("fallo el canje del enlace: " + ((err && err.code) || err));
     setAuthMsg("El enlace no es válido o ya expiró. Solicita uno nuevo.", "error");
+    soltarArranqueSinSesion();
   } finally {
     history.replaceState({}, document.title, window.location.pathname);
   }
@@ -3669,11 +3692,49 @@ function renderSidebarIdentity() {
   els.authUser.classList.add("as-secondary");
 }
 
+/* ---------- Arranque: tres pantallas, no dos ----------
+   Antes el HTML mostraba el login por defecto y onAuthStateChanged lo
+   escondia despues. Como esa primera respuesta no es instantanea, sin
+   conexion se alcanzaba a ver "ingresa tu correo" aunque la sesion
+   estuviera guardada: parecia que se habia cerrado sola.
+
+   Ahora arranca una tercera pantalla neutra ("Cargando…") y solo cuando
+   auth responde por PRIMERA VEZ se decide entre login y app. El login no
+   aparece nunca sin haber confirmado antes que no hay sesion. */
+function mostrarPantalla(cual) {
+  els.bootGate.hidden = cual !== "cargando";
+  els.authGate.hidden = cual !== "login";
+  els.app.hidden = cual !== "app";
+}
+
+let authResuelto = false;
+
+/* Entrar por el enlace del correo es el otro caso donde el login parpadea:
+   auth responde null primero y la sesion se crea un instante despues, al
+   canjear el enlace. Si venimos de un enlace, se sigue esperando. */
+const entrandoPorEnlace = isSignInWithEmailLink(auth, window.location.href);
+
+/* Diagnostico de arranque. Los tiempos son desde que empezo a ejecutarse
+   este modulo, para poder medir cuanto tarda auth en resolver sin red. */
+const tModulo = performance.now();
+
+function logAuth(texto) {
+  console.log("[auth +" + Math.round(performance.now() - tModulo) + "ms] " + new Date().toISOString() + " — " + texto);
+}
+
+logAuth(
+  "registrando onAuthStateChanged (online=" + navigator.onLine + ", por enlace de correo=" + entrandoPorEnlace + ")"
+);
+
 onAuthStateChanged(auth, (user) => {
+  logAuth(
+    (authResuelto ? "cambio de sesion" : "PRIMERA respuesta") + ": user=" + (user ? user.email || user.uid : "null")
+  );
+
   if (user) {
     currentUid = user.uid;
-    els.authGate.hidden = true;
-    els.app.hidden = false;
+    mostrarPantalla("app");
+    authResuelto = true;
     if (els.authUser) {
       els.authUser.hidden = false;
       els.authUser.textContent = user.email || "Sesión activa";
@@ -3699,8 +3760,18 @@ onAuthStateChanged(auth, (user) => {
     state.formulario = [];
     state.profile = null;
     state.ready = false;
-    els.app.hidden = true;
-    els.authGate.hidden = false;
+
+    // Venimos del enlace del correo y auth todavia no lo ha canjeado: no es
+    // "no hay sesion", es "aun no la hay". Se queda en la pantalla de
+    // arranque hasta que completeSignInIfNeeded() resuelva.
+    if (!authResuelto && entrandoPorEnlace) {
+      els.bootMsg.textContent = "Completando acceso…";
+      logAuth("null pero hay enlace de correo: sigo esperando");
+    } else {
+      mostrarPantalla("login");
+      authResuelto = true;
+    }
+
     if (els.authUser) els.authUser.hidden = true;
     renderSidebarIdentity();
   }

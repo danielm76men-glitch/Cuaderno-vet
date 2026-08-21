@@ -11,7 +11,16 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="auth-gate" id="authGate">
+  <!-- Pantalla de arranque. Es la unica visible al cargar: hasta que
+       onAuthStateChanged responda por primera vez no se sabe si hay sesion
+       guardada, y mostrar el login mientras tanto hacia parecer que la
+       sesion se habia perdido. -->
+  <div class="boot-gate" id="bootGate">
+    <img class="brand-mark brand-mark-lg" src="icon.svg" alt="" width="44" height="44" />
+    <p id="bootMsg">Cargando…</p>
+  </div>
+
+  <div class="auth-gate" id="authGate" hidden>
     <div class="auth-card">
       <h1><img class="brand-mark brand-mark-lg" src="icon.svg" alt="" width="44" height="44" /> VetDiario</h1>
       <p>Medicina Veterinaria</p>

@@ -681,6 +681,10 @@ button, input, select, textarea { font-family: inherit; }
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.45); color: #fff; font-size: 0.65rem; font-weight: 700; text-align: center; padding: 4px;
 }
+/* Pendiente de subir. Se distingue de "Subiendo…" a proposito: aquella es
+   una barra en curso, esta es un estado detenido esperando conexion. El
+   rojizo de la paleta ya se usa para "requiere tu atencion". */
+.photo-pendiente { background: rgba(177, 79, 44, 0.78); }
 .photo-add {
   aspect-ratio: 1; border: 1px dashed var(--line); border-radius: 8px; background: transparent;
   color: var(--muted); font-size: 1.3rem; cursor: pointer; display: flex; align-items: center; justify-content: center;

@@ -31,7 +31,7 @@ import {
   getStorage,
   ref as storageRef,
   uploadBytesResumable,
-  getDownloadURL,
+  getBlob,
   deleteObject
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
@@ -331,37 +331,104 @@ function buildSpeciesCheckboxes(selected, onChange) {
 // sin librerías): limita el lado más largo a maxDim y reexporta como
 // JPEG a la calidad indicada. Si el archivo no es una imagen decodificable
 // (o algo falla), se resuelve con el archivo original sin tocarlo.
+/* Diagnostico de fotos. Igual que el de arranque: etapa + milisegundos,
+   para poder ver EN QUE PASO se queda una subida en vez de adivinar. */
+function logFoto(texto) {
+  console.log("[foto " + new Date().toISOString().slice(11, 23) + "] " + texto);
+}
+
+/* Si la compresion no termina en este tiempo, se sube el original. Mas vale
+   subir 4 MB que no subir nada. */
+const TIMEOUT_COMPRESION = 15000;
+
+/* ATENCION — este era el bug de "Subiendo… para siempre".
+
+   La version anterior tenia onload y onerror, y aun asi podia dejar la
+   promesa sin resolver NUNCA:
+
+     - getContext("2d") devuelve null cuando el navegador se queda sin
+       memoria de canvas (habitual en el celular con fotos de 12 MP). La
+       linea siguiente, ctx.drawImage(...), lanza TypeError DENTRO del
+       onload. Ese throw no lo recoge nadie: la promesa se queda colgada.
+     - drawImage y canvas.width tambien lanzan con imagenes muy grandes.
+     - toBlob puede no llamar jamas a su callback en algunos WebView de
+       Android.
+
+   Y como compressImage corre ANTES de uploadPhoto, el vigilante de 60
+   segundos de la subida todavia no existia: no habia nada que cortara. La
+   foto se quedaba en "Subiendo…" indefinidamente, sin error, sin alerta y
+   sin forma de saber por que.
+
+   Ahora la promesa se resuelve SIEMPRE, por una de cuatro vias: exito,
+   error de decodificacion, excepcion, o tiempo agotado. En los tres
+   ultimos casos devuelve el archivo original, que se sube igual. */
 function compressImage(file, maxDim, quality) {
   return new Promise((resolve) => {
     if (!file.type || !file.type.startsWith("image/")) {
+      logFoto("no es imagen decodificable, se sube tal cual: " + file.type);
       resolve(file);
       return;
     }
+
     const url = URL.createObjectURL(file);
     const img = new Image();
+    let resuelto = false;
+
+    function terminar(resultado, motivo) {
+      if (resuelto) return;
+      resuelto = true;
+      clearTimeout(temporizador);
+      URL.revokeObjectURL(url);
+      img.onload = null;
+      img.onerror = null;
+      logFoto("compresión: " + motivo);
+      resolve(resultado);
+    }
+
+    // El backstop. Cubre cualquier cuelgue futuro que no hayamos previsto.
+    const temporizador = setTimeout(
+      () => terminar(file, "se agotó el tiempo (" + TIMEOUT_COMPRESION / 1000 + "s), se sube el original"),
+      TIMEOUT_COMPRESION
+    );
+
     img.onload = () => {
-      URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if (width > maxDim || height > maxDim) {
-        if (width >= height) {
-          height = Math.round((height * maxDim) / width);
-          width = maxDim;
-        } else {
-          width = Math.round((width * maxDim) / height);
-          height = maxDim;
+      try {
+        let width = img.naturalWidth || img.width;
+        let height = img.naturalHeight || img.height;
+        if (!width || !height) {
+          terminar(file, "el navegador no dio dimensiones, se sube el original");
+          return;
         }
+        if (width > maxDim || height > maxDim) {
+          if (width >= height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          // Sin memoria de canvas. Antes esto reventaba en la linea de abajo.
+          terminar(file, "sin contexto de canvas (memoria), se sube el original");
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => terminar(blob || file, blob ? "ok, " + Math.round(blob.size / 1024) + " KB" : "toBlob vacío, original"),
+          "image/jpeg",
+          quality
+        );
+      } catch (err) {
+        terminar(file, "excepción (" + (err && err.name) + "), se sube el original");
       }
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, width, height);
-      canvas.toBlob((blob) => resolve(blob || file), "image/jpeg", quality);
     };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      resolve(file);
-    };
+
+    img.onerror = () => terminar(file, "el navegador no pudo decodificar el formato, se sube el original");
     img.src = url;
   });
 }
@@ -550,8 +617,8 @@ async function procesarColaFotos() {
       // y se retomara en la proxima reconexion.
       if (!navigator.onLine) break;
       try {
-        const url = await uploadPhoto(reg.path, reg.blob, () => {});
-        const foto = { url, path: reg.path, name: reg.name };
+        await uploadPhoto(reg.path, reg.blob, () => {});
+        const foto = { path: reg.path, name: reg.name };
         // arrayUnion en vez de reescribir el array entero: si mientras tanto
         // agregaste otra foto desde el celular, no se pierde.
         await updateDoc(doc(db, "entries", reg.entryId), {
@@ -585,13 +652,23 @@ async function procesarColaFotos() {
    la subida si pasa un minuto sin transferir un solo byte. */
 function uploadPhoto(path, blob, onProgress) {
   return new Promise((resolve, reject) => {
-    const task = uploadBytesResumable(storageRef(storage, path), blob, { contentType: "image/jpeg" });
+    logFoto("subida: iniciando " + path + " (" + Math.round(blob.size / 1024) + " KB)");
+    let task;
+    try {
+      task = uploadBytesResumable(storageRef(storage, path), blob, { contentType: "image/jpeg" });
+    } catch (err) {
+      // storageRef lanza en el acto si el bucket del config esta mal escrito.
+      logFoto("subida: no arrancó — " + ((err && err.code) || err));
+      reject(err);
+      return;
+    }
     let lastBytes = -1;
     let lastMovedAt = Date.now();
 
     const watchdog = setInterval(() => {
       if (Date.now() - lastMovedAt > 60000) {
         clearInterval(watchdog);
+        logFoto("subida: 60 s sin transferir un byte, se cancela");
         try {
           task.cancel();
         } catch (e) {
@@ -605,6 +682,7 @@ function uploadPhoto(path, blob, onProgress) {
       "state_changed",
       (snap) => {
         if (snap.bytesTransferred !== lastBytes) {
+          if (lastBytes === -1) logFoto("subida: primer evento de progreso (estado " + snap.state + ")");
           lastBytes = snap.bytesTransferred;
           lastMovedAt = Date.now();
         }
@@ -614,18 +692,66 @@ function uploadPhoto(path, blob, onProgress) {
       },
       (err) => {
         clearInterval(watchdog);
+        logFoto("subida: ERROR " + ((err && err.code) || err));
         reject(err);
       },
       async () => {
         clearInterval(watchdog);
+        logFoto("subida: bytes completos, pidiendo la URL de descarga");
         try {
-          resolve(await getDownloadURL(task.snapshot.ref));
+          const url = await getDownloadURL(task.snapshot.ref);
+          logFoto("subida: OK");
+          resolve(url);
         } catch (err) {
+          // Los bytes ya estan en Storage; lo que fallo es LEER la URL, que
+          // es un permiso distinto en storage.rules.
+          logFoto("subida: subió pero getDownloadURL falló — " + ((err && err.code) || err));
           reject(err);
         }
       }
     );
   });
+}
+
+/* ---------- Lectura de fotos protegida por reglas ----------
+   getBlob() descarga con las credenciales de la sesion, asi que la descarga
+   la autoriza (o la deniega) la misma regla de Storage que todo lo demas. No
+   queda ninguna URL permanente que se pueda filtrar.
+
+   El coste es que cada imagen hay que bajarla para poder pintarla, asi que
+   se cachea el objectURL por ruta: renderGrid() se ejecuta muchas veces
+   mientras editas la ficha y sin cache cada pasada volveria a descargar la
+   radiografia entera. */
+const urlsDeFotos = new Map();
+
+function olvidarUrlsDeFotos() {
+  urlsDeFotos.forEach((url) => URL.revokeObjectURL(url));
+  urlsDeFotos.clear();
+}
+
+async function urlDeFoto(photo) {
+  if (!photo) return "";
+
+  // Marcadores en curso y pendientes: su url ya es un objectURL local, no
+  // hay nada que descargar.
+  if (photo.uploading || photo.pendiente) return photo.url || "";
+
+  /* COMPATIBILIDAD TEMPORAL — quitar cuando la migracion haya terminado.
+     Las fotos subidas antes de este cambio guardaron la URL con token y no
+     siempre guardaron la ruta. Mientras existan, se siguen pintando con esa
+     URL: si no, dejarian de verse de golpe. */
+  if (!photo.path && photo.url) return photo.url;
+
+  if (!photo.path) return "";
+  if (urlsDeFotos.has(photo.path)) return urlsDeFotos.get(photo.path);
+
+  const blob = await getBlob(storageRef(storage, photo.path));
+  // Otra pasada de renderGrid() pudo pedir la misma foto mientras esta
+  // descargaba; si ya la dejo en el cache, se descarta esta copia.
+  if (urlsDeFotos.has(photo.path)) return urlsDeFotos.get(photo.path);
+  const url = URL.createObjectURL(blob);
+  urlsDeFotos.set(photo.path, url);
+  return url;
 }
 
 function buildPhotosSection(entry, statusText) {
@@ -655,8 +781,12 @@ function buildPhotosSection(entry, statusText) {
      quedó guardado en Firestore por una subida interrumpida, se ve como
      una foto eternamente "Subiendo…" que nunca carga; al filtrarlos aquí
      desaparecen y el siguiente commit() limpia el documento. */
+  /* Una foto vale si tiene RUTA (esquema nuevo) o URL heredada (esquema
+     viejo, mientras dure la compatibilidad). Antes se exigia `url`, asi que
+     al dejar de guardarla las fotos nuevas habrian desaparecido de la ficha
+     sin ningun aviso. */
   const photos = (Array.isArray(entry.fotos) ? entry.fotos : []).filter(
-    (p) => p && p.url && !p.uploading && !String(p.url).startsWith("blob:")
+    (p) => p && (p.path || p.url) && !p.uploading && !String(p.url || "").startsWith("blob:")
   );
 
   // Nunca se persiste un marcador en curso ni uno pendiente: solo fotos ya
@@ -665,7 +795,7 @@ function buildPhotosSection(entry, statusText) {
   // local que no significaria nada en otro dispositivo.
   function commit() {
     const persistible = photos.filter(
-      (p) => p && p.url && !p.uploading && !p.pendiente && !String(p.url).startsWith("blob:")
+      (p) => p && (p.path || p.url) && !p.uploading && !p.pendiente && !String(p.url || "").startsWith("blob:")
     );
     scheduleSave("entries", entry.id, { fotos: persistible }, statusText);
   }
@@ -705,10 +835,26 @@ function buildPhotosSection(entry, statusText) {
       tile.className = "photo-tile";
 
       const img = document.createElement("img");
-      img.src = photo.url;
       img.alt = photo.name || "Foto";
       img.loading = "lazy";
       tile.appendChild(img);
+
+      /* La fuente ya no es un dato del documento: hay que ir a buscarla a
+         Storage. Mientras llega, el mosaico queda en blanco con su marco; si
+         la descarga se deniega (sesion caducada, o alguien mirando datos que
+         no son suyos) se dice, en vez de dejar un hueco mudo. */
+      urlDeFoto(photo).then(
+        (url) => {
+          if (url) img.src = url;
+        },
+        (err) => {
+          console.warn("No se pudo cargar la foto " + (photo.path || photo.url) + ":", err);
+          const fallo = document.createElement("div");
+          fallo.className = "photo-uploading photo-pendiente";
+          fallo.textContent = "No se pudo cargar";
+          tile.appendChild(fallo);
+        }
+      );
 
       if (photo.uploading) {
         const spin = document.createElement("div");
@@ -795,13 +941,15 @@ function buildPhotosSection(entry, statusText) {
       // la version comprimida, no el original de varios MB.
       let comprimida = null;
       try {
+        logFoto("archivo: " + file.name + " · " + file.type + " · " + Math.round(file.size / 1024) + " KB");
         comprimida = await compressImage(file, 1600, 0.82);
-        const url = await uploadPhoto(path, comprimida, (pct) => {
+        await uploadPhoto(path, comprimida, (pct) => {
           placeholder.progress = pct;
           renderGrid();
         });
+        // Solo la ruta: la URL con token ya no se guarda ni se genera.
         const idx = photos.indexOf(placeholder);
-        if (idx > -1) photos[idx] = { url, path, name: file.name };
+        if (idx > -1) photos[idx] = { path, name: file.name };
         URL.revokeObjectURL(objectUrl);
         renderGrid();
         commit();
@@ -1862,6 +2010,10 @@ function render() {
   // innerHTML = "": si la cola le hablara despues, escribiria sobre nodos
   // huerfanos.
   seccionFotosMontada = null;
+  // Los objectURL de las fotos apuntan a blobs que siguen ocupando memoria
+  // aunque el <img> que los usaba ya no exista. Se sueltan aqui, en el mismo
+  // punto donde se desmonta todo lo demas.
+  olvidarUrlsDeFotos();
   setActiveNav();
   els.content.innerHTML = "";
 

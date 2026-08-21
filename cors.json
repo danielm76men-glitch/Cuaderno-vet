@@ -1,0 +1,31 @@
+[
+  {
+    "origin": [
+      "https://REEMPLAZA-CON-TU-USUARIO.github.io",
+      "http://localhost:5180",
+      "http://127.0.0.1:5180",
+      "http://localhost:5500",
+      "http://127.0.0.1:5500",
+      "http://localhost:8080",
+      "http://127.0.0.1:8080",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000"
+    ],
+    "method": ["GET", "HEAD", "PUT", "POST", "DELETE", "OPTIONS"],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Length",
+      "Content-Range",
+      "Authorization",
+      "Range",
+      "X-Goog-Upload-Command",
+      "X-Goog-Upload-Header-Content-Length",
+      "X-Goog-Upload-Header-Content-Type",
+      "X-Goog-Upload-Offset",
+      "X-Goog-Upload-Protocol",
+      "X-Goog-Upload-Status",
+      "X-Goog-Upload-URL"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

@@ -1011,3 +1011,12 @@ button, input, select, textarea { font-family: inherit; }
   border-radius: 8px; padding: 12px; font-size: 0.82rem;
 }
 .calc-bloqueo-titulo { font-weight: 700; margin-bottom: 6px; }
+
+/* El diagnóstico de fotos y el motivo de un fallo llegan como texto de
+   varias líneas. Sin esto, los saltos se colapsan y el informe sale como
+   un párrafo ilegible. No afecta a los mensajes de una sola línea. */
+.confirm-msg { white-space: pre-line; }
+
+/* Una foto que la cola dio por perdida. Se distingue de "Pendiente": esa
+   está esperando, esta necesita que hagas algo. */
+.photo-bloqueada { background: rgba(177, 79, 44, 0.9); cursor: pointer; }

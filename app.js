@@ -555,6 +555,74 @@ function quitarFotoPendiente(id) {
   return operacionCola("readwrite", (store) => store.delete(id));
 }
 
+// Guarda el resultado de un intento fallido sin perder el blob.
+function actualizarFotoPendiente(id, cambios) {
+  return abrirColaFotos().then(
+    (db_) =>
+      new Promise((resolve, reject) => {
+        const tx = db_.transaction(FOTOS_STORE, "readwrite");
+        const store = tx.objectStore(FOTOS_STORE);
+        const lectura = store.get(id);
+        lectura.onsuccess = () => {
+          const reg = lectura.result;
+          if (!reg) return resolve(null);
+          const escritura = store.put({ ...reg, ...cambios });
+          escritura.onsuccess = () => resolve(escritura.result);
+          escritura.onerror = () => reject(escritura.error);
+        };
+        lectura.onerror = () => reject(lectura.error);
+        tx.onerror = () => reject(tx.error);
+      })
+  );
+}
+
+/* Diagnostico de Storage. Sube un archivo de 1 byte y cuenta exactamente
+   que paso. Existe porque el error real ocurre en el celular, donde no hay
+   consola que mirar: sin esto, "no sube" es todo lo que se puede saber. */
+async function diagnosticarStorage() {
+  const lineas = [];
+  const bucket = (firebaseConfig && firebaseConfig.storageBucket) || "(sin definir)";
+  lineas.push("Bucket configurado: " + bucket);
+  lineas.push("Sesión: " + (currentUid ? "activa" : "NO hay sesión"));
+  lineas.push("Navegador en línea: " + (navigator.onLine ? "sí" : "no"));
+
+  if (!currentUid) {
+    lineas.push("");
+    lineas.push("Sin sesión no se puede probar la subida.");
+    return lineas.join("\n");
+  }
+
+  const ruta = "photos/" + currentUid + "/diagnostico/" + Date.now() + ".txt";
+  try {
+    const url = await uploadPhoto(ruta, new Blob(["ok"], { type: "text/plain" }), () => {});
+    lineas.push("");
+    lineas.push("ESCRITURA: correcta");
+    lineas.push("LECTURA (getDownloadURL): correcta");
+    lineas.push("");
+    lineas.push("Storage funciona. Si una foto sigue sin subir, el problema es de esa foto, no de la configuración.");
+    try {
+      await deleteObject(storageRef(storage, ruta));
+      lineas.push("(archivo de prueba borrado)");
+    } catch (e) {
+      lineas.push("(no se pudo borrar el archivo de prueba: " + ((e && e.code) || e) + ")");
+    }
+    void url;
+  } catch (err) {
+    const motivo = clasificarFalloDeSubida(err);
+    lineas.push("");
+    lineas.push("FALLÓ: " + motivo.detalle);
+    lineas.push("");
+    if (motivo.tipo === "reintentable") {
+      lineas.push("La petición sale pero no transfiere nada. Las causas típicas:");
+      lineas.push("• Storage no está activado en la consola de Firebase.");
+      lineas.push("• storageBucket no coincide con el bucket real del proyecto.");
+      lineas.push("  Los proyectos nuevos usan  <proyecto>.firebasestorage.app");
+      lineas.push("  y los antiguos              <proyecto>.appspot.com");
+    }
+  }
+  return lineas.join("\n");
+}
+
 function fotosPendientesDeEntrada(entryId) {
   return operacionCola("readonly", (store) => store.index("entryId").getAll(entryId)).catch(() => []);
 }
@@ -566,13 +634,47 @@ function todasLasFotosPendientes() {
 /* Solo se encola lo que puede arreglarse solo al volver la red. Un fallo de
    permisos o de cuota se repetiria indefinidamente en cada reconexion sin
    llegar nunca a subir, asi que esos siguen avisando al momento. */
+/* Antes esto devolvia un si/no, y ahi estaba el problema: un fallo de
+   CONFIGURACION (Storage sin activar, bucket mal escrito, reglas que
+   rechazan) se clasificaba como "falta de conexion" y la foto se quedaba
+   reintentandose para siempre, repitiendo el mismo error y sin decir nunca
+   cual era. Eso es el "Pendiente de subir" que no cambia nunca.
+
+   Ahora se distingue el motivo, y solo se reintenta lo que de verdad puede
+   arreglarse solo. */
+const MAX_INTENTOS_FOTO = 3;
+
+function clasificarFalloDeSubida(err) {
+  if (!navigator.onLine) return { tipo: "sin-conexion", detalle: "Sin conexión" };
+
+  const code = (err && err.code) || "";
+  const configuracion = {
+    "storage/unauthorized": "Las reglas de Storage rechazan la subida. Revisa storage.rules y que estén publicadas.",
+    "storage/unauthenticated": "La sesión no llegó a Storage. Cierra sesión y vuelve a entrar.",
+    "storage/quota-exceeded": "El bucket superó su cuota.",
+    "storage/project-not-found": "El proyecto del config no existe.",
+    "storage/bucket-not-found": "El bucket no existe. ¿Activaste Storage en la consola de Firebase?",
+    "storage/invalid-argument": "El archivo o la ruta no son válidos."
+  };
+  if (configuracion[code]) return { tipo: "configuracion", detalle: code + " — " + configuracion[code] };
+
+  // Estos SI pueden ser mala señal, asi que se reintentan — pero contados.
+  if (code === "storage/retry-limit-exceeded") {
+    return { tipo: "reintentable", detalle: "storage/retry-limit-exceeded — se agotaron los reintentos del SDK" };
+  }
+  if (err && err.message === "sin-progreso") {
+    return { tipo: "reintentable", detalle: "No transfirió un solo byte en 60 s" };
+  }
+
+  return { tipo: "configuracion", detalle: code || (err && err.message) || "Error desconocido" };
+}
+
+// Compatibilidad: el alta de fotos solo necesita saber si vale la pena
+// encolar. Cualquier fallo se encola — la foto no se pierde nunca — y es la
+// cola la que decide si insiste o se rinde.
 function esFalloDeConexion(err) {
-  if (!navigator.onLine) return true;
-  const code = err && err.code ? err.code : "";
-  if (code === "storage/retry-limit-exceeded") return true;
-  // "sin-progreso" lo lanza el vigilante de uploadPhoto: la subida arranco
-  // pero dejo de transferir bytes, que es exactamente perder la señal.
-  return !!(err && err.message === "sin-progreso");
+  const t = clasificarFalloDeSubida(err).tipo;
+  return t === "sin-conexion" || t === "reintentable" || t === "configuracion";
 }
 
 /* La ficha abierta se apunta aqui para que la cola pueda refrescar su
@@ -616,9 +718,14 @@ async function procesarColaFotos() {
       // Si la red se cae a media cola, se para: lo que queda sigue guardado
       // y se retomara en la proxima reconexion.
       if (!navigator.onLine) break;
+      // Una foto ya bloqueada no se reintenta: su error no se arregla solo.
+      if (reg.bloqueada) continue;
       try {
-        await uploadPhoto(reg.path, reg.blob, () => {});
-        const foto = { path: reg.path, name: reg.name };
+        // La URL que devuelve uploadPhoto es lo que hace visible la foto: la
+        // cuadricula filtra por p.url. Sin ella, la foto sube a Storage pero
+        // se guarda "invisible" y no aparece nunca.
+        const url = await uploadPhoto(reg.path, reg.blob, () => {});
+        const foto = { url, path: reg.path, name: reg.name };
         // arrayUnion en vez de reescribir el array entero: si mientras tanto
         // agregaste otra foto desde el celular, no se pierde.
         await updateDoc(doc(db, "entries", reg.entryId), {
@@ -631,11 +738,26 @@ async function procesarColaFotos() {
           seccionFotosMontada.alSubir(reg.id, foto);
         }
       } catch (err) {
-        if (esFalloDeConexion(err)) break; // se reintenta en la proxima
-        // La entrada ya no existe (la borraste) o Storage la rechaza: esta
-        // foto no va a subir nunca, se saca de la cola para no atascarla.
-        console.warn("Foto pendiente descartada:", err);
-        await quitarFotoPendiente(reg.id);
+        const motivo = clasificarFalloDeSubida(err);
+        const intentos = (reg.intentos || 0) + 1;
+        logFoto("cola: falló " + reg.name + " (" + motivo.tipo + ", intento " + intentos + ") — " + motivo.detalle);
+
+        if (motivo.tipo === "sin-conexion") break; // ni cuenta el intento
+
+        /* Se rinde cuando el error es de configuracion, o cuando ya lo
+           intento MAX_INTENTOS_FOTO veces. Rendirse NO borra la foto: queda
+           en la cola marcada, con el motivo a la vista y un boton para
+           reintentar cuando hayas arreglado lo que sea. */
+        const seRinde = motivo.tipo === "configuracion" || intentos >= MAX_INTENTOS_FOTO;
+        await actualizarFotoPendiente(reg.id, {
+          intentos,
+          ultimoError: motivo.detalle,
+          bloqueada: seRinde
+        });
+        if (seccionFotosMontada && seccionFotosMontada.entryId === reg.entryId) {
+          seccionFotosMontada.alFallar(reg.id, seRinde ? motivo.detalle : "");
+        }
+        if (!seRinde) break; // el resto de la cola espera a la proxima vuelta
       }
     }
     if (subidas) showToast(subidas === 1 ? "Foto pendiente subida" : subidas + " fotos pendientes subidas");
@@ -763,6 +885,33 @@ function buildPhotosSection(entry, statusText) {
   const label = document.createElement("span");
   label.textContent = "Fotos (radiografías, ecografías, paciente)";
   head.appendChild(label);
+
+  /* Diagnostico de Storage. Va aqui y no en Configuracion porque es aqui
+     donde te enteras de que algo falla, y porque el error real ocurre en el
+     celular, donde no hay consola que abrir. */
+  const btnDiag = document.createElement("button");
+  btnDiag.type = "button";
+  btnDiag.className = "icon-btn";
+  btnDiag.textContent = "🩺";
+  btnDiag.title = "Diagnosticar la subida de fotos";
+  btnDiag.setAttribute("aria-label", "Diagnosticar la subida de fotos");
+  btnDiag.addEventListener("click", async () => {
+    btnDiag.disabled = true;
+    const previo = btnDiag.textContent;
+    btnDiag.textContent = "…";
+    try {
+      const informe = await diagnosticarStorage();
+      await askConfirm({
+        title: "Diagnóstico de fotos",
+        message: informe,
+        confirmLabel: "Entendido"
+      });
+    } finally {
+      btnDiag.textContent = previo;
+      btnDiag.disabled = false;
+    }
+  });
+  head.appendChild(btnDiag);
   wrap.appendChild(head);
 
   const grid = document.createElement("div");
@@ -808,7 +957,14 @@ function buildPhotosSection(entry, statusText) {
     const nuevas = pendientes.filter((p) => !photos.some((f) => f.colaId === p.id));
     if (!nuevas.length) return;
     nuevas.forEach((p) => {
-      photos.push({ url: urlDePendiente(p), name: p.name, pendiente: true, colaId: p.id });
+      photos.push({
+        url: urlDePendiente(p),
+        name: p.name,
+        pendiente: true,
+        colaId: p.id,
+        bloqueada: !!p.bloqueada,
+        ultimoError: p.ultimoError || ""
+      });
     });
     renderGrid();
   });
@@ -823,6 +979,14 @@ function buildPhotosSection(entry, statusText) {
       const idx = photos.findIndex((p) => p.colaId === colaId);
       if (idx > -1) photos[idx] = foto;
       else photos.push(foto);
+      renderGrid();
+    },
+    // La cola se rindio con esta foto: el mosaico deja de decir "Pendiente"
+    // y pasa a decir por que, que es lo unico accionable.
+    alFallar(colaId, detalle) {
+      const idx = photos.findIndex((p) => p.colaId === colaId);
+      if (idx === -1) return;
+      photos[idx] = { ...photos[idx], bloqueada: !!detalle, ultimoError: detalle };
       renderGrid();
     }
   };
@@ -864,7 +1028,37 @@ function buildPhotosSection(entry, statusText) {
       } else if (photo.pendiente) {
         const aviso = document.createElement("div");
         aviso.className = "photo-uploading photo-pendiente";
-        aviso.textContent = "Pendiente de subir";
+        if (photo.bloqueada) {
+          /* "Pendiente de subir" para siempre no dice nada y no se puede
+             accionar. Cuando la cola se rinde, el mosaico dice que fallo y
+             deja tocarlo para ver el motivo exacto. */
+          aviso.classList.add("photo-bloqueada");
+          aviso.textContent = "No se pudo subir — toca para ver";
+          aviso.setAttribute("role", "button");
+          aviso.tabIndex = 0;
+          const verMotivo = async () => {
+            const reintentar = await askConfirm({
+              title: "No se pudo subir esta foto",
+              message: (photo.ultimoError || "Motivo desconocido.") + "\n\nLa foto sigue guardada aquí; no se ha perdido.",
+              confirmLabel: "Reintentar"
+            });
+            if (!reintentar) return;
+            await actualizarFotoPendiente(photo.colaId, { intentos: 0, bloqueada: false, ultimoError: "" }).catch(() => {});
+            photo.bloqueada = false;
+            photo.ultimoError = "";
+            renderGrid();
+            procesarColaFotos();
+          };
+          aviso.addEventListener("click", verMotivo);
+          aviso.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              verMotivo();
+            }
+          });
+        } else {
+          aviso.textContent = "Pendiente de subir";
+        }
         tile.appendChild(aviso);
 
         // Tambien se puede descartar una pendiente: si no, una foto que no

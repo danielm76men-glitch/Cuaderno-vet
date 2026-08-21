@@ -1,4 +1,5 @@
 import { firebaseConfig } from "./firebase-config.js";
+import { SEMILLA_FORMULARIO } from "./semilla-formulario.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
   getAuth,
@@ -22,6 +23,7 @@ import {
   orderBy,
   where,
   arrayUnion,
+  deleteField,
   serverTimestamp,
   enableIndexedDbPersistence
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
@@ -195,13 +197,18 @@ function matchesMedQuery(item, q) {
   );
 }
 
+/* Busca sobre la forma NORMALIZADA, asi el mismo buscador sirve para los
+   documentos del esquema viejo y del nuevo. Ademas de nombre y via, ahora
+   cubre familia e indicacion, que es lo que pide la vista del formulario. */
 function matchesFormularioQuery(item, q) {
   if (!q) return true;
   q = normalizarBusqueda(q);
+  const f = farmacoNormalizado(item);
   return (
-    incluyeNormalizado(item.nombre, q) ||
-    incluyeNormalizado(item.via, q) ||
-    (Array.isArray(item.especies) ? item.especies : []).some((e) => incluyeNormalizado(e, q))
+    incluyeNormalizado(f.nombreGenerico, q) ||
+    incluyeNormalizado(f.familia, q) ||
+    f.dosis.some((d) => incluyeNormalizado(d.via, q) || incluyeNormalizado(d.indicacion, q)) ||
+    especiesDe(f).some((e) => incluyeNormalizado(e, q))
   );
 }
 
@@ -1147,6 +1154,8 @@ function buildDoseCalculator(context) {
   const wrap = document.createElement("div");
   wrap.className = "calc";
 
+  const farmacos = farmacosNormalizados();
+
   const nameField = document.createElement("div");
   nameField.className = "calc-field";
   const nameLabel = document.createElement("label");
@@ -1156,10 +1165,10 @@ function buildDoseCalculator(context) {
   nameInput.placeholder = "Escribe el nombre…";
   const datalist = document.createElement("datalist");
   datalist.id = "calcFarmacoList";
-  state.formulario.forEach((f) => {
-    if (!f.nombre) return;
+  farmacos.forEach((f) => {
+    if (!f.nombreGenerico) return;
     const opt = document.createElement("option");
-    opt.value = f.nombre;
+    opt.value = f.nombreGenerico;
     datalist.appendChild(opt);
   });
   nameField.appendChild(nameLabel);
@@ -1174,6 +1183,18 @@ function buildDoseCalculator(context) {
   const speciesSelect = document.createElement("select");
   speciesField.appendChild(speciesLabel);
   speciesField.appendChild(speciesSelect);
+
+  // Indicacion: un mismo farmaco y especie pueden tener varias pautas (dosis
+  // de carga y mantenimiento, por ejemplo), y elegir la equivocada cambia el
+  // resultado por completo.
+  const indicacionField = document.createElement("div");
+  indicacionField.className = "calc-field";
+  indicacionField.hidden = true;
+  const indicacionLabel = document.createElement("label");
+  indicacionLabel.textContent = "Indicación / pauta";
+  const indicacionSelect = document.createElement("select");
+  indicacionField.appendChild(indicacionLabel);
+  indicacionField.appendChild(indicacionSelect);
 
   const weightField = document.createElement("div");
   weightField.className = "calc-field";
@@ -1192,6 +1213,17 @@ function buildDoseCalculator(context) {
   weightField.appendChild(weightLabel);
   weightField.appendChild(weightInput);
 
+  // Presentacion: de aqui sale la concentracion del frasco, que es lo que
+  // convierte los mg en mL.
+  const presField = document.createElement("div");
+  presField.className = "calc-field";
+  presField.hidden = true;
+  const presLabel = document.createElement("label");
+  presLabel.textContent = "Presentación";
+  const presSelect = document.createElement("select");
+  presField.appendChild(presLabel);
+  presField.appendChild(presSelect);
+
   const result = document.createElement("div");
   result.className = "calc-result";
 
@@ -1200,15 +1232,34 @@ function buildDoseCalculator(context) {
   let lastTotalLine = "";
 
   function findDrug(name) {
-    const n = (name || "").trim().toLowerCase();
+    const n = normalizarBusqueda(name).trim();
     if (!n) return null;
-    return state.formulario.find((f) => (f.nombre || "").trim().toLowerCase() === n) || null;
+    return farmacos.find((f) => normalizarBusqueda(f.nombreGenerico).trim() === n) || null;
+  }
+
+  // Solo entran al calculo las pautas CON fuente: una dosis sin fuente no es
+  // verificable, y la regla del modulo es que un dato asi no se usa.
+  function dosisUtilizables(farmaco, especie) {
+    if (!farmaco) return [];
+    return farmaco.dosis.filter(
+      (d) =>
+        String(d.fuente || "").trim() &&
+        d.dosisMin != null &&
+        isFinite(d.dosisMin) &&
+        (!especie || String(d.especie || "").toLowerCase() === especie)
+    );
   }
 
   function updateSpeciesField() {
     speciesSelect.innerHTML = "";
-    const especies = selectedDrug && Array.isArray(selectedDrug.especies) ? selectedDrug.especies : [];
-    if (!selectedDrug || especies.length <= 1) {
+    if (!selectedDrug) {
+      speciesField.hidden = true;
+      return;
+    }
+    const especies = Array.from(
+      new Set(dosisUtilizables(selectedDrug, "").map((d) => String(d.especie || "").toLowerCase()).filter(Boolean))
+    );
+    if (!especies.length) {
       speciesField.hidden = true;
       return;
     }
@@ -1219,6 +1270,46 @@ function buildDoseCalculator(context) {
       o.textContent = e;
       speciesSelect.appendChild(o);
     });
+  }
+
+  function updateIndicacionField() {
+    indicacionSelect.innerHTML = "";
+    const pautas = dosisUtilizables(selectedDrug, speciesSelect.value);
+    if (pautas.length <= 1) {
+      indicacionField.hidden = true;
+      return;
+    }
+    indicacionField.hidden = false;
+    pautas.forEach((d, i) => {
+      const o = document.createElement("option");
+      o.value = String(i);
+      o.textContent =
+        (d.indicacion || "Pauta " + (i + 1)) + " — " + d.dosisMin + (d.dosisMax !== d.dosisMin ? "–" + d.dosisMax : "") + " " + d.unidad;
+      indicacionSelect.appendChild(o);
+    });
+  }
+
+  function updatePresField() {
+    presSelect.innerHTML = "";
+    const pres = selectedDrug ? selectedDrug.presentaciones.filter((p) => p.concentracion > 0) : [];
+    if (!pres.length) {
+      presField.hidden = true;
+      return;
+    }
+    presField.hidden = false;
+    pres.forEach((p, i) => {
+      const o = document.createElement("option");
+      o.value = String(i);
+      o.textContent =
+        (p.nombreComercialLocal || "Presentación " + (i + 1)) + " — " + p.concentracion + " " + (p.unidadConc || "");
+      presSelect.appendChild(o);
+    });
+  }
+
+  function presentacionElegida() {
+    const pres = selectedDrug ? selectedDrug.presentaciones.filter((p) => p.concentracion > 0) : [];
+    if (!pres.length) return null;
+    return pres[Number(presSelect.value) || 0] || pres[0];
   }
 
   function showEmpty(text) {
@@ -1257,11 +1348,40 @@ function buildDoseCalculator(context) {
       if (addBtn) result.appendChild(addBtn);
       return;
     }
-    if (selectedDrug.dosisValor == null || !isFinite(selectedDrug.dosisValor)) {
-      showEmpty("Este fármaco no tiene una dosis numérica cargada en el formulario.");
+
+    /* Bloqueo por alerta. Va ANTES que cualquier otra comprobacion: si el
+       farmaco tiene una contraindicacion absoluta para esta especie, no se
+       calcula nada. Un numero en pantalla, aunque lleve una advertencia al
+       lado, invita a usarlo. */
+    const alerta = alertaQueBloquea(selectedDrug, speciesSelect.value);
+    if (alerta) {
+      const bloque = document.createElement("div");
+      bloque.className = "calc-bloqueo";
+      const titulo = document.createElement("div");
+      titulo.className = "calc-bloqueo-titulo";
+      titulo.textContent = "⚠ Cálculo bloqueado — contraindicación absoluta";
+      const texto = document.createElement("div");
+      texto.textContent = alerta;
+      bloque.appendChild(titulo);
+      bloque.appendChild(texto);
+      result.appendChild(bloque);
       if (addBtn) result.appendChild(addBtn);
       return;
     }
+
+    const pautas = dosisUtilizables(selectedDrug, speciesSelect.value);
+    if (!pautas.length) {
+      const conFuente = selectedDrug.dosis.filter((d) => String(d.fuente || "").trim()).length;
+      showEmpty(
+        selectedDrug.dosis.length && !conFuente
+          ? "Este fármaco tiene dosis cargadas pero ninguna con fuente. Sin fuente no se calcula."
+          : "Este fármaco no tiene una dosis numérica cargada para esa especie."
+      );
+      if (addBtn) result.appendChild(addBtn);
+      return;
+    }
+
+    const pauta = pautas[Number(indicacionSelect.value) || 0] || pautas[0];
 
     const weight = parseFloat(weightInput.value);
     if (!weight || weight <= 0) {
@@ -1270,31 +1390,117 @@ function buildDoseCalculator(context) {
       return;
     }
 
-    const dosisUnidad = selectedDrug.dosisUnidad || "";
-    const massUnit = dosisUnidad.includes("/") ? dosisUnidad.split("/")[0].trim() : dosisUnidad;
-    const totalDose = weight * selectedDrug.dosisValor;
-    const especieNote = speciesSelect.value ? " (" + speciesSelect.value + ")" : "";
+    const unidad = pauta.unidad || "mg/kg";
+    const massUnit = unidad.includes("/") ? unidad.split("/")[0].trim() : unidad;
+    const dosisMin = Number(pauta.dosisMin);
+    const dosisMax = pauta.dosisMax != null && isFinite(pauta.dosisMax) ? Number(pauta.dosisMax) : dosisMin;
 
-    const formulaLine =
-      "Dosis total" + especieNote + " = peso × dosis = " + weight + " kg × " + selectedDrug.dosisValor + " " + dosisUnidad;
-    addLine(formulaLine);
+    // Se calcula sobre el punto medio del rango; los extremos se muestran
+    // debajo para que se vea el margen con el que se esta trabajando.
+    const dosisUsada = (dosisMin + dosisMax) / 2;
+    const totalDose = weight * dosisUsada;
+    const totalMin = weight * dosisMin;
+    const totalMax = weight * dosisMax;
+
+    const especieNota = speciesSelect.value ? " (" + speciesSelect.value + ")" : "";
+    addLine(
+      "Dosis" +
+        especieNota +
+        " = " +
+        weight +
+        " kg × " +
+        roundNice(dosisUsada) +
+        " " +
+        unidad +
+        (dosisMin !== dosisMax ? " (rango " + dosisMin + "–" + dosisMax + ")" : "")
+    );
+
     const totalText = roundNice(totalDose) + " " + massUnit;
     addLine("= " + totalText, "calc-total");
+    if (dosisMin !== dosisMax) {
+      addLine("Rango total: " + roundNice(totalMin) + " – " + roundNice(totalMax) + " " + massUnit, "calc-line-suave");
+    }
 
-    lastSummaryLine = selectedDrug.nombre + ": " + weight + " kg × " + selectedDrug.dosisValor + " " + dosisUnidad + especieNote;
+    lastSummaryLine =
+      selectedDrug.nombreGenerico + ": " + weight + " kg × " + roundNice(dosisUsada) + " " + unidad + especieNota;
     lastTotalLine = "Dosis total = " + totalText;
 
-    if (selectedDrug.concentracionValor && isFinite(selectedDrug.concentracionValor) && selectedDrug.concentracionValor > 0) {
-      const concUnidad = selectedDrug.concentracionUnidad || "";
+    /* El volumen en mL es el resultado que importa: el error clinico real
+       ocurre al convertir los mg a la concentracion del frasco. */
+    const pres = presentacionElegida();
+    if (pres) {
+      const concUnidad = pres.unidadConc || "";
       const volUnit = concUnidad.includes("/") ? concUnidad.split("/")[1].trim() : "";
-      const volume = totalDose / selectedDrug.concentracionValor;
+      const volume = totalDose / Number(pres.concentracion);
       const volText = roundNice(volume) + " " + volUnit;
-
-      addLine(
-        "Volumen = dosis total ÷ concentración = " + totalText + " ÷ " + selectedDrug.concentracionValor + " " + concUnidad
-      );
+      addLine("Volumen = " + totalText + " ÷ " + pres.concentracion + " " + concUnidad);
       addLine("= " + volText, "calc-total");
+      if (dosisMin !== dosisMax) {
+        addLine(
+          "Rango: " +
+            roundNice(totalMin / Number(pres.concentracion)) +
+            " – " +
+            roundNice(totalMax / Number(pres.concentracion)) +
+            " " +
+            volUnit,
+          "calc-line-suave"
+        );
+      }
       lastTotalLine += " · Volumen a administrar = " + volText;
+    } else {
+      addLine(
+        "Sin presentación cargada: no se puede convertir a mL. Agrega la concentración del frasco en la ficha del fármaco.",
+        "calc-line-suave"
+      );
+    }
+
+    /* Aviso de rango. El resultado NO se oculta: esconderlo empuja a
+       recalcular a mano, que es peor que verlo con la advertencia al lado. */
+    const dosisEfectiva = totalDose / weight;
+    if (dosisEfectiva < dosisMin || dosisEfectiva > dosisMax) {
+      const aviso = document.createElement("div");
+      aviso.className = "calc-aviso";
+      aviso.textContent =
+        "⚠ La dosis usada (" +
+        roundNice(dosisEfectiva) +
+        " " +
+        unidad +
+        ") queda fuera del rango cargado (" +
+        dosisMin +
+        "–" +
+        dosisMax +
+        " " +
+        unidad +
+        ").";
+      result.appendChild(aviso);
+    }
+
+    if (pauta.esExtralabel) {
+      const extra = document.createElement("div");
+      extra.className = "calc-aviso";
+      extra.textContent = "⚠ Uso extraetiqueta: esta pauta no está en la etiqueta autorizada del producto.";
+      result.appendChild(extra);
+    }
+
+    if (pauta.frecuenciaH) {
+      addLine("Frecuencia: cada " + pauta.frecuenciaH + " h", "calc-line-suave");
+    }
+    if (pauta.duracionMaxDias) {
+      addLine("Duración máxima: " + pauta.duracionMaxDias + " día(s)", "calc-line-suave");
+    }
+
+    // La fuente de la dosis usada, siempre visible junto al resultado.
+    const fuente = document.createElement("div");
+    fuente.className = "calc-fuente";
+    fuente.textContent = "Fuente: " + pauta.fuente;
+    result.appendChild(fuente);
+
+    if (verificacionVencida(selectedDrug.verificadoEl)) {
+      const viejo = document.createElement("div");
+      viejo.className = "calc-aviso";
+      viejo.textContent =
+        "⚠ Ficha desactualizada: verificada el " + fechaCorta(selectedDrug.verificadoEl) + ". Revisa la fuente antes de usarla.";
+      result.appendChild(viejo);
     }
 
     if (addBtn) {
@@ -1306,14 +1512,23 @@ function buildDoseCalculator(context) {
   nameInput.addEventListener("input", () => {
     selectedDrug = findDrug(nameInput.value);
     updateSpeciesField();
+    updateIndicacionField();
+    updatePresField();
     renderResult();
   });
-  speciesSelect.addEventListener("change", renderResult);
+  speciesSelect.addEventListener("change", () => {
+    updateIndicacionField();
+    renderResult();
+  });
+  indicacionSelect.addEventListener("change", renderResult);
+  presSelect.addEventListener("change", renderResult);
   weightInput.addEventListener("input", renderResult);
 
   wrap.appendChild(nameField);
   wrap.appendChild(speciesField);
+  wrap.appendChild(indicacionField);
   wrap.appendChild(weightField);
+  wrap.appendChild(presField);
   wrap.appendChild(result);
 
   // "Agregar a las notas del caso": solo existe cuando la calculadora se abrió desde
@@ -2868,6 +3083,331 @@ function renderMateriaDetail(root, entry) {
   if (!entry.title) setTimeout(() => titleInput.focus(), 0);
 }
 
+/* ================= FORMULARIO: esquema enriquecido =================
+
+   La coleccion "formulario" nacio con un esquema plano (nombre, dosisValor,
+   dosisUnidad, via, frecuencia, concentracionValor…), que solo admitia UNA
+   dosis por farmaco y ninguna trazabilidad. El esquema nuevo guarda arrays:
+   varias presentaciones, varias dosis por especie e indicacion, tiempos de
+   retiro, contraindicaciones y alertas.
+
+   La pieza central es farmacoNormalizado(): TODA lectura pasa por ahi y
+   devuelve siempre la forma enriquecida, venga el documento del esquema
+   viejo o del nuevo. Por eso la app funciona igual antes y despues de
+   migrar, y por eso la migracion se puede revertir sin romper nada: no hay
+   ninguna pantalla que dependa de que la migracion se haya ejecutado. */
+
+const ESPECIES_FORMULARIO = ["canino", "felino", "bovino", "porcino", "equino", "ovino"];
+const VIAS_FORMULARIO = ["IV", "IM", "SC", "VO", "IU", "tópica"];
+const MESES_VIGENCIA_FORMULARIO = 24;
+
+// "c/12h" -> 12. El esquema viejo guardaba la frecuencia como texto libre.
+function horasDesdeTexto(texto) {
+  const m = /(\d+(?:[.,]\d+)?)\s*h/i.exec(String(texto == null ? "" : texto));
+  return m ? Number(m[1].replace(",", ".")) : null;
+}
+
+function fechaDeVerificacion(valor) {
+  if (!valor) return null;
+  // Firestore devuelve Timestamp; la semilla y el <input type="date">
+  // devuelven texto "AAAA-MM-DD".
+  if (typeof valor.toDate === "function") return valor.toDate();
+  const d = new Date(valor);
+  return isFinite(d.getTime()) ? d : null;
+}
+
+function verificacionVencida(valor) {
+  const d = fechaDeVerificacion(valor);
+  if (!d) return false;
+  const limite = new Date(d);
+  limite.setMonth(limite.getMonth() + MESES_VIGENCIA_FORMULARIO);
+  return new Date() > limite;
+}
+
+function fechaCorta(valor) {
+  const d = fechaDeVerificacion(valor);
+  if (!d) return "";
+  return d.toLocaleDateString("es-EC", { year: "numeric", month: "long", day: "numeric" });
+}
+
+function paraInputFecha(valor) {
+  const d = fechaDeVerificacion(valor);
+  if (!d) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+/* Adaptador de lectura. Un documento del esquema viejo se ve por aqui como
+   uno del nuevo, sin escribir nada en Firestore. */
+function farmacoNormalizado(f) {
+  if (!f) return null;
+
+  const yaEnriquecido = Array.isArray(f.dosis);
+  const base = {
+    id: f.id,
+    uid: f.uid,
+    nombreGenerico: f.nombreGenerico || f.nombre || "",
+    familia: f.familia || "",
+    presentaciones: Array.isArray(f.presentaciones) ? f.presentaciones : [],
+    dosis: [],
+    retiro: Array.isArray(f.retiro) ? f.retiro : [],
+    contraindicaciones: Array.isArray(f.contraindicaciones) ? f.contraindicaciones : [],
+    alertas: Array.isArray(f.alertas) ? f.alertas : [],
+    verificadoEl: f.verificadoEl || null,
+    createdAt: f.createdAt,
+    updatedAt: f.updatedAt,
+    _pending: f._pending,
+    _migrado: yaEnriquecido
+  };
+
+  if (yaEnriquecido) {
+    base.dosis = f.dosis;
+    return base;
+  }
+
+  /* Esquema plano -> enriquecido. Las especies viejas venian capitalizadas
+     ("Canino") y ademas incluian opciones que el esquema nuevo no lista
+     (Aves, Caprino, Exotico…). Se pasan a minusculas pero NO se descartan:
+     tirar una especie seria perder un dato que tu cargaste. */
+  const especies = (Array.isArray(f.especies) ? f.especies : []).map((e) => String(e).toLowerCase());
+
+  if (f.dosisValor != null && isFinite(f.dosisValor)) {
+    const plantilla = {
+      indicacion: "",
+      dosisMin: Number(f.dosisValor),
+      dosisMax: Number(f.dosisValor),
+      unidad: f.dosisUnidad || "mg/kg",
+      via: f.via || "",
+      frecuenciaH: horasDesdeTexto(f.frecuencia),
+      duracionMaxDias: null,
+      fuente: f.fuente || "",
+      esExtralabel: false
+    };
+    base.dosis = especies.length
+      ? especies.map((especie) => ({ especie, ...plantilla }))
+      : [{ especie: "", ...plantilla }];
+  }
+
+  if (f.concentracionValor != null && isFinite(f.concentracionValor)) {
+    base.presentaciones = [
+      {
+        concentracion: Number(f.concentracionValor),
+        unidadConc: f.concentracionUnidad || "mg/mL",
+        via: f.via || "",
+        nombreComercialLocal: ""
+      }
+    ];
+  }
+
+  return base;
+}
+
+function farmacosNormalizados() {
+  return state.formulario.map(farmacoNormalizado).filter(Boolean);
+}
+
+// Especies presentes en los datos ademas de las seis canonicas, para que el
+// filtro no esconda farmacos cargados con el esquema viejo.
+function especiesDelFormulario() {
+  const vistas = new Set(ESPECIES_FORMULARIO);
+  farmacosNormalizados().forEach((f) => {
+    f.dosis.forEach((d) => {
+      if (d.especie) vistas.add(String(d.especie).toLowerCase());
+    });
+  });
+  return Array.from(vistas);
+}
+
+function especiesDe(farmaco) {
+  const set = new Set();
+  farmaco.dosis.forEach((d) => {
+    if (d.especie) set.add(String(d.especie).toLowerCase());
+  });
+  return Array.from(set);
+}
+
+/* Una alerta bloquea el calculo si NOMBRA la especie elegida. Es una
+   coincidencia de texto: las alertas son prosa libre, no un campo
+   estructurado, asi que no hay forma mas fiable de cruzarlas con la
+   especie sin obligarte a llenar un campo mas por cada alerta. */
+function alertaQueBloquea(farmaco, especie) {
+  if (!especie) return null;
+  const e = normalizarBusqueda(especie);
+  return (farmaco.alertas || []).find((a) => normalizarBusqueda(a).includes(e)) || null;
+}
+
+function retiroEsOrientativo(entrada) {
+  return !normalizarBusqueda(entrada && entrada.fuente).includes("agrocalidad");
+}
+
+/* ---------- Migracion del esquema plano al enriquecido ----------
+   Escribe los campos nuevos y NO borra los viejos. Esa es toda la
+   estrategia de reversion: los datos originales siguen ahi intactos, asi
+   que revertir es quitar los campos nuevos y ya. */
+async function migrarFormulario(opciones) {
+  const opts = opciones || {};
+  const pendientes = state.formulario.filter((f) => !Array.isArray(f.dosis));
+  if (opts.soloSimular) return { total: state.formulario.length, pendientes: pendientes.length };
+
+  let migrados = 0;
+  const fallos = [];
+  for (const crudo of pendientes) {
+    try {
+      const n = farmacoNormalizado(crudo);
+      await updateDoc(doc(db, "formulario", crudo.id), {
+        nombreGenerico: n.nombreGenerico,
+        familia: n.familia,
+        presentaciones: n.presentaciones,
+        dosis: n.dosis,
+        retiro: n.retiro,
+        contraindicaciones: n.contraindicaciones,
+        alertas: n.alertas,
+        verificadoEl: n.verificadoEl,
+        esquemaFormulario: 2,
+        updatedAt: serverTimestamp()
+      });
+      migrados++;
+    } catch (err) {
+      console.error("No se pudo migrar " + crudo.id + ":", err);
+      fallos.push((crudo.nombre || crudo.id) + ": " + ((err && err.code) || "error"));
+    }
+  }
+  return { total: state.formulario.length, pendientes: pendientes.length, migrados, fallos };
+}
+
+/* Deshace la migracion quitando SOLO los campos que ella agrego. Los del
+   esquema viejo nunca se tocaron, asi que el documento queda exactamente
+   como estaba. */
+async function revertirMigracionFormulario() {
+  const migrados = state.formulario.filter((f) => Array.isArray(f.dosis));
+  let revertidos = 0;
+  const fallos = [];
+  for (const crudo of migrados) {
+    try {
+      await updateDoc(doc(db, "formulario", crudo.id), {
+        nombreGenerico: deleteField(),
+        familia: deleteField(),
+        presentaciones: deleteField(),
+        dosis: deleteField(),
+        retiro: deleteField(),
+        contraindicaciones: deleteField(),
+        alertas: deleteField(),
+        verificadoEl: deleteField(),
+        esquemaFormulario: deleteField(),
+        updatedAt: serverTimestamp()
+      });
+      revertidos++;
+    } catch (err) {
+      console.error("No se pudo revertir " + crudo.id + ":", err);
+      fallos.push((crudo.nombreGenerico || crudo.nombre || crudo.id) + ": " + ((err && err.code) || "error"));
+    }
+  }
+  return { revertidos, fallos };
+}
+
+/* ---------- Carga de la semilla ----------
+   Id determinista a partir del slug: volver a pulsar el boton reescribe el
+   mismo documento en vez de crear copias. merge:true conserva createdAt. */
+async function cargarSemillaFormulario() {
+  let cargados = 0;
+  const fallos = [];
+  for (const receta of SEMILLA_FORMULARIO) {
+    if (!receta || !receta.slug) {
+      fallos.push("Una entrada de la semilla no tiene slug y se omitio");
+      continue;
+    }
+    try {
+      await setDoc(
+        doc(db, "formulario", "semilla_" + receta.slug),
+        {
+          uid: currentUid,
+          nombreGenerico: receta.nombreGenerico || "",
+          familia: receta.familia || "",
+          presentaciones: receta.presentaciones || [],
+          dosis: receta.dosis || [],
+          retiro: receta.retiro || [],
+          contraindicaciones: receta.contraindicaciones || [],
+          alertas: receta.alertas || [],
+          verificadoEl: receta.verificadoEl ? new Date(receta.verificadoEl) : null,
+          esquemaFormulario: 2,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        },
+        { merge: true }
+      );
+      cargados++;
+    } catch (err) {
+      console.error("No se pudo cargar " + receta.slug + ":", err);
+      fallos.push(receta.slug + ": " + ((err && err.code) || "error"));
+    }
+  }
+  return { cargados, fallos };
+}
+
+/* ---------- Campos reutilizables del modulo ---------- */
+
+function campoFormulario(labelText, control) {
+  const group = document.createElement("div");
+  group.className = "field-group";
+  const lbl = document.createElement("label");
+  lbl.textContent = labelText;
+  group.appendChild(lbl);
+  group.appendChild(control);
+  return group;
+}
+
+function inputTexto(valor, placeholder) {
+  const input = document.createElement("input");
+  input.placeholder = placeholder || "";
+  input.value = valor == null ? "" : valor;
+  return input;
+}
+
+function inputNumero(valor, placeholder) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.step = "any";
+  input.placeholder = placeholder || "";
+  input.value = valor == null ? "" : valor;
+  return input;
+}
+
+function selectDe(opciones, valor, textoVacio) {
+  const sel = document.createElement("select");
+  if (textoVacio != null) {
+    const o = document.createElement("option");
+    o.value = "";
+    o.textContent = textoVacio;
+    sel.appendChild(o);
+  }
+  opciones.forEach((op) => {
+    const o = document.createElement("option");
+    o.value = op;
+    o.textContent = op;
+    sel.appendChild(o);
+  });
+  sel.value = valor || "";
+  return sel;
+}
+
+function subtituloModulo(texto, extraClase) {
+  const h = document.createElement("div");
+  h.className = "form-subtitulo" + (extraClase ? " " + extraClase : "");
+  h.textContent = texto;
+  return h;
+}
+
+function botonQuitar(etiqueta, onClick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "icon-btn danger";
+  b.textContent = "🗑";
+  b.setAttribute("aria-label", etiqueta);
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+/* ---------- Tabla del formulario ---------- */
+
 function buildFormularioTable(list, withActions) {
   const wrap = document.createElement("div");
   wrap.className = "table-wrap";
@@ -2880,38 +3420,56 @@ function buildFormularioTable(list, withActions) {
   }
   const table = document.createElement("table");
   table.className = "data-table";
-  const cols = withActions ? ["Fármaco", "Dosis", "Vía", "Especies", "Acción"] : ["Fármaco", "Dosis", "Especies"];
+  const cols = withActions
+    ? ["Fármaco", "Familia", "Dosis", "Especies", "Acción"]
+    : ["Fármaco", "Familia", "Especies"];
   table.innerHTML = "<thead><tr>" + cols.map((c) => "<th>" + c + "</th>").join("") + "</tr></thead>";
   const tbody = document.createElement("tbody");
-  list.forEach((item) => {
+
+  list.forEach((crudo) => {
+    const far = farmacoNormalizado(crudo);
     const tr = document.createElement("tr");
     if (!withActions) tr.style.cursor = "default";
     else {
       tr.addEventListener("click", (e) => {
         if (e.target.closest(".row-actions")) return;
         state.studyTab = "formulario";
-        state.activeId = item.id;
+        state.activeId = far.id;
         render();
       });
     }
+
     const nameTd = document.createElement("td");
     nameTd.className = "cell-title";
-    nameTd.textContent = item.nombre || "(sin nombre)";
-    const doseTd = document.createElement("td");
-    doseTd.className = "cell-muted";
-    doseTd.textContent = item.dosisValor != null ? item.dosisValor + " " + (item.dosisUnidad || "") : "—";
+    nameTd.textContent = far.nombreGenerico || "(sin nombre)";
+    // Una alerta absoluta tiene que verse ya en la lista, no solo al abrir.
+    if (far.alertas.length) {
+      const chip = document.createElement("span");
+      chip.className = "form-chip-alerta";
+      chip.textContent = "⚠";
+      chip.title = far.alertas.length + " alerta(s)";
+      nameTd.appendChild(chip);
+    }
+    tr.appendChild(nameTd);
+
+    const famTd = document.createElement("td");
+    famTd.className = "cell-muted";
+    famTd.textContent = far.familia || "—";
+    tr.appendChild(famTd);
+
+    if (withActions) {
+      const doseTd = document.createElement("td");
+      doseTd.className = "cell-muted";
+      doseTd.textContent = far.dosis.length ? far.dosis.length + " pauta(s)" : "—";
+      tr.appendChild(doseTd);
+    }
+
     const specTd = document.createElement("td");
     specTd.className = "cell-muted";
-    specTd.textContent = Array.isArray(item.especies) && item.especies.length ? item.especies.join(", ") : "—";
-    tr.appendChild(nameTd);
-    tr.appendChild(doseTd);
-    if (withActions) {
-      const viaTd = document.createElement("td");
-      viaTd.className = "cell-muted";
-      viaTd.textContent = item.via || "—";
-      tr.appendChild(viaTd);
-    }
+    const esp = especiesDe(far);
+    specTd.textContent = esp.length ? esp.join(", ") : "—";
     tr.appendChild(specTd);
+
     if (withActions) {
       const actTd = document.createElement("td");
       actTd.className = "row-actions";
@@ -2922,23 +3480,18 @@ function buildFormularioTable(list, withActions) {
       editBtn.setAttribute("aria-label", "Editar");
       editBtn.addEventListener("click", () => {
         state.studyTab = "formulario";
-        state.activeId = item.id;
+        state.activeId = far.id;
         render();
       });
-      const delBtn = document.createElement("button");
-      delBtn.type = "button";
-      delBtn.className = "icon-btn danger";
-      delBtn.textContent = "🗑";
-      delBtn.setAttribute("aria-label", "Eliminar");
-      delBtn.addEventListener("click", async () => {
+      const delBtn = botonQuitar("Eliminar", async () => {
         const ok = await askConfirm({
           title: "¿Eliminar del formulario?",
-          message: "Se quitará “" + (item.nombre || "este fármaco") + "” del formulario de referencia.",
+          message: "Se quitará “" + (far.nombreGenerico || "este fármaco") + "” del formulario de referencia.",
           confirmLabel: "Eliminar"
         });
         if (!ok) return;
         try {
-          await deleteDoc(doc(db, "formulario", item.id));
+          await deleteDoc(doc(db, "formulario", far.id));
         } catch (err) {
           alert("No se pudo eliminar (sin conexión).");
         }
@@ -2947,8 +3500,10 @@ function buildFormularioTable(list, withActions) {
       actTd.appendChild(delBtn);
       tr.appendChild(actTd);
     }
+
     tbody.appendChild(tr);
   });
+
   table.appendChild(tbody);
   wrap.appendChild(table);
   return wrap;
@@ -2958,15 +3513,15 @@ async function createFormularioEntry() {
   try {
     const ref = await addDoc(collection(db, "formulario"), {
       uid: currentUid,
-      nombre: "",
-      especies: [],
-      dosisValor: null,
-      dosisUnidad: "mg/kg",
-      via: "",
-      frecuencia: "",
-      concentracionValor: null,
-      concentracionUnidad: "",
-      fuente: "",
+      nombreGenerico: "",
+      familia: "",
+      presentaciones: [],
+      dosis: [],
+      retiro: [],
+      contraindicaciones: [],
+      alertas: [],
+      verificadoEl: null,
+      esquemaFormulario: 2,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
@@ -2978,11 +3533,9 @@ async function createFormularioEntry() {
   }
 }
 
+/* ---------- Pestaña Formulario ---------- */
+
 function renderFormularioTab(root) {
-  // Aquí había 4 tarjetas fijas (Farmacología, Medicina interna, Cirugía,
-  // Diagnóstico por imagen) heredadas del mockup: eran <div> sin ningún
-  // listener, con un "EXPLORAR →" que no llevaba a ninguna parte y que no
-  // salía de tus datos. Se eliminaron por prometer secciones inexistentes.
   const card = document.createElement("div");
   card.className = "card";
   const cardHead = document.createElement("div");
@@ -2999,41 +3552,173 @@ function renderFormularioTab(root) {
   card.appendChild(cardHead);
 
   const filterRow = document.createElement("div");
-  filterRow.style.padding = "14px 18px 0";
-  const especieSelect = document.createElement("select");
+  filterRow.className = "form-filtros";
+
+  const especieSelect = selectDe(especiesDelFormulario(), state.formularioEspecieFilter, "Todas las especies");
   especieSelect.className = "btn-secondary";
-  const blankOpt = document.createElement("option");
-  blankOpt.value = "";
-  blankOpt.textContent = "Todas las especies";
-  especieSelect.appendChild(blankOpt);
-  SPECIES_OPTIONS.forEach((opt) => {
-    const o = document.createElement("option");
-    o.value = opt;
-    o.textContent = opt;
-    especieSelect.appendChild(o);
-  });
-  especieSelect.value = state.formularioEspecieFilter;
   especieSelect.addEventListener("change", () => {
     state.formularioEspecieFilter = especieSelect.value;
     render();
   });
   filterRow.appendChild(especieSelect);
+
+  // El buscador global de la barra superior ya filtra por nombre y familia
+  // (matchesFormularioQuery). Esta pista lo explica en vez de duplicar un
+  // segundo campo de busqueda que haria lo mismo.
+  const pista = document.createElement("span");
+  pista.className = "form-pista";
+  pista.textContent = state.query
+    ? 'Filtrando por “' + state.query + '” (nombre genérico, familia, vía o indicación).'
+    : "Usa el buscador de arriba para filtrar por nombre genérico, familia, vía o indicación.";
+  filterRow.appendChild(pista);
   card.appendChild(filterRow);
 
   const listWrap = document.createElement("div");
   listWrap.style.padding = "14px 0 4px";
+  const filtro = state.formularioEspecieFilter;
   const list = state.formulario
     .filter((f) => matchesFormularioQuery(f, state.query))
-    .filter((f) => !state.formularioEspecieFilter || (Array.isArray(f.especies) ? f.especies : []).includes(state.formularioEspecieFilter))
-    .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+    .filter((f) => !filtro || especiesDe(farmacoNormalizado(f)).includes(filtro))
+    .sort((a, b) =>
+      (farmacoNormalizado(a).nombreGenerico || "").localeCompare(farmacoNormalizado(b).nombreGenerico || "")
+    );
   listWrap.appendChild(buildFormularioTable(list, true));
   card.appendChild(listWrap);
-
   root.appendChild(card);
+
+  root.appendChild(buildMantenimientoFormulario());
 }
+
+/* Mantenimiento: migracion y semilla. Vive dentro de la pestaña Formulario
+   porque es lo unico que administra, y asi no hay que tocar Configuracion
+   ni la navegacion. */
+function buildMantenimientoFormulario() {
+  const card = document.createElement("div");
+  card.className = "card card-pad form-mantenimiento";
+
+  const titulo = document.createElement("h2");
+  titulo.className = "form-mant-titulo";
+  titulo.textContent = "Mantenimiento del formulario";
+  card.appendChild(titulo);
+
+  const sinMigrar = state.formulario.filter((f) => !Array.isArray(f.dosis)).length;
+  const migrados = state.formulario.length - sinMigrar;
+
+  const estado = document.createElement("p");
+  estado.className = "form-mant-desc";
+  estado.textContent =
+    state.formulario.length === 0
+      ? "El formulario está vacío."
+      : migrados + " de " + state.formulario.length + " fármacos usan el esquema nuevo.";
+  card.appendChild(estado);
+
+  const salida = document.createElement("p");
+  salida.className = "form-mant-salida";
+  salida.hidden = true;
+
+  function informar(texto, esError) {
+    salida.hidden = false;
+    salida.textContent = texto;
+    salida.classList.toggle("error", !!esError);
+  }
+
+  const acciones = document.createElement("div");
+  acciones.className = "form-mant-acciones";
+
+  const btnMigrar = document.createElement("button");
+  btnMigrar.type = "button";
+  btnMigrar.className = "btn-primary";
+  btnMigrar.textContent = sinMigrar ? "Migrar " + sinMigrar + " fármaco(s)" : "Nada que migrar";
+  btnMigrar.disabled = !sinMigrar;
+  btnMigrar.addEventListener("click", async () => {
+    const ok = await askConfirm({
+      title: "¿Migrar el formulario?",
+      message:
+        "Se agregan los campos del esquema nuevo a " +
+        sinMigrar +
+        " fármaco(s). Los campos viejos NO se borran, así que la migración se puede revertir.",
+      confirmLabel: "Migrar"
+    });
+    if (!ok) return;
+    btnMigrar.disabled = true;
+    btnMigrar.textContent = "Migrando…";
+    const r = await migrarFormulario();
+    informar(
+      "Migrados " + r.migrados + " de " + r.pendientes + (r.fallos.length ? ". Fallaron: " + r.fallos.join("; ") : "."),
+      r.fallos.length > 0
+    );
+    render();
+  });
+  acciones.appendChild(btnMigrar);
+
+  const btnRevertir = document.createElement("button");
+  btnRevertir.type = "button";
+  btnRevertir.className = "btn-secondary";
+  btnRevertir.textContent = "Revertir migración";
+  btnRevertir.disabled = migrados === 0;
+  btnRevertir.addEventListener("click", async () => {
+    const ok = await askConfirm({
+      title: "¿Revertir la migración?",
+      message:
+        "Se quitan los campos del esquema nuevo de " +
+        migrados +
+        " fármaco(s). Lo que hayas escrito SOLO en los campos nuevos (presentaciones, alertas, retiro…) se pierde. Los datos del esquema viejo quedan intactos.",
+      confirmLabel: "Revertir"
+    });
+    if (!ok) return;
+    btnRevertir.disabled = true;
+    btnRevertir.textContent = "Revirtiendo…";
+    const r = await revertirMigracionFormulario();
+    informar(
+      "Revertidos " + r.revertidos + (r.fallos.length ? ". Fallaron: " + r.fallos.join("; ") : "."),
+      r.fallos.length > 0
+    );
+    render();
+  });
+  acciones.appendChild(btnRevertir);
+
+  const btnSemilla = document.createElement("button");
+  btnSemilla.type = "button";
+  btnSemilla.className = "btn-secondary";
+  btnSemilla.textContent = "Cargar semilla (" + SEMILLA_FORMULARIO.length + ")";
+  btnSemilla.addEventListener("click", async () => {
+    const ok = await askConfirm({
+      title: "¿Cargar la semilla?",
+      message:
+        "Se crean o reescriben " +
+        SEMILLA_FORMULARIO.length +
+        " fármaco(s) desde semilla-formulario.js. Volver a pulsarlo no duplica: reescribe los mismos.",
+      confirmLabel: "Cargar"
+    });
+    if (!ok) return;
+    btnSemilla.disabled = true;
+    btnSemilla.textContent = "Cargando…";
+    const r = await cargarSemillaFormulario();
+    informar("Cargados " + r.cargados + (r.fallos.length ? ". Fallaron: " + r.fallos.join("; ") : "."), r.fallos.length > 0);
+    render();
+  });
+  acciones.appendChild(btnSemilla);
+
+  card.appendChild(acciones);
+  card.appendChild(salida);
+
+  const nota = document.createElement("p");
+  nota.className = "form-mant-desc";
+  nota.textContent =
+    "Los fármacos del esquema viejo se leen y se calculan igual sin migrar: la migración solo habilita los campos nuevos (varias dosis por especie, retiro, alertas).";
+  card.appendChild(nota);
+
+  return card;
+}
+
+/* ---------- Ficha del fármaco ----------
+   Orden fijo: alertas, presentaciones, dosis por especie, retiro,
+   contraindicaciones, y por ultimo verificacion. */
 
 function renderFormularioDetail(root, item) {
   mountedDetailId = item.id;
+  const far = farmacoNormalizado(item);
+
   root.appendChild(
     backLink("Centro de estudio", () => {
       state.activeId = null;
@@ -3047,8 +3732,21 @@ function renderFormularioDetail(root, item) {
   status.innerHTML = '<span class="dot"></span><span class="statusText">Sincronizado</span>';
   const statusText = status.querySelector(".statusText");
 
-  function save(field, value) {
-    scheduleSave("formulario", item.id, { [field]: value }, statusText);
+  function save(campo, valor) {
+    scheduleSave("formulario", far.id, { [campo]: valor }, statusText);
+  }
+
+  // Guardar un array implica reescribirlo entero, asi que la copia local es
+  // la fuente de verdad mientras la ficha esta abierta (los snapshots no
+  // redibujan una ficha montada).
+  function guardarLista(campo, lista) {
+    far[campo] = lista;
+    save(campo, lista);
+  }
+
+  function marcarError(texto) {
+    status.setAttribute("data-state", "error");
+    statusText.textContent = texto;
   }
 
   const tag = document.createElement("span");
@@ -3059,74 +3757,507 @@ function renderFormularioDetail(root, item) {
 
   const titleInput = document.createElement("input");
   titleInput.className = "field-title";
-  titleInput.placeholder = "Nombre del fármaco";
-  titleInput.value = item.nombre || "";
-  titleInput.style.margin = "10px 0 16px";
-  titleInput.addEventListener("input", () => save("nombre", titleInput.value));
+  titleInput.placeholder = "Nombre genérico";
+  titleInput.value = far.nombreGenerico;
+  titleInput.style.margin = "10px 0 8px";
+  titleInput.addEventListener("input", () => save("nombreGenerico", titleInput.value));
 
-  const card = document.createElement("div");
-  card.className = "card card-pad";
-
-  const especiesLabel = document.createElement("label");
-  especiesLabel.className = "checkbox-group-label";
-  especiesLabel.textContent = "Especies aplicables";
-  const especiesBox = buildSpeciesCheckboxes(item.especies, (list) => save("especies", list));
-
-  const doseRow = document.createElement("div");
-  doseRow.className = "field-row";
-  doseRow.style.marginTop = "12px";
-
-  function numberField(labelText, value, onInput, placeholder) {
-    const group = document.createElement("div");
-    group.className = "field-group";
-    const lbl = document.createElement("label");
-    lbl.textContent = labelText;
-    const input = document.createElement("input");
-    input.type = "number";
-    input.step = "any";
-    input.placeholder = placeholder;
-    input.value = value != null ? value : "";
-    input.addEventListener("input", () => onInput(input.value));
-    group.appendChild(lbl);
-    group.appendChild(input);
-    return group;
-  }
-  function textField(labelText, value, onInput, placeholder) {
-    const group = document.createElement("div");
-    group.className = "field-group";
-    const lbl = document.createElement("label");
-    lbl.textContent = labelText;
-    const input = document.createElement("input");
-    input.placeholder = placeholder;
-    input.value = value || "";
-    input.addEventListener("input", () => onInput(input.value));
-    group.appendChild(lbl);
-    group.appendChild(input);
-    return group;
-  }
-
-  doseRow.appendChild(numberField("Dosis", item.dosisValor, (v) => save("dosisValor", v === "" ? null : Number(v)), "Ej. 20"));
-  doseRow.appendChild(textField("Unidad", item.dosisUnidad, (v) => save("dosisUnidad", v), "Ej. mg/kg"));
-  doseRow.appendChild(textField("Vía", item.via, (v) => save("via", v), "Ej. Oral, IV, IM, SC…"));
-  doseRow.appendChild(textField("Frecuencia", item.frecuencia, (v) => save("frecuencia", v), "Ej. c/12h"));
-
-  const concRow = document.createElement("div");
-  concRow.className = "field-row";
-  concRow.appendChild(numberField("Concentración (opcional)", item.concentracionValor, (v) => save("concentracionValor", v === "" ? null : Number(v)), "Ej. 50"));
-  concRow.appendChild(textField("Unidad de concentración", item.concentracionUnidad, (v) => save("concentracionUnidad", v), "Ej. mg/mL"));
-
-  const fuenteRow = document.createElement("div");
-  fuenteRow.className = "field-row";
-  fuenteRow.appendChild(textField("Fuente / referencia", item.fuente, (v) => save("fuente", v), "Ej. Plumb's Veterinary Drug Handbook, 9na ed."));
-
-  card.appendChild(especiesLabel);
-  card.appendChild(especiesBox);
-  card.appendChild(doseRow);
-  card.appendChild(concRow);
-  card.appendChild(fuenteRow);
   root.appendChild(tag);
   root.appendChild(titleInput);
-  root.appendChild(card);
+
+  const familiaRow = document.createElement("div");
+  familiaRow.className = "field-row";
+  const familiaInput = inputTexto(far.familia, "Ej. AINE, aminoglucósido, fluoroquinolona");
+  familiaInput.addEventListener("input", () => save("familia", familiaInput.value));
+  familiaRow.appendChild(campoFormulario("Familia", familiaInput));
+  root.appendChild(familiaRow);
+
+  /* --- 1. Alertas (primero y en rojo, antes que cualquier dosis) --- */
+  const alertasCard = document.createElement("div");
+  alertasCard.className = "card card-pad form-alertas";
+  alertasCard.appendChild(subtituloModulo("Alertas — contraindicaciones absolutas"));
+
+  const alertasLista = document.createElement("div");
+  alertasCard.appendChild(alertasLista);
+
+  function pintarAlertas() {
+    alertasLista.innerHTML = "";
+    if (!far.alertas.length) {
+      const vacio = document.createElement("p");
+      vacio.className = "form-vacio";
+      vacio.textContent = "Sin alertas registradas.";
+      alertasLista.appendChild(vacio);
+    }
+    far.alertas.forEach((texto, i) => {
+      const fila = document.createElement("div");
+      fila.className = "form-fila form-fila-alerta";
+      const input = inputTexto(texto, "Ej. Felinos: no usar en pautas repetidas");
+      input.addEventListener("input", () => {
+        const copia = far.alertas.slice();
+        copia[i] = input.value;
+        guardarLista("alertas", copia);
+      });
+      fila.appendChild(input);
+      fila.appendChild(
+        botonQuitar("Quitar alerta", () => {
+          guardarLista("alertas", far.alertas.filter((_, j) => j !== i));
+          pintarAlertas();
+        })
+      );
+      alertasLista.appendChild(fila);
+    });
+  }
+  pintarAlertas();
+
+  const addAlerta = document.createElement("button");
+  addAlerta.type = "button";
+  addAlerta.className = "btn-secondary";
+  addAlerta.textContent = "+ Agregar alerta";
+  addAlerta.addEventListener("click", () => {
+    guardarLista("alertas", far.alertas.concat(""));
+    pintarAlertas();
+  });
+  alertasCard.appendChild(addAlerta);
+  root.appendChild(alertasCard);
+
+  /* --- 2. Presentaciones --- */
+  const presCard = document.createElement("div");
+  presCard.className = "card card-pad";
+  presCard.appendChild(subtituloModulo("Presentaciones"));
+  const presLista = document.createElement("div");
+  presCard.appendChild(presLista);
+
+  function pintarPresentaciones() {
+    presLista.innerHTML = "";
+    if (!far.presentaciones.length) {
+      const vacio = document.createElement("p");
+      vacio.className = "form-vacio";
+      vacio.textContent = "Sin presentaciones. La calculadora necesita al menos una para dar el volumen en mL.";
+      presLista.appendChild(vacio);
+    }
+    far.presentaciones.forEach((p, i) => {
+      const fila = document.createElement("div");
+      fila.className = "form-fila-bloque";
+      const campos = document.createElement("div");
+      campos.className = "field-row";
+
+      function editar(campo, valor) {
+        const copia = far.presentaciones.map((x, j) => (j === i ? { ...x, [campo]: valor } : x));
+        guardarLista("presentaciones", copia);
+      }
+
+      const conc = inputNumero(p.concentracion, "Ej. 50");
+      conc.addEventListener("input", () => editar("concentracion", conc.value === "" ? null : Number(conc.value)));
+      campos.appendChild(campoFormulario("Concentración", conc));
+
+      const unidad = inputTexto(p.unidadConc, "mg/mL, mg/tableta");
+      unidad.addEventListener("input", () => editar("unidadConc", unidad.value));
+      campos.appendChild(campoFormulario("Unidad", unidad));
+
+      const via = selectDe(VIAS_FORMULARIO, p.via, "—");
+      via.addEventListener("change", () => editar("via", via.value));
+      campos.appendChild(campoFormulario("Vía", via));
+
+      const comercial = inputTexto(p.nombreComercialLocal, "Nombre comercial local");
+      comercial.addEventListener("input", () => editar("nombreComercialLocal", comercial.value));
+      campos.appendChild(campoFormulario("Producto local", comercial));
+
+      fila.appendChild(campos);
+      fila.appendChild(
+        botonQuitar("Quitar presentación", () => {
+          guardarLista("presentaciones", far.presentaciones.filter((_, j) => j !== i));
+          pintarPresentaciones();
+        })
+      );
+      presLista.appendChild(fila);
+    });
+  }
+  pintarPresentaciones();
+
+  const addPres = document.createElement("button");
+  addPres.type = "button";
+  addPres.className = "btn-secondary";
+  addPres.textContent = "+ Agregar presentación";
+  addPres.addEventListener("click", () => {
+    guardarLista(
+      "presentaciones",
+      far.presentaciones.concat({ concentracion: null, unidadConc: "mg/mL", via: "", nombreComercialLocal: "" })
+    );
+    pintarPresentaciones();
+  });
+  presCard.appendChild(addPres);
+  root.appendChild(presCard);
+
+  /* --- 3. Dosis agrupadas por especie --- */
+  const dosisCard = document.createElement("div");
+  dosisCard.className = "card card-pad";
+  dosisCard.appendChild(subtituloModulo("Dosis"));
+  const dosisLista = document.createElement("div");
+  dosisCard.appendChild(dosisLista);
+
+  function filaDosis(d, i) {
+    const bloque = document.createElement("div");
+    bloque.className = "form-fila-bloque";
+
+    function editar(campo, valor) {
+      const copia = far.dosis.map((x, j) => (j === i ? { ...x, [campo]: valor } : x));
+      guardarLista("dosis", copia);
+    }
+
+    const fila1 = document.createElement("div");
+    fila1.className = "field-row";
+
+    const ind = inputTexto(d.indicacion, "Ej. Infección de piel y tejidos blandos");
+    ind.addEventListener("input", () => editar("indicacion", ind.value));
+    fila1.appendChild(campoFormulario("Indicación", ind));
+
+    const via = selectDe(VIAS_FORMULARIO, d.via, "—");
+    via.addEventListener("change", () => editar("via", via.value));
+    fila1.appendChild(campoFormulario("Vía", via));
+
+    const fila2 = document.createElement("div");
+    fila2.className = "field-row";
+
+    const dmin = inputNumero(d.dosisMin, "Mín.");
+    dmin.addEventListener("input", () => editar("dosisMin", dmin.value === "" ? null : Number(dmin.value)));
+    fila2.appendChild(campoFormulario("Dosis mín.", dmin));
+
+    const dmax = inputNumero(d.dosisMax, "Máx.");
+    dmax.addEventListener("input", () => editar("dosisMax", dmax.value === "" ? null : Number(dmax.value)));
+    fila2.appendChild(campoFormulario("Dosis máx.", dmax));
+
+    const uni = inputTexto(d.unidad, "mg/kg, UI/kg");
+    uni.addEventListener("input", () => editar("unidad", uni.value));
+    fila2.appendChild(campoFormulario("Unidad", uni));
+
+    const frec = inputNumero(d.frecuenciaH, "Ej. 12");
+    frec.addEventListener("input", () => editar("frecuenciaH", frec.value === "" ? null : Number(frec.value)));
+    fila2.appendChild(campoFormulario("Cada (h)", frec));
+
+    const dur = inputNumero(d.duracionMaxDias, "Sin límite");
+    dur.addEventListener("input", () => editar("duracionMaxDias", dur.value === "" ? null : Number(dur.value)));
+    fila2.appendChild(campoFormulario("Duración máx. (días)", dur));
+
+    const fila3 = document.createElement("div");
+    fila3.className = "field-row";
+
+    /* La fuente es el unico campo que se niega a guardarse vacio. Sin
+       fuente el dato no es verificable, y un vademecum sin trazabilidad es
+       justo lo que este esquema vino a evitar. */
+    const fuente = inputTexto(d.fuente, "Obligatorio: etiqueta, NADA, EMA, FARAD…");
+    fuente.addEventListener("input", () => {
+      const vacia = !fuente.value.trim();
+      fuente.classList.toggle("campo-invalido", vacia);
+      if (vacia) {
+        marcarError("Sin fuente no se guarda esta dosis");
+        return;
+      }
+      editar("fuente", fuente.value);
+    });
+    if (!String(d.fuente || "").trim()) fuente.classList.add("campo-invalido");
+    fila3.appendChild(campoFormulario("Fuente (obligatoria)", fuente));
+
+    const extraWrap = document.createElement("label");
+    extraWrap.className = "form-check";
+    const extra = document.createElement("input");
+    extra.type = "checkbox";
+    extra.checked = !!d.esExtralabel;
+    extra.addEventListener("change", () => editar("esExtralabel", extra.checked));
+    extraWrap.appendChild(extra);
+    extraWrap.appendChild(document.createTextNode(" Uso extraetiqueta"));
+    fila3.appendChild(extraWrap);
+
+    bloque.appendChild(fila1);
+    bloque.appendChild(fila2);
+    bloque.appendChild(fila3);
+
+    if (!String(d.fuente || "").trim()) {
+      const aviso = document.createElement("p");
+      aviso.className = "form-aviso-error";
+      aviso.textContent = "Esta pauta no tiene fuente: no se usa en la calculadora hasta que la completes.";
+      bloque.appendChild(aviso);
+    }
+
+    bloque.appendChild(
+      botonQuitar("Quitar dosis", () => {
+        guardarLista("dosis", far.dosis.filter((_, j) => j !== i));
+        pintarDosis();
+      })
+    );
+    return bloque;
+  }
+
+  function pintarDosis() {
+    dosisLista.innerHTML = "";
+    if (!far.dosis.length) {
+      const vacio = document.createElement("p");
+      vacio.className = "form-vacio";
+      vacio.textContent = "Sin dosis cargadas.";
+      dosisLista.appendChild(vacio);
+      return;
+    }
+    // Agrupadas por especie, como pide la ficha.
+    const grupos = new Map();
+    far.dosis.forEach((d, i) => {
+      const clave = d.especie || "(sin especie)";
+      if (!grupos.has(clave)) grupos.set(clave, []);
+      grupos.get(clave).push({ d, i });
+    });
+    grupos.forEach((filas, especie) => {
+      dosisLista.appendChild(subtituloModulo(especie, "form-subtitulo-especie"));
+      filas.forEach(({ d, i }) => dosisLista.appendChild(filaDosis(d, i)));
+    });
+  }
+  pintarDosis();
+
+  /* Alta de dosis: aqui SI hay validacion previa. La ficha se guarda sola
+     campo a campo, asi que la unica forma de que "no deje guardar" sea real
+     es que la pauta no entre a la lista sin fuente. */
+  const altaDosis = document.createElement("div");
+  altaDosis.className = "form-alta";
+  altaDosis.appendChild(subtituloModulo("Agregar dosis"));
+
+  const altaFila = document.createElement("div");
+  altaFila.className = "field-row";
+  const altaEspecie = selectDe(ESPECIES_FORMULARIO, "", "Especie…");
+  altaFila.appendChild(campoFormulario("Especie", altaEspecie));
+  const altaMin = inputNumero(null, "Mín.");
+  altaFila.appendChild(campoFormulario("Dosis mín.", altaMin));
+  const altaMax = inputNumero(null, "Máx.");
+  altaFila.appendChild(campoFormulario("Dosis máx.", altaMax));
+  const altaUnidad = inputTexto("mg/kg", "mg/kg");
+  altaFila.appendChild(campoFormulario("Unidad", altaUnidad));
+  const altaVia = selectDe(VIAS_FORMULARIO, "", "Vía…");
+  altaFila.appendChild(campoFormulario("Vía", altaVia));
+  altaDosis.appendChild(altaFila);
+
+  const altaFila2 = document.createElement("div");
+  altaFila2.className = "field-row";
+  const altaFuente = inputTexto("", "Obligatorio: etiqueta, NADA, EMA, FARAD…");
+  altaFila2.appendChild(campoFormulario("Fuente (obligatoria)", altaFuente));
+  altaDosis.appendChild(altaFila2);
+
+  const altaError = document.createElement("p");
+  altaError.className = "form-aviso-error";
+  altaError.hidden = true;
+  altaDosis.appendChild(altaError);
+
+  const altaBtn = document.createElement("button");
+  altaBtn.type = "button";
+  altaBtn.className = "btn-primary";
+  altaBtn.textContent = "Agregar dosis";
+  altaBtn.addEventListener("click", () => {
+    const faltan = [];
+    if (!altaEspecie.value) faltan.push("especie");
+    if (altaMin.value === "") faltan.push("dosis mínima");
+    if (!altaUnidad.value.trim()) faltan.push("unidad");
+    if (!altaVia.value) faltan.push("vía");
+    if (!altaFuente.value.trim()) faltan.push("fuente");
+
+    altaFuente.classList.toggle("campo-invalido", !altaFuente.value.trim());
+    if (faltan.length) {
+      altaError.hidden = false;
+      altaError.textContent = "Falta: " + faltan.join(", ") + ". Sin fuente no se guarda ninguna dosis.";
+      return;
+    }
+    altaError.hidden = true;
+
+    const max = altaMax.value === "" ? Number(altaMin.value) : Number(altaMax.value);
+    guardarLista(
+      "dosis",
+      far.dosis.concat({
+        especie: altaEspecie.value,
+        indicacion: "",
+        dosisMin: Number(altaMin.value),
+        dosisMax: max,
+        unidad: altaUnidad.value.trim(),
+        via: altaVia.value,
+        frecuenciaH: null,
+        duracionMaxDias: null,
+        fuente: altaFuente.value.trim(),
+        esExtralabel: false
+      })
+    );
+    altaEspecie.value = "";
+    altaMin.value = "";
+    altaMax.value = "";
+    altaVia.value = "";
+    altaFuente.value = "";
+    altaFuente.classList.remove("campo-invalido");
+    pintarDosis();
+  });
+  altaDosis.appendChild(altaBtn);
+  dosisCard.appendChild(altaDosis);
+  root.appendChild(dosisCard);
+
+  /* --- 4. Tiempos de retiro --- */
+  const retiroCard = document.createElement("div");
+  retiroCard.className = "card card-pad";
+  retiroCard.appendChild(subtituloModulo("Tiempos de retiro"));
+  const retiroLista = document.createElement("div");
+  retiroCard.appendChild(retiroLista);
+
+  function pintarRetiro() {
+    retiroLista.innerHTML = "";
+    if (!far.retiro.length) {
+      const vacio = document.createElement("p");
+      vacio.className = "form-vacio";
+      vacio.textContent = "Sin tiempos de retiro registrados.";
+      retiroLista.appendChild(vacio);
+    }
+    far.retiro.forEach((r, i) => {
+      const bloque = document.createElement("div");
+      bloque.className = "form-fila-bloque";
+
+      function editar(campo, valor) {
+        const copia = far.retiro.map((x, j) => (j === i ? { ...x, [campo]: valor } : x));
+        guardarLista("retiro", copia);
+      }
+
+      const f1 = document.createElement("div");
+      f1.className = "field-row";
+      const esp = selectDe(ESPECIES_FORMULARIO, r.especie, "Especie…");
+      esp.addEventListener("change", () => editar("especie", esp.value));
+      f1.appendChild(campoFormulario("Especie", esp));
+      const prod = inputTexto(r.producto, "Producto registrado");
+      prod.addEventListener("input", () => editar("producto", prod.value));
+      f1.appendChild(campoFormulario("Producto", prod));
+
+      const f2 = document.createElement("div");
+      f2.className = "field-row";
+      const carne = inputNumero(r.carneDias, "Días");
+      carne.addEventListener("input", () => editar("carneDias", carne.value === "" ? null : Number(carne.value)));
+      f2.appendChild(campoFormulario("Carne (días)", carne));
+      const leche = inputNumero(r.lecheHoras, "Horas");
+      leche.addEventListener("input", () => editar("lecheHoras", leche.value === "" ? null : Number(leche.value)));
+      f2.appendChild(campoFormulario("Leche (horas)", leche));
+      const fue = inputTexto(r.fuente, "AGROCALIDAD, FDA, EMA…");
+      fue.addEventListener("input", () => editar("fuente", fue.value));
+      f2.appendChild(campoFormulario("Fuente", fue));
+
+      bloque.appendChild(f1);
+      bloque.appendChild(f2);
+
+      // El aviso legal: fuera de AGROCALIDAD el dato no es vinculante aqui.
+      if (retiroEsOrientativo(r)) {
+        const aviso = document.createElement("p");
+        aviso.className = "form-aviso-legal";
+        aviso.textContent =
+          "Dato orientativo: la fuente no es AGROCALIDAD. En Ecuador el tiempo de retiro vinculante es el de la etiqueta del producto registrado localmente.";
+        bloque.appendChild(aviso);
+      }
+
+      bloque.appendChild(
+        botonQuitar("Quitar retiro", () => {
+          guardarLista("retiro", far.retiro.filter((_, j) => j !== i));
+          pintarRetiro();
+        })
+      );
+      retiroLista.appendChild(bloque);
+    });
+  }
+  pintarRetiro();
+
+  const addRetiro = document.createElement("button");
+  addRetiro.type = "button";
+  addRetiro.className = "btn-secondary";
+  addRetiro.textContent = "+ Agregar tiempo de retiro";
+  addRetiro.addEventListener("click", () => {
+    guardarLista(
+      "retiro",
+      far.retiro.concat({ especie: "", producto: "", carneDias: null, lecheHoras: null, fuente: "" })
+    );
+    pintarRetiro();
+  });
+  retiroCard.appendChild(addRetiro);
+  root.appendChild(retiroCard);
+
+  /* --- 5. Contraindicaciones --- */
+  const contraCard = document.createElement("div");
+  contraCard.className = "card card-pad";
+  contraCard.appendChild(subtituloModulo("Contraindicaciones"));
+  const contraLista = document.createElement("div");
+  contraCard.appendChild(contraLista);
+
+  function pintarContra() {
+    contraLista.innerHTML = "";
+    if (!far.contraindicaciones.length) {
+      const vacio = document.createElement("p");
+      vacio.className = "form-vacio";
+      vacio.textContent = "Sin contraindicaciones registradas.";
+      contraLista.appendChild(vacio);
+    }
+    far.contraindicaciones.forEach((texto, i) => {
+      const fila = document.createElement("div");
+      fila.className = "form-fila";
+      const input = inputTexto(texto, "Ej. Insuficiencia renal");
+      input.addEventListener("input", () => {
+        const copia = far.contraindicaciones.slice();
+        copia[i] = input.value;
+        guardarLista("contraindicaciones", copia);
+      });
+      fila.appendChild(input);
+      fila.appendChild(
+        botonQuitar("Quitar contraindicación", () => {
+          guardarLista("contraindicaciones", far.contraindicaciones.filter((_, j) => j !== i));
+          pintarContra();
+        })
+      );
+      contraLista.appendChild(fila);
+    });
+  }
+  pintarContra();
+
+  const addContra = document.createElement("button");
+  addContra.type = "button";
+  addContra.className = "btn-secondary";
+  addContra.textContent = "+ Agregar contraindicación";
+  addContra.addEventListener("click", () => {
+    guardarLista("contraindicaciones", far.contraindicaciones.concat(""));
+    pintarContra();
+  });
+  contraCard.appendChild(addContra);
+  root.appendChild(contraCard);
+
+  /* --- 6. Verificacion --- */
+  const verifCard = document.createElement("div");
+  verifCard.className = "card card-pad";
+  verifCard.appendChild(subtituloModulo("Verificación"));
+
+  const verifRow = document.createElement("div");
+  verifRow.className = "field-row";
+  const verifInput = document.createElement("input");
+  verifInput.type = "date";
+  verifInput.value = paraInputFecha(far.verificadoEl);
+  verifInput.addEventListener("change", () => {
+    const valor = verifInput.value ? new Date(verifInput.value) : null;
+    far.verificadoEl = valor;
+    save("verificadoEl", valor);
+    pintarEstadoVerif();
+  });
+  verifRow.appendChild(campoFormulario("Verificado el", verifInput));
+  verifCard.appendChild(verifRow);
+
+  const estadoVerif = document.createElement("p");
+  verifCard.appendChild(estadoVerif);
+
+  function pintarEstadoVerif() {
+    if (!far.verificadoEl) {
+      estadoVerif.className = "form-aviso-error";
+      estadoVerif.textContent = "Sin fecha de verificación.";
+      return;
+    }
+    if (verificacionVencida(far.verificadoEl)) {
+      estadoVerif.className = "form-aviso-error";
+      estadoVerif.textContent =
+        "Desactualizado: verificado el " + fechaCorta(far.verificadoEl) + ", hace más de " + MESES_VIGENCIA_FORMULARIO + " meses.";
+      return;
+    }
+    estadoVerif.className = "form-vacio";
+    estadoVerif.textContent = "Verificado el " + fechaCorta(far.verificadoEl) + ".";
+  }
+  pintarEstadoVerif();
+  root.appendChild(verifCard);
 
   const foot = document.createElement("div");
   foot.className = "editor-foot";
@@ -3137,14 +4268,14 @@ function renderFormularioDetail(root, item) {
   del.addEventListener("click", async () => {
     const ok = await askConfirm({
       title: "¿Eliminar del formulario?",
-      message: "Se borrará “" + (item.nombre || "este fármaco") + "” del formulario de referencia. No se puede deshacer.",
+      message: "Se borrará “" + (far.nombreGenerico || "este fármaco") + "” del formulario de referencia. No se puede deshacer.",
       confirmLabel: "Eliminar"
     });
     if (!ok) return;
     state.activeId = null;
     render();
     try {
-      await deleteDoc(doc(db, "formulario", item.id));
+      await deleteDoc(doc(db, "formulario", far.id));
     } catch (err) {
       alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
     }
@@ -3153,7 +4284,7 @@ function renderFormularioDetail(root, item) {
   foot.appendChild(del);
   root.appendChild(foot);
 
-  if (!item.nombre) setTimeout(() => titleInput.focus(), 0);
+  if (!far.nombreGenerico) setTimeout(() => titleInput.focus(), 0);
 }
 
 /* ---------- Configuración ---------- */

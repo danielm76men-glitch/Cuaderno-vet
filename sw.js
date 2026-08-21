@@ -17,7 +17,7 @@
 
    IMPORTANTE: sube VERSION en cada despliegue. Es la unica linea que hay
    que tocar aqui. */
-const VERSION = "1";
+const VERSION = "2";
 
 const CACHE_SHELL = "vetdiario-shell-v" + VERSION;
 
@@ -40,6 +40,7 @@ const APP_SHELL = [
   "./",
   "./index.html",
   "./app.js",
+  "./semilla-formulario.js",
   "./styles.css",
   "./firebase-config.js",
   "./manifest.json",
@@ -151,7 +152,7 @@ self.addEventListener("fetch", (event) => {
   const ruta = url.pathname.split("/").pop();
   const esDelShell =
     esNavegacion ||
-    ["", "index.html", "app.js", "styles.css", "firebase-config.js", "manifest.json", "icon.svg"].includes(ruta);
+    ["", "index.html", "app.js", "semilla-formulario.js", "styles.css", "firebase-config.js", "manifest.json", "icon.svg"].includes(ruta);
 
   if (!esDelShell) return;
 

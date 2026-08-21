@@ -941,3 +941,73 @@ button, input, select, textarea { font-family: inherit; }
     margin-bottom: 2pt;
   }
 }
+
+/* ============================================================
+   MÓDULO FORMULARIO (vademécum). Bloque aditivo: no redefine
+   ninguna clase existente, todas las de aquí llevan prefijo
+   .form-* o .calc-*, y usan las variables de la paleta.
+   ============================================================ */
+
+.form-filtros { padding: 14px 18px 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.form-pista { font-size: 0.75rem; color: var(--muted); }
+
+.form-subtitulo {
+  font-family: var(--serif); font-size: 0.95rem; font-weight: 700; color: var(--ink);
+  margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line-soft);
+}
+.form-subtitulo-especie {
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--teal-ink); border-bottom: none; margin: 14px 0 6px; padding-bottom: 0;
+}
+.form-vacio { font-size: 0.8rem; color: var(--muted); margin: 4px 0 10px; }
+
+.form-fila { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.form-fila input { flex: 1; }
+.form-fila-bloque {
+  border: 1px solid var(--line-soft); border-radius: 8px; padding: 12px;
+  margin-bottom: 10px; background: var(--paper-alt);
+}
+.form-fila-bloque .field-row { margin-bottom: 8px; }
+
+.form-check { display: flex; align-items: center; gap: 6px; font-size: 0.8rem; color: var(--muted); align-self: flex-end; padding-bottom: 8px; }
+.form-check input { width: auto; }
+
+.form-alta { border-top: 1px dashed var(--line); margin-top: 14px; padding-top: 14px; }
+
+/* Alertas: contraindicaciones absolutas. Es el único bloque de la ficha
+   que se pinta con el rojizo de la paleta de fondo, porque es el único
+   que puede impedir un cálculo. */
+.form-alertas { border-color: var(--rust); border-width: 1px; }
+.form-alertas .form-subtitulo { color: var(--rust-ink); border-bottom-color: var(--rust-soft); }
+.form-fila-alerta input { border-color: var(--rust); }
+.form-chip-alerta { color: var(--rust); margin-left: 6px; font-weight: 700; }
+
+.form-aviso-error { font-size: 0.76rem; color: var(--rust-ink); margin: 6px 0 0; }
+.form-aviso-legal {
+  font-size: 0.76rem; color: var(--amber); margin: 6px 0 0;
+  background: var(--amber-soft); border-radius: 6px; padding: 6px 8px;
+}
+.campo-invalido { border-color: var(--rust) !important; background: var(--rust-soft); }
+
+.form-mantenimiento { margin-top: 16px; }
+.form-mant-titulo { font-family: var(--serif); font-size: 1rem; margin: 0 0 4px; }
+.form-mant-desc { font-size: 0.78rem; color: var(--muted); margin: 0 0 12px; }
+.form-mant-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.form-mant-salida { font-size: 0.78rem; color: var(--teal-ink); margin: 10px 0 0; }
+.form-mant-salida.error { color: var(--rust-ink); }
+
+/* Calculadora */
+.calc-line-suave { font-size: 0.78rem; color: var(--muted); }
+.calc-fuente {
+  font-size: 0.72rem; color: var(--muted); margin-top: 10px;
+  border-top: 1px solid var(--line-soft); padding-top: 8px; word-break: break-word;
+}
+.calc-aviso {
+  font-size: 0.78rem; color: var(--rust-ink); background: var(--rust-soft);
+  border-radius: 6px; padding: 8px 10px; margin-top: 10px;
+}
+.calc-bloqueo {
+  border: 1px solid var(--rust); background: var(--rust-soft); color: var(--rust-ink);
+  border-radius: 8px; padding: 12px; font-size: 0.82rem;
+}
+.calc-bloqueo-titulo { font-weight: 700; margin-bottom: 6px; }

@@ -27,18 +27,10 @@ import {
   serverTimestamp,
   enableIndexedDbPersistence
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-import {
-  getStorage,
-  ref as storageRef,
-  uploadBytesResumable,
-  getBlob,
-  deleteObject
-} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const storage = getStorage(app);
 
 enableIndexedDbPersistence(db).catch((err) => {
   if (err.code === "failed-precondition") {
@@ -354,8 +346,8 @@ const TIMEOUT_COMPRESION = 15000;
      - toBlob puede no llamar jamas a su callback en algunos WebView de
        Android.
 
-   Y como compressImage corre ANTES de uploadPhoto, el vigilante de 60
-   segundos de la subida todavia no existia: no habia nada que cortara. La
+   Y como compressImage corre ANTES de guardar, no habia ningun vigilante
+   posterior que pudiera cortar el cuelgue. La
    foto se quedaba en "Subiendo…" indefinidamente, sin error, sin alerta y
    sin forma de saber por que.
 
@@ -493,387 +485,151 @@ function attachVoiceInput(button, targetEl) {
   });
 }
 
-/* ---------- Cola de fotos pendientes ----------
-   Firestore ya guarda el TEXTO sin conexion por su cuenta (IndexedDB), pero
-   Storage no: una foto que falla al subir se perdia y solo quedaba un
-   alert(). Aqui se guarda el archivo en IndexedDB junto con la entrada a la
-   que pertenece, y se reintenta solo al volver la conexion.
+/* ---------- Fotos en Firestore ----------
 
-   IndexedDB y no localStorage porque localStorage solo guarda texto: meter
-   una foto ahi obligaria a convertirla a base64 (un tercio mas de peso) y
-   se toparia con el limite de ~5 MB. IndexedDB guarda el Blob tal cual.
+   Storage quedo descartado: Firebase ya no lo ofrece en el plan gratuito, y
+   en Ecuador exige un prepago de USD 30. El bucket nunca llego a existir —
+   por eso las subidas se quedaban en "Subiendo…" sin dar error: el SDK
+   reintentaba contra un bucket inexistente hasta que saltaba el vigilante.
 
-   Base propia, separada de la de Firestore: asi una limpieza de la cache de
-   Firestore no se lleva por delante fotos que todavia no se han subido. */
-const FOTOS_DB = "vetdiario-fotos-pendientes";
-const FOTOS_STORE = "pendientes";
-let fotosDbPromesa = null;
+   Ahora la foto vive dentro de un documento de Firestore, en base64. Eso
+   impone el limite de la casa: un documento no pasa de 1 MB, y base64 infla
+   un 33%, asi que el JPEG no puede pasar de ~716 KB. Con 1600 px de lado
+   mayor y calidad 0.82 la media ronda los 477 KB, que entra con holgura.
 
-function abrirColaFotos() {
-  if (fotosDbPromesa) return fotosDbPromesa;
-  fotosDbPromesa = new Promise((resolve, reject) => {
-    const req = indexedDB.open(FOTOS_DB, 1);
-    req.onupgradeneeded = () => {
-      const db_ = req.result;
-      if (!db_.objectStoreNames.contains(FOTOS_STORE)) {
-        const store = db_.createObjectStore(FOTOS_STORE, { keyPath: "id", autoIncrement: true });
-        // Indice por entrada: la ficha abierta necesita SUS pendientes, no
-        // los de todas las fichas.
-        store.createIndex("entryId", "entryId", { unique: false });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  }).catch((err) => {
-    // Si IndexedDB no esta disponible (modo privado en algunos navegadores)
-    // la app sigue funcionando: simplemente no hay cola.
-    console.warn("No se pudo abrir la cola de fotos:", err);
-    fotosDbPromesa = null;
-    throw err;
-  });
-  return fotosDbPromesa;
+   Dos cosas salen gratis de este cambio y conviene no rehacerlas:
+
+   1. La cola de reintentos ya no hace falta. Firestore tiene persistencia
+      offline activada, asi que una escritura sin conexion se guarda local y
+      se sincroniza sola al volver. La foto aparece al instante, marcada
+      como pendiente de sincronizar, y no hay nada que vigilar.
+   2. Las fotos NO viajan en el listener global de "entries". Van en su
+      propia coleccion y se piden solo al abrir un caso, para que la cache
+      del telefono no cargue con las fotos de todos los casos a la vez. */
+
+const LIMITE_BASE64 = 1000000; // margen bajo el 1 MB real del documento
+const MAX_LADO_FOTO = 1600;
+const CALIDAD_FOTO = 0.82;
+
+/* Un solo campo para filtrar. Con uid y entryId por separado Firestore
+   pediria un indice compuesto; concatenados es una igualdad simple que
+   funciona sin configurar nada en la consola. */
+function claveFotos(entryId) {
+  return currentUid + "__" + entryId;
 }
 
-function operacionCola(modo, fn) {
-  return abrirColaFotos().then(
-    (db_) =>
-      new Promise((resolve, reject) => {
-        const tx = db_.transaction(FOTOS_STORE, modo);
-        const req = fn(tx.objectStore(FOTOS_STORE));
-        tx.onerror = () => reject(tx.error);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
-      })
-  );
-}
-
-function encolarFoto(registro) {
-  return operacionCola("readwrite", (store) => store.add(registro));
-}
-
-function quitarFotoPendiente(id) {
-  return operacionCola("readwrite", (store) => store.delete(id));
-}
-
-// Guarda el resultado de un intento fallido sin perder el blob.
-function actualizarFotoPendiente(id, cambios) {
-  return abrirColaFotos().then(
-    (db_) =>
-      new Promise((resolve, reject) => {
-        const tx = db_.transaction(FOTOS_STORE, "readwrite");
-        const store = tx.objectStore(FOTOS_STORE);
-        const lectura = store.get(id);
-        lectura.onsuccess = () => {
-          const reg = lectura.result;
-          if (!reg) return resolve(null);
-          const escritura = store.put({ ...reg, ...cambios });
-          escritura.onsuccess = () => resolve(escritura.result);
-          escritura.onerror = () => reject(escritura.error);
-        };
-        lectura.onerror = () => reject(lectura.error);
-        tx.onerror = () => reject(tx.error);
-      })
-  );
-}
-
-/* Diagnostico de Storage. Sube un archivo de 1 byte y cuenta exactamente
-   que paso. Existe porque el error real ocurre en el celular, donde no hay
-   consola que mirar: sin esto, "no sube" es todo lo que se puede saber. */
-async function diagnosticarStorage() {
-  const lineas = [];
-  const bucket = (firebaseConfig && firebaseConfig.storageBucket) || "(sin definir)";
-  lineas.push("Bucket configurado: " + bucket);
-  lineas.push("Sesión: " + (currentUid ? "activa" : "NO hay sesión"));
-  lineas.push("Navegador en línea: " + (navigator.onLine ? "sí" : "no"));
-
-  if (!currentUid) {
-    lineas.push("");
-    lineas.push("Sin sesión no se puede probar la subida.");
-    return lineas.join("\n");
-  }
-
-  const ruta = "photos/" + currentUid + "/diagnostico/" + Date.now() + ".txt";
-  try {
-    const url = await uploadPhoto(ruta, new Blob(["ok"], { type: "text/plain" }), () => {});
-    lineas.push("");
-    lineas.push("ESCRITURA: correcta");
-    lineas.push("LECTURA (getDownloadURL): correcta");
-    lineas.push("");
-    lineas.push("Storage funciona. Si una foto sigue sin subir, el problema es de esa foto, no de la configuración.");
-    try {
-      await deleteObject(storageRef(storage, ruta));
-      lineas.push("(archivo de prueba borrado)");
-    } catch (e) {
-      lineas.push("(no se pudo borrar el archivo de prueba: " + ((e && e.code) || e) + ")");
-    }
-    void url;
-  } catch (err) {
-    const motivo = clasificarFalloDeSubida(err);
-    lineas.push("");
-    lineas.push("FALLÓ: " + motivo.detalle);
-    lineas.push("");
-    if (motivo.tipo === "reintentable") {
-      lineas.push("La petición sale pero no transfiere nada. Las causas típicas:");
-      lineas.push("• Storage no está activado en la consola de Firebase.");
-      lineas.push("• storageBucket no coincide con el bucket real del proyecto.");
-      lineas.push("  Los proyectos nuevos usan  <proyecto>.firebasestorage.app");
-      lineas.push("  y los antiguos              <proyecto>.appspot.com");
-    }
-  }
-  return lineas.join("\n");
-}
-
-function fotosPendientesDeEntrada(entryId) {
-  return operacionCola("readonly", (store) => store.index("entryId").getAll(entryId)).catch(() => []);
-}
-
-function todasLasFotosPendientes() {
-  return operacionCola("readonly", (store) => store.getAll()).catch(() => []);
-}
-
-/* Solo se encola lo que puede arreglarse solo al volver la red. Un fallo de
-   permisos o de cuota se repetiria indefinidamente en cada reconexion sin
-   llegar nunca a subir, asi que esos siguen avisando al momento. */
-/* Antes esto devolvia un si/no, y ahi estaba el problema: un fallo de
-   CONFIGURACION (Storage sin activar, bucket mal escrito, reglas que
-   rechazan) se clasificaba como "falta de conexion" y la foto se quedaba
-   reintentandose para siempre, repitiendo el mismo error y sin decir nunca
-   cual era. Eso es el "Pendiente de subir" que no cambia nunca.
-
-   Ahora se distingue el motivo, y solo se reintenta lo que de verdad puede
-   arreglarse solo. */
-const MAX_INTENTOS_FOTO = 3;
-
-function clasificarFalloDeSubida(err) {
-  if (!navigator.onLine) return { tipo: "sin-conexion", detalle: "Sin conexión" };
-
-  const code = (err && err.code) || "";
-  const configuracion = {
-    "storage/unauthorized": "Las reglas de Storage rechazan la subida. Revisa storage.rules y que estén publicadas.",
-    "storage/unauthenticated": "La sesión no llegó a Storage. Cierra sesión y vuelve a entrar.",
-    "storage/quota-exceeded": "El bucket superó su cuota.",
-    "storage/project-not-found": "El proyecto del config no existe.",
-    "storage/bucket-not-found": "El bucket no existe. ¿Activaste Storage en la consola de Firebase?",
-    "storage/invalid-argument": "El archivo o la ruta no son válidos."
-  };
-  if (configuracion[code]) return { tipo: "configuracion", detalle: code + " — " + configuracion[code] };
-
-  // Estos SI pueden ser mala señal, asi que se reintentan — pero contados.
-  if (code === "storage/retry-limit-exceeded") {
-    return { tipo: "reintentable", detalle: "storage/retry-limit-exceeded — se agotaron los reintentos del SDK" };
-  }
-  if (err && err.message === "sin-progreso") {
-    return { tipo: "reintentable", detalle: "No transfirió un solo byte en 60 s" };
-  }
-
-  return { tipo: "configuracion", detalle: code || (err && err.message) || "Error desconocido" };
-}
-
-// Compatibilidad: el alta de fotos solo necesita saber si vale la pena
-// encolar. Cualquier fallo se encola — la foto no se pierde nunca — y es la
-// cola la que decide si insiste o se rinde.
-function esFalloDeConexion(err) {
-  const t = clasificarFalloDeSubida(err).tipo;
-  return t === "sin-conexion" || t === "reintentable" || t === "configuracion";
-}
-
-/* La ficha abierta se apunta aqui para que la cola pueda refrescar su
-   cuadricula al terminar una subida. Solo puede haber una ficha abierta a
-   la vez, asi que basta un hueco; render() lo limpia. */
-let seccionFotosMontada = null;
-
-/* Un objectURL por foto pendiente, reutilizado entre renders. Creando uno
-   nuevo cada vez que se redibuja la ficha, el blob anterior se queda en
-   memoria hasta recargar: con fotos de 1 MB eso se nota. */
-const urlsPendientes = new Map();
-
-function urlDePendiente(registro) {
-  if (!urlsPendientes.has(registro.id)) {
-    urlsPendientes.set(registro.id, URL.createObjectURL(registro.blob));
-  }
-  return urlsPendientes.get(registro.id);
-}
-
-function olvidarUrlPendiente(colaId) {
-  const url = urlsPendientes.get(colaId);
-  if (url) {
-    URL.revokeObjectURL(url);
-    urlsPendientes.delete(colaId);
-  }
-}
-
-let colaEnCurso = false;
-
-async function procesarColaFotos() {
-  if (colaEnCurso || !currentUid || !navigator.onLine) return;
-  colaEnCurso = true;
-  try {
-    const pendientes = (await todasLasFotosPendientes())
-      .filter((p) => p.uid === currentUid)
-      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-    if (!pendientes.length) return;
-
-    let subidas = 0;
-    for (const reg of pendientes) {
-      // Si la red se cae a media cola, se para: lo que queda sigue guardado
-      // y se retomara en la proxima reconexion.
-      if (!navigator.onLine) break;
-      // Una foto ya bloqueada no se reintenta: su error no se arregla solo.
-      if (reg.bloqueada) continue;
-      try {
-        // La URL que devuelve uploadPhoto es lo que hace visible la foto: la
-        // cuadricula filtra por p.url. Sin ella, la foto sube a Storage pero
-        // se guarda "invisible" y no aparece nunca.
-        const url = await uploadPhoto(reg.path, reg.blob, () => {});
-        const foto = { url, path: reg.path, name: reg.name };
-        // arrayUnion en vez de reescribir el array entero: si mientras tanto
-        // agregaste otra foto desde el celular, no se pierde.
-        await updateDoc(doc(db, "entries", reg.entryId), {
-          fotos: arrayUnion(foto),
-          updatedAt: serverTimestamp()
-        });
-        await quitarFotoPendiente(reg.id);
-        subidas++;
-        if (seccionFotosMontada && seccionFotosMontada.entryId === reg.entryId) {
-          seccionFotosMontada.alSubir(reg.id, foto);
-        }
-      } catch (err) {
-        const motivo = clasificarFalloDeSubida(err);
-        const intentos = (reg.intentos || 0) + 1;
-        logFoto("cola: falló " + reg.name + " (" + motivo.tipo + ", intento " + intentos + ") — " + motivo.detalle);
-
-        if (motivo.tipo === "sin-conexion") break; // ni cuenta el intento
-
-        /* Se rinde cuando el error es de configuracion, o cuando ya lo
-           intento MAX_INTENTOS_FOTO veces. Rendirse NO borra la foto: queda
-           en la cola marcada, con el motivo a la vista y un boton para
-           reintentar cuando hayas arreglado lo que sea. */
-        const seRinde = motivo.tipo === "configuracion" || intentos >= MAX_INTENTOS_FOTO;
-        await actualizarFotoPendiente(reg.id, {
-          intentos,
-          ultimoError: motivo.detalle,
-          bloqueada: seRinde
-        });
-        if (seccionFotosMontada && seccionFotosMontada.entryId === reg.entryId) {
-          seccionFotosMontada.alFallar(reg.id, seRinde ? motivo.detalle : "");
-        }
-        if (!seRinde) break; // el resto de la cola espera a la proxima vuelta
-      }
-    }
-    if (subidas) showToast(subidas === 1 ? "Foto pendiente subida" : subidas + " fotos pendientes subidas");
-  } finally {
-    colaEnCurso = false;
-  }
-}
-
-/* Sube un archivo a Storage informando el avance real. Antes se usaba
-   uploadBytes(), que no da progreso: si la subida se quedaba colgada (sin
-   red, Storage no habilitado, reglas que no responden) la promesa nunca se
-   resolvía ni fallaba y la foto se quedaba en "Subiendo…" para siempre.
-   Con uploadBytesResumable sí hay eventos de avance, y un vigilante corta
-   la subida si pasa un minuto sin transferir un solo byte. */
-function uploadPhoto(path, blob, onProgress) {
+function blobADataURL(blob) {
   return new Promise((resolve, reject) => {
-    logFoto("subida: iniciando " + path + " (" + Math.round(blob.size / 1024) + " KB)");
-    let task;
-    try {
-      task = uploadBytesResumable(storageRef(storage, path), blob, { contentType: "image/jpeg" });
-    } catch (err) {
-      // storageRef lanza en el acto si el bucket del config esta mal escrito.
-      logFoto("subida: no arrancó — " + ((err && err.code) || err));
-      reject(err);
-      return;
-    }
-    let lastBytes = -1;
-    let lastMovedAt = Date.now();
-
-    const watchdog = setInterval(() => {
-      if (Date.now() - lastMovedAt > 60000) {
-        clearInterval(watchdog);
-        logFoto("subida: 60 s sin transferir un byte, se cancela");
-        try {
-          task.cancel();
-        } catch (e) {
-          /* ya terminó o ya estaba cancelada */
-        }
-        reject(new Error("sin-progreso"));
-      }
-    }, 5000);
-
-    task.on(
-      "state_changed",
-      (snap) => {
-        if (snap.bytesTransferred !== lastBytes) {
-          if (lastBytes === -1) logFoto("subida: primer evento de progreso (estado " + snap.state + ")");
-          lastBytes = snap.bytesTransferred;
-          lastMovedAt = Date.now();
-        }
-        if (snap.totalBytes > 0) {
-          onProgress(Math.min(99, Math.round((snap.bytesTransferred / snap.totalBytes) * 100)));
-        }
-      },
-      (err) => {
-        clearInterval(watchdog);
-        logFoto("subida: ERROR " + ((err && err.code) || err));
-        reject(err);
-      },
-      async () => {
-        clearInterval(watchdog);
-        logFoto("subida: bytes completos, pidiendo la URL de descarga");
-        try {
-          const url = await getDownloadURL(task.snapshot.ref);
-          logFoto("subida: OK");
-          resolve(url);
-        } catch (err) {
-          // Los bytes ya estan en Storage; lo que fallo es LEER la URL, que
-          // es un permiso distinto en storage.rules.
-          logFoto("subida: subió pero getDownloadURL falló — " + ((err && err.code) || err));
-          reject(err);
-        }
-      }
-    );
+    const lector = new FileReader();
+    lector.onload = () => resolve(lector.result);
+    lector.onerror = () => reject(lector.error || new Error("no se pudo leer el archivo"));
+    lector.readAsDataURL(blob);
   });
 }
 
-/* ---------- Lectura de fotos protegida por reglas ----------
-   getBlob() descarga con las credenciales de la sesion, asi que la descarga
-   la autoriza (o la deniega) la misma regla de Storage que todo lo demas. No
-   queda ninguna URL permanente que se pueda filtrar.
+/* Comprime y, si aun asi no entra en el documento, baja la calidad por
+   pasos. Sin esto una foto especialmente detallada reventaria el limite y
+   Firestore la rechazaria con un error que no dice nada util. */
+async function prepararFotoParaFirestore(file) {
+  let calidad = CALIDAD_FOTO;
+  let lado = MAX_LADO_FOTO;
 
-   El coste es que cada imagen hay que bajarla para poder pintarla, asi que
-   se cachea el objectURL por ruta: renderGrid() se ejecuta muchas veces
-   mientras editas la ficha y sin cache cada pasada volveria a descargar la
-   radiografia entera. */
-const urlsDeFotos = new Map();
-
-function olvidarUrlsDeFotos() {
-  urlsDeFotos.forEach((url) => URL.revokeObjectURL(url));
-  urlsDeFotos.clear();
+  for (let intento = 0; intento < 5; intento++) {
+    const blob = await compressImage(file, lado, calidad);
+    const dataUrl = await blobADataURL(blob);
+    if (dataUrl.length <= LIMITE_BASE64) {
+      logFoto("foto lista: " + Math.round(dataUrl.length / 1024) + " KB en base64 (calidad " + calidad + ", " + lado + " px)");
+      return dataUrl;
+    }
+    logFoto("no entra (" + Math.round(dataUrl.length / 1024) + " KB), bajando calidad");
+    calidad = Math.max(0.5, calidad - 0.12);
+    lado = Math.max(900, Math.round(lado * 0.85));
+  }
+  throw new Error("foto-demasiado-grande");
 }
 
-async function urlDeFoto(photo) {
-  if (!photo) return "";
+// Las fotos de un caso, ordenadas por antiguedad.
+function fotosDeEntrada(entryId) {
+  return getDocs(query(collection(db, "fotos"), where("uidEntrada", "==", claveFotos(entryId)))).then((snap) =>
+    snap.docs
+      .map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }), _pending: d.metadata.hasPendingWrites }))
+      .sort((a, b) => (a.orden || 0) - (b.orden || 0))
+  );
+}
 
-  // Marcadores en curso y pendientes: su url ya es un objectURL local, no
-  // hay nada que descargar.
-  if (photo.uploading || photo.pendiente) return photo.url || "";
+async function guardarFoto(entryId, file) {
+  const datos = await prepararFotoParaFirestore(file);
+  const ref = await addDoc(collection(db, "fotos"), {
+    uid: currentUid,
+    entryId,
+    uidEntrada: claveFotos(entryId),
+    nombre: file.name || "foto.jpg",
+    datos,
+    orden: Date.now(),
+    createdAt: serverTimestamp()
+  });
+  return { id: ref.id, nombre: file.name || "foto.jpg", datos };
+}
 
-  /* COMPATIBILIDAD TEMPORAL — quitar cuando la migracion haya terminado.
-     Las fotos subidas antes de este cambio guardaron la URL con token y no
-     siempre guardaron la ruta. Mientras existan, se siguen pintando con esa
-     URL: si no, dejarian de verse de golpe. */
-  if (!photo.path && photo.url) return photo.url;
+/* Rescate de la cola vieja. Las fotos que quedaron atrapadas intentando
+   subir a Storage siguen guardadas en IndexedDB con su blob intacto: se
+   pasan a Firestore y se sacan de la cola. Se ejecuta una vez al entrar y
+   despues la base se borra sola, porque ya no la usa nadie. */
+const FOTOS_DB_VIEJA = "vetdiario-fotos-pendientes";
 
-  if (!photo.path) return "";
-  if (urlsDeFotos.has(photo.path)) return urlsDeFotos.get(photo.path);
+async function rescatarFotosAtrapadas() {
+  if (!currentUid) return;
+  let registros = [];
+  try {
+    registros = await new Promise((resolve, reject) => {
+      const req = indexedDB.open(FOTOS_DB_VIEJA);
+      req.onerror = () => reject(req.error);
+      req.onsuccess = () => {
+        const db_ = req.result;
+        if (!db_.objectStoreNames.contains("pendientes")) {
+          db_.close();
+          resolve([]);
+          return;
+        }
+        const tx = db_.transaction("pendientes", "readonly");
+        const todo = tx.objectStore("pendientes").getAll();
+        todo.onsuccess = () => {
+          db_.close();
+          resolve(todo.result || []);
+        };
+        todo.onerror = () => {
+          db_.close();
+          reject(todo.error);
+        };
+      };
+    });
+  } catch (err) {
+    return; // la base no existe: no habia nada atrapado
+  }
 
-  const blob = await getBlob(storageRef(storage, photo.path));
-  // Otra pasada de renderGrid() pudo pedir la misma foto mientras esta
-  // descargaba; si ya la dejo en el cache, se descarta esta copia.
-  if (urlsDeFotos.has(photo.path)) return urlsDeFotos.get(photo.path);
-  const url = URL.createObjectURL(blob);
-  urlsDeFotos.set(photo.path, url);
-  return url;
+  const mias = registros.filter((r) => r.uid === currentUid && r.blob);
+  if (!mias.length) {
+    indexedDB.deleteDatabase(FOTOS_DB_VIEJA);
+    return;
+  }
+
+  logFoto("rescatando " + mias.length + " foto(s) que se quedaron sin subir");
+  let rescatadas = 0;
+  for (const reg of mias) {
+    try {
+      await guardarFoto(reg.entryId, new File([reg.blob], reg.name || "foto.jpg", { type: reg.blob.type || "image/jpeg" }));
+      rescatadas++;
+    } catch (err) {
+      logFoto("no se pudo rescatar " + reg.name + ": " + ((err && err.message) || err));
+    }
+  }
+  if (rescatadas) {
+    showToast(rescatadas === 1 ? "Se recuperó 1 foto pendiente" : "Se recuperaron " + rescatadas + " fotos pendientes");
+    render();
+  }
+  // Solo se borra la cola si TODAS se salvaron; si alguna fallo, se
+  // conserva para reintentar en el proximo arranque.
+  if (rescatadas === mias.length) indexedDB.deleteDatabase(FOTOS_DB_VIEJA);
 }
 
 function buildPhotosSection(entry, statusText) {
@@ -885,33 +641,6 @@ function buildPhotosSection(entry, statusText) {
   const label = document.createElement("span");
   label.textContent = "Fotos (radiografías, ecografías, paciente)";
   head.appendChild(label);
-
-  /* Diagnostico de Storage. Va aqui y no en Configuracion porque es aqui
-     donde te enteras de que algo falla, y porque el error real ocurre en el
-     celular, donde no hay consola que abrir. */
-  const btnDiag = document.createElement("button");
-  btnDiag.type = "button";
-  btnDiag.className = "icon-btn";
-  btnDiag.textContent = "🩺";
-  btnDiag.title = "Diagnosticar la subida de fotos";
-  btnDiag.setAttribute("aria-label", "Diagnosticar la subida de fotos");
-  btnDiag.addEventListener("click", async () => {
-    btnDiag.disabled = true;
-    const previo = btnDiag.textContent;
-    btnDiag.textContent = "…";
-    try {
-      const informe = await diagnosticarStorage();
-      await askConfirm({
-        title: "Diagnóstico de fotos",
-        message: informe,
-        confirmLabel: "Entendido"
-      });
-    } finally {
-      btnDiag.textContent = previo;
-      btnDiag.disabled = false;
-    }
-  });
-  head.appendChild(btnDiag);
   wrap.appendChild(head);
 
   const grid = document.createElement("div");
@@ -925,165 +654,46 @@ function buildPhotosSection(entry, statusText) {
   fileInput.style.display = "none";
   wrap.appendChild(fileInput);
 
-  /* Al leer se descartan los marcadores de "subiendo": son temporales, su
-     `url` es un blob: local que muere al recargar la página. Si alguno
-     quedó guardado en Firestore por una subida interrumpida, se ve como
-     una foto eternamente "Subiendo…" que nunca carga; al filtrarlos aquí
-     desaparecen y el siguiente commit() limpia el documento. */
-  /* Una foto vale si tiene RUTA (esquema nuevo) o URL heredada (esquema
-     viejo, mientras dure la compatibilidad). Antes se exigia `url`, asi que
-     al dejar de guardarla las fotos nuevas habrian desaparecido de la ficha
-     sin ningun aviso. */
-  const photos = (Array.isArray(entry.fotos) ? entry.fotos : []).filter(
-    (p) => p && (p.path || p.url) && !p.uploading && !String(p.url || "").startsWith("blob:")
-  );
-
-  // Nunca se persiste un marcador en curso ni uno pendiente: solo fotos ya
-  // subidas a Storage, que son las que tienen una URL definitiva. Las
-  // pendientes viven en IndexedDB, no en Firestore — su `url` es un blob:
-  // local que no significaria nada en otro dispositivo.
-  function commit() {
-    const persistible = photos.filter(
-      (p) => p && (p.path || p.url) && !p.uploading && !p.pendiente && !String(p.url || "").startsWith("blob:")
-    );
-    scheduleSave("entries", entry.id, { fotos: persistible }, statusText);
-  }
-
-  /* Fotos que quedaron en la cola de una sesion anterior. Se leen de
-     IndexedDB y se vuelven a mostrar como pendientes: el objectURL del
-     intento original murio al recargar, asi que se crea uno nuevo desde el
-     blob guardado. Sin esto, al recargar sin conexion parecerian perdidas. */
-  fotosPendientesDeEntrada(entry.id).then((pendientes) => {
-    const nuevas = pendientes.filter((p) => !photos.some((f) => f.colaId === p.id));
-    if (!nuevas.length) return;
-    nuevas.forEach((p) => {
-      photos.push({
-        url: urlDePendiente(p),
-        name: p.name,
-        pendiente: true,
-        colaId: p.id,
-        bloqueada: !!p.bloqueada,
-        ultimoError: p.ultimoError || ""
-      });
-    });
-    renderGrid();
-  });
-
-  // La cola avisa por aqui cuando logra subir una de estas fotos, para que
-  // la cuadricula cambie el rotulo "Pendiente" por la foto real sin tener
-  // que cerrar la ficha (mientras esta abierta, los snapshots no redibujan).
-  seccionFotosMontada = {
-    entryId: entry.id,
-    alSubir(colaId, foto) {
-      olvidarUrlPendiente(colaId);
-      const idx = photos.findIndex((p) => p.colaId === colaId);
-      if (idx > -1) photos[idx] = foto;
-      else photos.push(foto);
-      renderGrid();
-    },
-    // La cola se rindio con esta foto: el mosaico deja de decir "Pendiente"
-    // y pasa a decir por que, que es lo unico accionable.
-    alFallar(colaId, detalle) {
-      const idx = photos.findIndex((p) => p.colaId === colaId);
-      if (idx === -1) return;
-      photos[idx] = { ...photos[idx], bloqueada: !!detalle, ultimoError: detalle };
-      renderGrid();
-    }
-  };
+  // Copia local: la ficha abierta no se redibuja con los snapshots, asi que
+  // esta lista es la fuente de verdad mientras este montada.
+  let fotos = [];
+  let cargando = true;
 
   function renderGrid() {
     grid.innerHTML = "";
 
-    photos.forEach((photo, i) => {
+    if (cargando) {
+      const esperando = document.createElement("div");
+      esperando.className = "photos-cargando";
+      esperando.textContent = "Cargando fotos…";
+      grid.appendChild(esperando);
+      return;
+    }
+
+    fotos.forEach((foto) => {
       const tile = document.createElement("div");
       tile.className = "photo-tile";
 
       const img = document.createElement("img");
-      img.alt = photo.name || "Foto";
+      img.src = foto.datos;
+      img.alt = foto.nombre || "Foto";
       img.loading = "lazy";
       tile.appendChild(img);
 
-      /* La fuente ya no es un dato del documento: hay que ir a buscarla a
-         Storage. Mientras llega, el mosaico queda en blanco con su marco; si
-         la descarga se deniega (sesion caducada, o alguien mirando datos que
-         no son suyos) se dice, en vez de dejar un hueco mudo. */
-      urlDeFoto(photo).then(
-        (url) => {
-          if (url) img.src = url;
-        },
-        (err) => {
-          console.warn("No se pudo cargar la foto " + (photo.path || photo.url) + ":", err);
-          const fallo = document.createElement("div");
-          fallo.className = "photo-uploading photo-pendiente";
-          fallo.textContent = "No se pudo cargar";
-          tile.appendChild(fallo);
-        }
-      );
-
-      if (photo.uploading) {
+      if (foto.subiendo) {
         const spin = document.createElement("div");
         spin.className = "photo-uploading";
-        spin.textContent = photo.progress != null ? "Subiendo… " + photo.progress + "%" : "Subiendo…";
+        spin.textContent = "Guardando…";
         tile.appendChild(spin);
-      } else if (photo.pendiente) {
-        const aviso = document.createElement("div");
-        aviso.className = "photo-uploading photo-pendiente";
-        if (photo.bloqueada) {
-          /* "Pendiente de subir" para siempre no dice nada y no se puede
-             accionar. Cuando la cola se rinde, el mosaico dice que fallo y
-             deja tocarlo para ver el motivo exacto. */
-          aviso.classList.add("photo-bloqueada");
-          aviso.textContent = "No se pudo subir — toca para ver";
-          aviso.setAttribute("role", "button");
-          aviso.tabIndex = 0;
-          const verMotivo = async () => {
-            const reintentar = await askConfirm({
-              title: "No se pudo subir esta foto",
-              message: (photo.ultimoError || "Motivo desconocido.") + "\n\nLa foto sigue guardada aquí; no se ha perdido.",
-              confirmLabel: "Reintentar"
-            });
-            if (!reintentar) return;
-            await actualizarFotoPendiente(photo.colaId, { intentos: 0, bloqueada: false, ultimoError: "" }).catch(() => {});
-            photo.bloqueada = false;
-            photo.ultimoError = "";
-            renderGrid();
-            procesarColaFotos();
-          };
-          aviso.addEventListener("click", verMotivo);
-          aviso.addEventListener("keydown", (e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              verMotivo();
-            }
-          });
-        } else {
-          aviso.textContent = "Pendiente de subir";
-        }
-        tile.appendChild(aviso);
-
-        // Tambien se puede descartar una pendiente: si no, una foto que no
-        // quieres se queda reintentandose en cada reconexion sin manera de
-        // sacarla.
-        const del = document.createElement("button");
-        del.type = "button";
-        del.className = "photo-remove";
-        del.textContent = "×";
-        del.setAttribute("aria-label", "Descartar foto pendiente");
-        del.addEventListener("click", async () => {
-          const ok = await askConfirm({
-            title: "¿Descartar esta foto?",
-            message: "Todavía no se ha subido. Si la descartas, se pierde.",
-            confirmLabel: "Descartar"
-          });
-          if (!ok) return;
-          await quitarFotoPendiente(photo.colaId).catch(() => {});
-          olvidarUrlPendiente(photo.colaId);
-          const idx = photos.indexOf(photo);
-          if (idx > -1) photos.splice(idx, 1);
-          renderGrid();
-        });
-        tile.appendChild(del);
       } else {
+        if (foto._pending) {
+          // Firestore la tiene en local y la subira sola. No es un error ni
+          // requiere nada del usuario: es informacion, no una alarma.
+          const marca = document.createElement("div");
+          marca.className = "photo-sinsync";
+          marca.textContent = "Sin sincronizar";
+          tile.appendChild(marca);
+        }
         const del = document.createElement("button");
         del.type = "button";
         del.className = "photo-remove";
@@ -1092,20 +702,18 @@ function buildPhotosSection(entry, statusText) {
         del.addEventListener("click", async () => {
           const ok = await askConfirm({
             title: "¿Eliminar esta foto?",
-            message: "Se borra también del almacenamiento y no se puede deshacer.",
+            message: "Se borra definitivamente y no se puede deshacer.",
             confirmLabel: "Eliminar"
           });
           if (!ok) return;
           tile.style.opacity = "0.4";
-          try {
-            if (photo.path) await deleteObject(storageRef(storage, photo.path));
-          } catch (err) {
-            /* si ya no existe en Storage, igual la quitamos de la lista */
-          }
-          const idx = photos.indexOf(photo);
-          if (idx > -1) photos.splice(idx, 1);
+          fotos = fotos.filter((f) => f !== foto);
           renderGrid();
-          commit();
+          try {
+            await deleteDoc(doc(db, "fotos", foto.id));
+          } catch (err) {
+            logFoto("no se pudo borrar la foto: " + ((err && err.code) || err));
+          }
         });
         tile.appendChild(del);
       }
@@ -1122,74 +730,65 @@ function buildPhotosSection(entry, statusText) {
     grid.appendChild(addTile);
   }
 
-  fileInput.addEventListener("change", async () => {
-    const files = Array.from(fileInput.files || []);
-    fileInput.value = "";
-    for (const file of files) {
-      const objectUrl = URL.createObjectURL(file);
-      const placeholder = { url: objectUrl, name: file.name, uploading: true, progress: 0 };
-      photos.push(placeholder);
+  renderGrid();
+
+  fotosDeEntrada(entry.id)
+    .then((lista) => {
+      cargando = false;
+      // Puede haber llegado una foto nueva mientras cargaba: no se pisan.
+      const nuevas = fotos.filter((f) => !lista.some((l) => l.id === f.id));
+      fotos = lista.concat(nuevas);
       renderGrid();
-      const path = "photos/" + currentUid + "/" + entry.id + "/" + Date.now() + "_" + file.name;
-      // Fuera del try para poder reusarlo en el catch: lo que se encola es
-      // la version comprimida, no el original de varios MB.
-      let comprimida = null;
+    })
+    .catch((err) => {
+      cargando = false;
+      logFoto("no se pudieron cargar las fotos: " + ((err && err.code) || err));
+      renderGrid();
+      if (statusText) {
+        statusText.parentElement.setAttribute("data-state", "error");
+        statusText.textContent =
+          err && err.code === "permission-denied"
+            ? "Falta publicar las reglas de la colección fotos"
+            : "No se pudieron cargar las fotos";
+      }
+    });
+
+  fileInput.addEventListener("change", async () => {
+    const archivos = Array.from(fileInput.files || []);
+    fileInput.value = "";
+
+    for (const file of archivos) {
+      logFoto("archivo: " + file.name + " · " + file.type + " · " + Math.round(file.size / 1024) + " KB");
+      const provisional = { id: "tmp-" + Date.now(), nombre: file.name, datos: URL.createObjectURL(file), subiendo: true };
+      fotos.push(provisional);
+      renderGrid();
+
       try {
-        logFoto("archivo: " + file.name + " · " + file.type + " · " + Math.round(file.size / 1024) + " KB");
-        comprimida = await compressImage(file, 1600, 0.82);
-        await uploadPhoto(path, comprimida, (pct) => {
-          placeholder.progress = pct;
-          renderGrid();
-        });
-        // Solo la ruta: la URL con token ya no se guarda ni se genera.
-        const idx = photos.indexOf(placeholder);
-        if (idx > -1) photos[idx] = { path, name: file.name };
-        URL.revokeObjectURL(objectUrl);
+        const guardada = await guardarFoto(entry.id, file);
+        URL.revokeObjectURL(provisional.datos);
+        const i = fotos.indexOf(provisional);
+        // _pending: sin conexion, Firestore la guarda local y la sincroniza
+        // despues; con conexion ya esta arriba.
+        const registro = { ...guardada, _pending: !navigator.onLine };
+        if (i > -1) fotos[i] = registro;
+        else fotos.push(registro);
         renderGrid();
-        commit();
       } catch (err) {
-        const idx = photos.indexOf(placeholder);
-
-        if (esFalloDeConexion(err)) {
-          // Sin red: la foto NO se pierde. Se guarda en IndexedDB y el
-          // marcador pasa de "Subiendo…" a "Pendiente de subir". El
-          // objectURL se conserva (no se revoca) porque es lo que sigue
-          // mostrando la miniatura hasta que suba.
-          try {
-            const colaId = await encolarFoto({
-              uid: currentUid,
-              entryId: entry.id,
-              path,
-              name: file.name,
-              blob: comprimida || file,
-              createdAt: Date.now()
-            });
-            // Se reaprovecha el objectURL que ya estaba mostrando la
-            // miniatura, en vez de crear otro al volver a dibujar la ficha.
-            urlsPendientes.set(colaId, objectUrl);
-            if (idx > -1) photos[idx] = { url: objectUrl, name: file.name, pendiente: true, colaId };
-            renderGrid();
-            showToast("Sin conexión — la foto se subirá al reconectar");
-            continue;
-          } catch (errCola) {
-            console.warn("No se pudo encolar la foto:", errCola);
-            // Si ni la cola funciona, se cae al aviso de siempre.
-          }
-        }
-
-        if (idx > -1) photos.splice(idx, 1);
-        URL.revokeObjectURL(objectUrl);
+        URL.revokeObjectURL(provisional.datos);
+        fotos = fotos.filter((f) => f !== provisional);
         renderGrid();
+        logFoto("falló al guardar: " + ((err && err.code) || (err && err.message) || err));
         alert(
-          err && err.message === "sin-progreso"
-            ? "La subida de " + file.name + " se quedó sin avanzar y se canceló. Revisa tu conexión o si Storage está activado en el proyecto de Firebase."
-            : "No se pudo subir " + file.name + ". Revisa tu conexión (o si Storage sigue sin activarse en el proyecto)."
+          err && err.message === "foto-demasiado-grande"
+            ? "“" + file.name + "” es demasiado grande incluso comprimida. Prueba con una captura de menor resolución."
+            : "No se pudo guardar “" + file.name + "”. " + ((err && err.code) === "permission-denied"
+                ? "Faltan las reglas de la colección “fotos” en Firestore."
+                : "Intenta de nuevo.")
         );
       }
     }
   });
 
-  renderGrid();
   return wrap;
 }
 
@@ -2200,14 +1799,6 @@ document.addEventListener("focusout", () => {
 function render() {
   renderPendiente = false;
   mountedDetailId = null;
-  // La cuadricula de fotos que estuviera montada deja de existir tras el
-  // innerHTML = "": si la cola le hablara despues, escribiria sobre nodos
-  // huerfanos.
-  seccionFotosMontada = null;
-  // Los objectURL de las fotos apuntan a blobs que siguen ocupando memoria
-  // aunque el <img> que los usaba ya no exista. Se sueltan aqui, en el mismo
-  // punto donde se desmonta todo lo demas.
-  olvidarUrlsDeFotos();
   setActiveNav();
   els.content.innerHTML = "";
 
@@ -4929,8 +4520,8 @@ els.themeToggle.addEventListener("click", toggleTheme);
 
 window.addEventListener("online", () => {
   if (state.ready) setConn("online", "En línea");
-  // Volvio la red: se vacia la cola de fotos que no pudieron subir.
-  procesarColaFotos();
+  // Firestore sincroniza sus escrituras pendientes por su cuenta; las
+  // fotos ya no necesitan una cola aparte.
 });
 window.addEventListener("offline", () => {
   setConn("offline", "Sin conexión — se guardará al reconectar");
@@ -5220,9 +4811,9 @@ onAuthStateChanged(auth, (user) => {
     render();
     adoptOrphanEntries().then(subscribeEntries);
     subscribeFormulario();
-    // Al entrar tambien se intenta vaciar la cola: si cerraste la app sin
-    // señal, el evento "online" ya paso y nadie lo escucho.
-    procesarColaFotos();
+    // Rescata las fotos que quedaron atrapadas en la cola vieja cuando las
+    // subidas iban a Storage. Se ejecuta una vez y despues no encuentra nada.
+    rescatarFotosAtrapadas();
   } else {
     currentUid = null;
     if (unsubscribe) {

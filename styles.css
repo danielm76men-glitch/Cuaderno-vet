@@ -698,10 +698,6 @@ button, input, select, textarea { font-family: inherit; }
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.45); color: #fff; font-size: 0.65rem; font-weight: 700; text-align: center; padding: 4px;
 }
-/* Pendiente de subir. Se distingue de "Subiendo…" a proposito: aquella es
-   una barra en curso, esta es un estado detenido esperando conexion. El
-   rojizo de la paleta ya se usa para "requiere tu atencion". */
-.photo-pendiente { background: rgba(177, 79, 44, 0.78); }
 .photo-add {
   aspect-ratio: 1; border: 1px dashed var(--line); border-radius: 8px; background: transparent;
   color: var(--muted); font-size: 1.3rem; cursor: pointer; display: flex; align-items: center; justify-content: center;
@@ -1017,6 +1013,13 @@ button, input, select, textarea { font-family: inherit; }
    un párrafo ilegible. No afecta a los mensajes de una sola línea. */
 .confirm-msg { white-space: pre-line; }
 
-/* Una foto que la cola dio por perdida. Se distingue de "Pendiente": esa
-   está esperando, esta necesita que hagas algo. */
-.photo-bloqueada { background: rgba(177, 79, 44, 0.9); cursor: pointer; }
+
+/* Foto guardada en local que Firestore todavía no ha sincronizado. Es un
+   aviso, no un error: se sube sola. Por eso va en el verde de la app y no
+   en el rojizo, que aquí significa "requiere tu atención". */
+.photo-sinsync {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  background: rgba(46, 102, 89, 0.85); color: #f3f1e7;
+  font-size: 0.6rem; font-weight: 700; text-align: center; padding: 3px 4px;
+}
+.photos-cargando { grid-column: 1 / -1; font-size: 0.8rem; color: var(--muted); padding: 6px 2px; }

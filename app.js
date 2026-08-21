@@ -549,8 +549,28 @@ async function prepararFotoParaFirestore(file) {
 }
 
 // Las fotos de un caso, ordenadas por antiguedad.
+/* OJO con el filtro por uid: parece redundante porque "uidEntrada" ya lleva
+   el uid dentro, y no lo es.
+
+   Las reglas de seguridad de Firestore NO son filtros. En una consulta de
+   lista, Firestore exige que la propia consulta demuestre que solo puede
+   devolver documentos permitidos; no evalua la regla documento a documento.
+   La regla dice "uid == request.auth.uid", asi que la consulta tiene que
+   restringir el campo "uid" explicitamente. Filtrando solo por uidEntrada,
+   Firestore no puede demostrarlo y rechaza la consulta entera con
+   permission-denied — que es lo que hacia aparecer "Falta publicar las
+   reglas" aunque las reglas estuvieran publicadas y correctas.
+
+   Dos filtros de igualdad no necesitan indice compuesto: Firestore los
+   resuelve combinando los indices de campo unico. */
 function fotosDeEntrada(entryId) {
-  return getDocs(query(collection(db, "fotos"), where("uidEntrada", "==", claveFotos(entryId)))).then((snap) =>
+  return getDocs(
+    query(
+      collection(db, "fotos"),
+      where("uid", "==", currentUid),
+      where("uidEntrada", "==", claveFotos(entryId))
+    )
+  ).then((snap) =>
     snap.docs
       .map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }), _pending: d.metadata.hasPendingWrites }))
       .sort((a, b) => (a.orden || 0) - (b.orden || 0))
@@ -632,6 +652,271 @@ async function rescatarFotosAtrapadas() {
   if (rescatadas === mias.length) indexedDB.deleteDatabase(FOTOS_DB_VIEJA);
 }
 
+/* ---------- Visor de fotos con zoom ----------
+
+   Una radiografia mirada en un mosaico de 90 px no sirve para nada. Al tocar
+   una foto se abre a pantalla completa y desde ahi se puede acercar.
+
+   Va con Pointer Events y no con eventos de raton y de tactil por separado:
+   el navegador los unifica, asi que arrastrar con el dedo y arrastrar con el
+   raton son el mismo codigo. El pellizco necesita dos punteros a la vez, y
+   para eso se guardan en un Map.
+
+   El zoom se aplica con transform sobre el <img>. Se hace en un solo paso
+   (translate + scale) y no anidando elementos, porque encadenar transforms
+   acumula errores de redondeo al arrastrar. */
+
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 8;
+
+let visorFotoEl = null;
+let visorFotoEsc = null;
+
+function cerrarVisorFoto() {
+  if (visorFotoEl) {
+    visorFotoEl.remove();
+    visorFotoEl = null;
+  }
+  if (visorFotoEsc) {
+    document.removeEventListener("keydown", visorFotoEsc);
+    visorFotoEsc = null;
+  }
+}
+
+function abrirVisorFoto(lista, indiceInicial) {
+  cerrarVisorFoto();
+
+  let indice = indiceInicial;
+  let escala = 1;
+  let despX = 0;
+  let despY = 0;
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "overlay-backdrop visor-foto";
+  // Cerrar tocando el fondo, pero solo si no estabas arrastrando: si no, al
+  // soltar el dedo fuera de la imagen se cerraria el visor cada vez.
+  backdrop.addEventListener("click", (e) => {
+    if (e.target === backdrop && !huboArrastre) cerrarVisorFoto();
+  });
+
+  const marco = document.createElement("div");
+  marco.className = "visor-marco";
+
+  const img = document.createElement("img");
+  img.className = "visor-img";
+  img.alt = "";
+  img.draggable = false;
+  marco.appendChild(img);
+
+  function aplicarTransform() {
+    img.style.transform = "translate(" + despX + "px, " + despY + "px) scale(" + escala + ")";
+    img.style.cursor = escala > 1 ? "grab" : "zoom-in";
+    marco.classList.toggle("con-zoom", escala > 1);
+    if (btnMenos) btnMenos.disabled = escala <= ZOOM_MIN;
+    if (btnMas) btnMas.disabled = escala >= ZOOM_MAX;
+    if (nivel) nivel.textContent = Math.round(escala * 100) + "%";
+  }
+
+  /* Limita el desplazamiento para que la imagen no se pueda arrastrar fuera
+     de la pantalla y desaparecer. El margen disponible es lo que sobresale
+     del marco al estar ampliada. */
+  function limitarDesplazamiento() {
+    const r = marco.getBoundingClientRect();
+    const anchoSobra = Math.max(0, (img.clientWidth * escala - r.width) / 2);
+    const altoSobra = Math.max(0, (img.clientHeight * escala - r.height) / 2);
+    despX = Math.max(-anchoSobra, Math.min(anchoSobra, despX));
+    despY = Math.max(-altoSobra, Math.min(altoSobra, despY));
+  }
+
+  // Acerca manteniendo fijo el punto que estas señalando, que es lo que
+  // espera la mano: si haces zoom sobre una lesion, la lesion no se escapa.
+  function zoomEn(nuevaEscala, puntoX, puntoY) {
+    const previa = escala;
+    escala = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, nuevaEscala));
+    if (escala === previa) return;
+
+    const r = marco.getBoundingClientRect();
+    const cx = puntoX - r.left - r.width / 2;
+    const cy = puntoY - r.top - r.height / 2;
+    const factor = escala / previa;
+    despX = cx - (cx - despX) * factor;
+    despY = cy - (cy - despY) * factor;
+
+    if (escala === 1) {
+      despX = 0;
+      despY = 0;
+    }
+    limitarDesplazamiento();
+    aplicarTransform();
+  }
+
+  function reiniciarZoom() {
+    escala = 1;
+    despX = 0;
+    despY = 0;
+    aplicarTransform();
+  }
+
+  function mostrar(i) {
+    indice = (i + lista.length) % lista.length;
+    const foto = lista[indice];
+    img.src = foto.datos;
+    img.alt = foto.nombre || "Foto";
+    reiniciarZoom();
+    if (contador) contador.textContent = lista.length > 1 ? indice + 1 + " / " + lista.length : "";
+    if (titulo) titulo.textContent = foto.nombre || "";
+  }
+
+  /* ---- Punteros: arrastrar con uno, pellizcar con dos ---- */
+  const punteros = new Map();
+  let distanciaInicial = 0;
+  let escalaInicial = 1;
+  let huboArrastre = false;
+
+  marco.addEventListener("pointerdown", (e) => {
+    punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    huboArrastre = false;
+    if (punteros.size === 2) {
+      const [a, b] = Array.from(punteros.values());
+      distanciaInicial = Math.hypot(a.x - b.x, a.y - b.y);
+      escalaInicial = escala;
+    }
+    marco.setPointerCapture(e.pointerId);
+  });
+
+  marco.addEventListener("pointermove", (e) => {
+    if (!punteros.has(e.pointerId)) return;
+    const previo = punteros.get(e.pointerId);
+    punteros.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (punteros.size === 2) {
+      const [a, b] = Array.from(punteros.values());
+      const distancia = Math.hypot(a.x - b.x, a.y - b.y);
+      if (distanciaInicial > 0) {
+        huboArrastre = true;
+        zoomEn(escalaInicial * (distancia / distanciaInicial), (a.x + b.x) / 2, (a.y + b.y) / 2);
+      }
+      return;
+    }
+
+    // Arrastrar solo tiene sentido con la imagen ampliada.
+    if (escala <= 1) return;
+    const dx = e.clientX - previo.x;
+    const dy = e.clientY - previo.y;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) huboArrastre = true;
+    despX += dx;
+    despY += dy;
+    limitarDesplazamiento();
+    aplicarTransform();
+  });
+
+  function soltarPuntero(e) {
+    punteros.delete(e.pointerId);
+    if (punteros.size < 2) distanciaInicial = 0;
+  }
+  marco.addEventListener("pointerup", soltarPuntero);
+  marco.addEventListener("pointercancel", soltarPuntero);
+
+  // Rueda del raton: acercar y alejar sobre el cursor.
+  marco.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      zoomEn(escala * (e.deltaY < 0 ? 1.18 : 1 / 1.18), e.clientX, e.clientY);
+    },
+    { passive: false }
+  );
+
+  // Doble toque o doble clic: alternar entre ajustada y 3x, que es el gesto
+  // que todo el mundo intenta primero.
+  marco.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    if (escala > 1) reiniciarZoom();
+    else zoomEn(3, e.clientX, e.clientY);
+  });
+
+  // Un clic simple sobre la imagen sin zoom tambien acerca: en el celular
+  // el doble toque es incomodo con una mano.
+  img.addEventListener("click", (e) => {
+    if (huboArrastre) return;
+    if (escala === 1) zoomEn(2.5, e.clientX, e.clientY);
+  });
+
+  /* ---- Barra de controles ---- */
+  const barra = document.createElement("div");
+  barra.className = "visor-barra";
+
+  const titulo = document.createElement("span");
+  titulo.className = "visor-titulo";
+
+  const contador = document.createElement("span");
+  contador.className = "visor-contador";
+
+  function botonVisor(texto, etiqueta, alPulsar) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "visor-btn";
+    b.textContent = texto;
+    b.setAttribute("aria-label", etiqueta);
+    b.addEventListener("click", alPulsar);
+    return b;
+  }
+
+  const centro = () => {
+    const r = marco.getBoundingClientRect();
+    return [r.left + r.width / 2, r.top + r.height / 2];
+  };
+
+  const btnMenos = botonVisor("−", "Alejar", () => zoomEn(escala / 1.4, ...centro()));
+  const nivel = document.createElement("span");
+  nivel.className = "visor-nivel";
+  const btnMas = botonVisor("+", "Acercar", () => zoomEn(escala * 1.4, ...centro()));
+  const btnReset = botonVisor("⟲", "Restablecer zoom", reiniciarZoom);
+
+  const cerrar = document.createElement("button");
+  cerrar.type = "button";
+  cerrar.className = "visor-btn visor-cerrar";
+  cerrar.textContent = "×";
+  cerrar.setAttribute("aria-label", "Cerrar");
+  cerrar.addEventListener("click", cerrarVisorFoto);
+
+  barra.appendChild(titulo);
+  barra.appendChild(contador);
+  barra.appendChild(btnMenos);
+  barra.appendChild(nivel);
+  barra.appendChild(btnMas);
+  barra.appendChild(btnReset);
+  barra.appendChild(cerrar);
+
+  // Flechas solo si hay mas de una foto.
+  if (lista.length > 1) {
+    const anterior = botonVisor("‹", "Foto anterior", () => mostrar(indice - 1));
+    anterior.classList.add("visor-nav", "visor-nav-izq");
+    const siguiente = botonVisor("›", "Foto siguiente", () => mostrar(indice + 1));
+    siguiente.classList.add("visor-nav", "visor-nav-der");
+    backdrop.appendChild(anterior);
+    backdrop.appendChild(siguiente);
+  }
+
+  backdrop.appendChild(barra);
+  backdrop.appendChild(marco);
+  document.body.appendChild(backdrop);
+  visorFotoEl = backdrop;
+
+  visorFotoEsc = (e) => {
+    if (e.key === "Escape") cerrarVisorFoto();
+    else if (e.key === "ArrowLeft" && lista.length > 1) mostrar(indice - 1);
+    else if (e.key === "ArrowRight" && lista.length > 1) mostrar(indice + 1);
+    else if (e.key === "+" || e.key === "=") zoomEn(escala * 1.4, ...centro());
+    else if (e.key === "-") zoomEn(escala / 1.4, ...centro());
+    else if (e.key === "0") reiniciarZoom();
+  };
+  document.addEventListener("keydown", visorFotoEsc);
+
+  mostrar(indice);
+  cerrar.focus();
+}
+
 function buildPhotosSection(entry, statusText) {
   const wrap = document.createElement("div");
   wrap.className = "photos";
@@ -678,6 +963,15 @@ function buildPhotosSection(entry, statusText) {
       img.src = foto.datos;
       img.alt = foto.nombre || "Foto";
       img.loading = "lazy";
+      // Abrir el visor a pantalla completa. Solo las fotos ya guardadas: una
+      // que todavia se esta subiendo no tiene nada que ampliar.
+      if (!foto.subiendo) {
+        img.style.cursor = "zoom-in";
+        img.addEventListener("click", () => {
+          const verEstas = fotos.filter((f) => !f.subiendo);
+          abrirVisorFoto(verEstas, verEstas.indexOf(foto));
+        });
+      }
       tile.appendChild(img);
 
       if (foto.subiendo) {
@@ -1798,6 +2092,8 @@ document.addEventListener("focusout", () => {
 
 function render() {
   renderPendiente = false;
+  // El visor apunta a nodos que este render va a destruir.
+  cerrarVisorFoto();
   mountedDetailId = null;
   setActiveNav();
   els.content.innerHTML = "";
@@ -2245,7 +2541,7 @@ function bloqueImpreso(titulo) {
   return sec;
 }
 
-function buildPrintableCase(entry) {
+function buildPrintableCase(entry, fotos) {
   const caso = currentEntry(entry);
   const root = document.createElement("div");
   root.id = "printArea";
@@ -2340,14 +2636,66 @@ function buildPrintableCase(entry) {
     root.appendChild(sec);
   }
 
+  /* Fotos. Van al final a proposito: son lo que mas ocupa, y si fueran
+     antes empujarian el texto del caso a la segunda pagina. Se imprimen
+     porque van en base64 dentro del documento — no dependen de que el
+     navegador pueda descargar nada al generar el PDF. */
+  if (fotos && fotos.length) {
+    const sec = document.createElement("div");
+    sec.className = "print-block";
+    const h = document.createElement("h2");
+    h.textContent = fotos.length === 1 ? "Imagen" : "Imágenes (" + fotos.length + ")";
+    sec.appendChild(h);
+
+    const rejilla = document.createElement("div");
+    rejilla.className = "print-fotos";
+    fotos.forEach((f) => {
+      const fig = document.createElement("figure");
+      fig.className = "print-foto";
+      const im = document.createElement("img");
+      im.src = f.datos;
+      im.alt = f.nombre || "";
+      fig.appendChild(im);
+      if (f.nombre) {
+        const cap = document.createElement("figcaption");
+        cap.textContent = f.nombre;
+        fig.appendChild(cap);
+      }
+      rejilla.appendChild(fig);
+    });
+    sec.appendChild(rejilla);
+    root.appendChild(sec);
+  }
+
   return root;
 }
 
-function imprimirCaso(entry) {
+async function imprimirCaso(entry, boton) {
   const previo = document.getElementById("printArea");
   if (previo) previo.remove();
 
-  const area = buildPrintableCase(entry);
+  /* Las fotos ya no viven dentro del caso: hay que pedirlas. Por eso esto
+     es async y por eso el boton avisa — con varias fotos en base64 la
+     consulta tarda lo justo para que un clic sin respuesta despiste. */
+  let fotos = [];
+  const textoPrevio = boton ? boton.textContent : null;
+  if (boton) {
+    boton.disabled = true;
+    boton.textContent = "Preparando…";
+  }
+  try {
+    fotos = await fotosDeEntrada(entry.id);
+  } catch (err) {
+    // Sin fotos se imprime igual: mejor un PDF sin imagenes que ninguno.
+    logFoto("no se pudieron traer las fotos para el PDF: " + ((err && err.code) || err));
+  } finally {
+    if (boton) {
+      boton.disabled = false;
+      boton.textContent = textoPrevio;
+    }
+  }
+
+  const area = buildPrintableCase(entry, fotos);
   document.body.appendChild(area);
 
   function limpiar() {
@@ -2431,7 +2779,7 @@ function renderPatientDetail(root, entry) {
   pdfBtn.type = "button";
   pdfBtn.className = "btn-secondary";
   pdfBtn.textContent = "📄 Descargar PDF";
-  pdfBtn.addEventListener("click", () => imprimirCaso(entry));
+  pdfBtn.addEventListener("click", () => imprimirCaso(entry, pdfBtn));
   actions.appendChild(calcBtn);
   actions.appendChild(pdfBtn);
 

@@ -4,11 +4,11 @@
   <!-- Disco de fondo en el verde de la app -->
   <circle cx="256" cy="256" r="256" fill="#2e6659"/>
 
-  <!-- Todo el simbolo se reduce al 72% alrededor del centro para que quepa
-       dentro de la zona segura del icono maskable (radio 205 de 512), y sube 11 px
-       para quedar centrado en el disco. Sin
-       esto, Android recortaba las puntas de las alas. -->
-  <g id="simbolo" transform="translate(256,245) scale(0.68) translate(-256,-256)">
+  <!-- Todo el simbolo se reduce al 68% alrededor del centro para que quepa
+       dentro de la zona segura del icono maskable (radio 205 de 512), y sube
+       11 px para quedar centrado en el disco. Sin esto, Android recortaba las
+       puntas de las alas al instalar la app. -->
+  <g transform="translate(256,245) scale(0.68) translate(-256,-256)">
 
     <g fill="#f3f1e7">
       <!-- Ala derecha en tres capas de plumas. La izquierda es esta misma
@@ -26,7 +26,7 @@
 
       <!-- Pomo y vara -->
       <circle cx="256" cy="96" r="27"/>
-      <rect x="243" y="118" width="26" height="322" rx="13"/>
+      <rect x="243" y="118" width="26" height="330" rx="13"/>
     </g>
 
     <!-- Serpiente enroscada. Va con trazo, no relleno: a tamano chico una
@@ -43,8 +43,8 @@
          actua de separacion para que la V no se confunda con la vara ni con
          la serpiente por debajo; encima la V en color papel. -->
     <g fill="none" stroke-linejoin="miter" stroke-linecap="butt">
-      <path d="M 172 280 L 256 438 L 340 280" stroke="#2e6659" stroke-width="62"/>
-      <path d="M 172 280 L 256 438 L 340 280" stroke="#f3f1e7" stroke-width="34"/>
+      <path d="M 160 274 L 256 450 L 352 274" stroke="#2e6659" stroke-width="70"/>
+      <path d="M 160 274 L 256 450 L 352 274" stroke="#f3f1e7" stroke-width="38"/>
     </g>
   </g>
 </svg>

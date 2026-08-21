@@ -169,6 +169,13 @@ button, input, select, textarea { font-family: inherit; }
 }
 .sidebar-brand .glyph { font-size: 1.2rem; }
 
+/* Logo. Va como <img> del mismo icon.svg que usa la PWA, para no tener dos
+   dibujos que mantener en paralelo. El disco verde ya trae su propio fondo,
+   asi que se ve igual en modo claro y en oscuro. */
+.brand-mark { display: block; width: 26px; height: 26px; flex: 0 0 auto; border-radius: 50%; }
+.brand-mark-lg { width: 44px; height: 44px; }
+.auth-card h1 { display: flex; align-items: center; justify-content: center; gap: 10px; }
+
 .sidebar-nav { flex: 1; padding: 12px 10px; display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
 .nav-item {
   appearance: none;

@@ -91,7 +91,6 @@ const state = {
   entries: [],
   formulario: [],
   profile: null,
-  profileError: "",
   page: "dashboard",
   studyTab: "materias",
   areaFilter: "",
@@ -1362,7 +1361,43 @@ function isTypingInContent() {
   return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT";
 }
 
+/* Un snapshot que llega mientras escribes NO puede redibujar: render() vacía
+   els.content y vuelve a crear los campos, así que el input que tenías bajo
+   el cursor deja de existir — se pierde el foco, el texto seleccionado y el
+   menú de sugerencias. Eso es el "guardado brusco": tu propio guardado
+   vuelve como eco 450 ms después y te tumba el campo.
+
+   detailIsBeingEdited() ya cubría las fichas abiertas, pero no las páginas
+   de lista ni Configuración, que también tienen campos. Aquí se cubren
+   todas: si hay alguien escribiendo, el render queda pendiente y se ejecuta
+   en cuanto el cursor sale del campo. */
+let renderPendiente = false;
+
+function renderDesdeSnapshot() {
+  if (detailIsBeingEdited() || isTypingInContent()) {
+    renderPendiente = true;
+    updateNavCounts();
+    return;
+  }
+  render();
+}
+
+/* Al salir de un campo se recupera lo que se dejó pendiente. El setTimeout
+   es para dar tiempo a que el foco aterrice: al saltar de un input a otro
+   con Tab, focusout dispara ANTES de que el siguiente reciba el foco, y sin
+   la espera redibujaríamos justo en medio del salto. Las fichas abiertas
+   siguen bajo su propia regla: ahí no se redibuja hasta cerrarlas. */
+document.addEventListener("focusout", () => {
+  if (!renderPendiente) return;
+  setTimeout(() => {
+    if (!renderPendiente) return;
+    if (detailIsBeingEdited() || isTypingInContent()) return;
+    render();
+  }, 200);
+});
+
 function render() {
+  renderPendiente = false;
   mountedDetailId = null;
   setActiveNav();
   els.content.innerHTML = "";
@@ -2911,23 +2946,23 @@ function renderSettingsPage(root) {
   perfilDesc.style.marginBottom = "10px";
   perfilDesc.textContent = "Tu nombre y título, como aparecen en la barra lateral.";
 
-  // El estado arranca describiendo lo que REALMENTE pasó al cargar, no un
-  // "Sincronizado" fijo: antes decía que estaba sincronizado aunque el
-  // perfil nunca se hubiera podido leer ni guardar.
+  // El perfil ya no se "prepara" al entrar: el documento nace con la primera
+  // tecla (createIfMissing). Por eso, no tenerlo todavía NO es un error ni
+  // una carga pendiente — es simplemente que aún no has escrito nada.
   const perfilStatus = document.createElement("div");
   perfilStatus.className = "status";
   perfilStatus.style.marginTop = "10px";
   perfilStatus.innerHTML = '<span class="dot"></span><span class="statusText"></span>';
   const perfilStatusText = perfilStatus.querySelector(".statusText");
-  if (state.profileError) {
-    perfilStatus.setAttribute("data-state", "error");
-    perfilStatusText.textContent = "No se pudo cargar";
+  if (!state.ready) {
+    perfilStatus.setAttribute("data-state", "pending");
+    perfilStatusText.textContent = "Cargando…";
   } else if (state.profile) {
     perfilStatus.setAttribute("data-state", "ok");
     perfilStatusText.textContent = "Sincronizado";
   } else {
     perfilStatus.setAttribute("data-state", "pending");
-    perfilStatusText.textContent = "Cargando…";
+    perfilStatusText.textContent = "Sin guardar todavía";
   }
 
   const perfilFields = document.createElement("div");
@@ -2966,13 +3001,6 @@ function renderSettingsPage(root) {
   perfilRow.appendChild(perfilLbl);
   perfilRow.appendChild(perfilDesc);
   perfilRow.appendChild(perfilFields);
-  if (state.profileError) {
-    const aviso = document.createElement("div");
-    aviso.className = "settings-msg error";
-    aviso.style.marginTop = "10px";
-    aviso.textContent = state.profileError;
-    perfilRow.appendChild(aviso);
-  }
   perfilRow.appendChild(perfilStatus);
   list.appendChild(perfilRow);
 
@@ -3301,11 +3329,7 @@ function subscribeEntries() {
       state.ready = true;
       actualizarPerfilDesdeEntries();
       setConn(navigator.onLine ? "online" : "offline", navigator.onLine ? "En línea" : "Sin conexión — se guardará al reconectar");
-      if (detailIsBeingEdited()) {
-        updateNavCounts();
-        return;
-      }
-      render();
+      renderDesdeSnapshot();
     },
     (err) => {
       setConn("error", "Error de conexión con el cuaderno");
@@ -3330,11 +3354,7 @@ function subscribeFormulario() {
         const data = d.data({ serverTimestamps: "estimate" });
         return { id: d.id, ...data, _pending: d.metadata.hasPendingWrites };
       });
-      if (detailIsBeingEdited()) {
-        updateNavCounts();
-        return;
-      }
-      render();
+      renderDesdeSnapshot();
     },
     (err) => {
       console.error(err);
@@ -3343,46 +3363,21 @@ function subscribeFormulario() {
 }
 
 /* ---------- Perfil del veterinario ----------
-   Un documento por usuario en "profiles/{uid}". El id del documento ES el
-   uid, así que no hace falta consultar por campo: se lee directo.
-   Se crea con setDoc(merge) la primera vez que entras, para que después
-   scheduleSave() pueda usar updateDoc() igual que en el resto de la app
-   (updateDoc falla si el documento todavía no existe). */
+   El perfil vive como un documento mas dentro de "entries", con
+   section: "profile" y un id determinista ("profile_<uid>"), asi que lo
+   cubren las mismas reglas de seguridad que ya estan publicadas y no puede
+   duplicarse. Como las listas se arman con entriesForSection("casos" |
+   "materias"), este documento nunca aparece entre los casos ni las materias.
+
+   NO se crea al iniciar sesion. Antes habia un ensureProfile() que en cada
+   arranque escribia el documento con setDoc(merge) y nombre: "" — y merge
+   NO ignora los campos que le pasas: los sobrescribe. Resultado: cada vez
+   que recargabas la pagina, el nombre guardado se borraba solo. Ahora el
+   documento nace con la primera tecla que escribes en Configuracion, via
+   scheduleSave(..., { createIfMissing: true }), que solo escribe el campo
+   que tocaste. */
 function profileDocId() {
   return "profile_" + currentUid;
-}
-
-/* El perfil vive como un documento mas dentro de "entries", con
-   section: "profile" y un id determinista ("profile_<uid>"). Antes estaba en
-   una coleccion propia "profiles", que exigia publicar un bloque nuevo de
-   reglas de seguridad; mientras eso no ocurriera, el perfil no se podia ni
-   leer ni guardar y el pie del sidebar se quedaba solo con el correo.
-   Reusando "entries" funciona con las reglas que ya estan publicadas, y como
-   las listas se arman con entriesForSection("casos"|"materias"), este
-   documento nunca aparece entre los casos ni entre las materias.
-   El id determinista evita que se creen perfiles duplicados. */
-async function ensureProfile() {
-  try {
-    await setDoc(
-      doc(db, "entries", profileDocId()),
-      {
-        uid: currentUid,
-        section: "profile",
-        nombre: "",
-        titulo: TITULO_POR_DEFECTO,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      },
-      { merge: true }
-    );
-    state.profileError = "";
-  } catch (err) {
-    console.error("No se pudo preparar el perfil:", err);
-    state.profileError =
-      err && err.code === "permission-denied"
-        ? "Sin permiso para guardar el perfil. Revisa que las reglas de Firestore permitan tu correo."
-        : "No se pudo preparar el perfil (" + ((err && err.code) || "error desconocido") + ").";
-  }
 }
 
 // Se llama desde el snapshot de "entries": el perfil llega por la misma
@@ -3401,10 +3396,10 @@ function renderSidebarIdentity() {
   const nombre = state.profile && state.profile.nombre ? String(state.profile.nombre).trim() : "";
   const titulo = state.profile && state.profile.titulo ? String(state.profile.titulo).trim() : "";
 
-  // La condicion es tener NOMBRE, no titulo: ensureProfile() crea el perfil
-  // con "Medico Veterinario" por defecto, asi que si bastara el titulo el
-  // bloque apareceria para todo el mundo sin haber llenado nada. Sin nombre
-  // se deja el pie como estaba: solo el correo.
+  // La condicion es tener NOMBRE, no titulo: el campo de titulo arranca con
+  // "Medico Veterinario" precargado, asi que si bastara el titulo el bloque
+  // apareceria sin haber llenado nada. Sin nombre se deja el pie como
+  // estaba: solo el correo.
   if (!nombre) {
     els.sidebarIdentity.hidden = true;
     els.sidName.textContent = "";
@@ -3439,7 +3434,6 @@ onAuthStateChanged(auth, (user) => {
     render();
     adoptOrphanEntries().then(subscribeEntries);
     subscribeFormulario();
-    ensureProfile();
   } else {
     currentUid = null;
     if (unsubscribe) {
@@ -3453,7 +3447,6 @@ onAuthStateChanged(auth, (user) => {
     state.entries = [];
     state.formulario = [];
     state.profile = null;
-    state.profileError = "";
     state.ready = false;
     els.app.hidden = true;
     els.authGate.hidden = false;

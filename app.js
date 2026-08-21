@@ -14,7 +14,6 @@ import {
   doc,
   addDoc,
   setDoc,
-  getDoc,
   updateDoc,
   deleteDoc,
   onSnapshot,
@@ -2898,7 +2897,7 @@ function renderSettingsPage(root) {
   list.appendChild(themeRow);
 
   // Perfil: se guarda con el mismo debounce por campo del resto de la app,
-  // sobre la colección "profiles" (el id del documento es el uid).
+  // sobre el documento de perfil dentro de "entries".
   const perfilRow = document.createElement("div");
   perfilRow.className = "settings-row";
   perfilRow.style.flexDirection = "column";
@@ -2945,7 +2944,13 @@ function renderSettingsPage(root) {
     input.addEventListener("input", () => {
       // createIfMissing: el documento del perfil se crea al vuelo si todavía
       // no existe, en vez de fallar con "not-found".
-      scheduleSave("profiles", currentUid, { [campo]: input.value }, perfilStatusText, { createIfMissing: true });
+      scheduleSave(
+        "entries",
+        profileDocId(),
+        { [campo]: input.value, section: "profile" },
+        perfilStatusText,
+        { createIfMissing: true }
+      );
     });
     group.appendChild(lbl);
     group.appendChild(input);
@@ -3294,6 +3299,7 @@ function subscribeEntries() {
         };
       });
       state.ready = true;
+      actualizarPerfilDesdeEntries();
       setConn(navigator.onLine ? "online" : "offline", navigator.onLine ? "En línea" : "Sin conexión — se guardará al reconectar");
       if (detailIsBeingEdited()) {
         updateNavCounts();
@@ -3342,63 +3348,49 @@ function subscribeFormulario() {
    Se crea con setDoc(merge) la primera vez que entras, para que después
    scheduleSave() pueda usar updateDoc() igual que en el resto de la app
    (updateDoc falla si el documento todavía no existe). */
+function profileDocId() {
+  return "profile_" + currentUid;
+}
+
+/* El perfil vive como un documento mas dentro de "entries", con
+   section: "profile" y un id determinista ("profile_<uid>"). Antes estaba en
+   una coleccion propia "profiles", que exigia publicar un bloque nuevo de
+   reglas de seguridad; mientras eso no ocurriera, el perfil no se podia ni
+   leer ni guardar y el pie del sidebar se quedaba solo con el correo.
+   Reusando "entries" funciona con las reglas que ya estan publicadas, y como
+   las listas se arman con entriesForSection("casos"|"materias"), este
+   documento nunca aparece entre los casos ni entre las materias.
+   El id determinista evita que se creen perfiles duplicados. */
 async function ensureProfile() {
-  const ref = doc(db, "profiles", currentUid);
   try {
-    const snap = await getDoc(ref);
-    if (!snap.exists()) {
-      await setDoc(
-        ref,
-        {
-          uid: currentUid,
-          nombre: "",
-          titulo: TITULO_POR_DEFECTO,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp()
-        },
-        { merge: true }
-      );
-    }
+    await setDoc(
+      doc(db, "entries", profileDocId()),
+      {
+        uid: currentUid,
+        section: "profile",
+        nombre: "",
+        titulo: TITULO_POR_DEFECTO,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      },
+      { merge: true }
+    );
     state.profileError = "";
   } catch (err) {
-    // Se guarda el motivo para mostrarlo en Configuración. Antes solo se
-    // escribía en la consola, así que el perfil fallaba de forma invisible.
     console.error("No se pudo preparar el perfil:", err);
     state.profileError =
       err && err.code === "permission-denied"
-        ? "Las reglas de seguridad todavía no permiten la colección “profiles”. Publica firestore.rules en la consola de Firebase para que el perfil se pueda guardar."
+        ? "Sin permiso para guardar el perfil. Revisa que las reglas de Firestore permitan tu correo."
         : "No se pudo preparar el perfil (" + ((err && err.code) || "error desconocido") + ").";
   }
 }
 
-let unsubscribeProfile = null;
-
-function subscribeProfile() {
-  if (unsubscribeProfile) return;
-  unsubscribeProfile = onSnapshot(
-    doc(db, "profiles", currentUid),
-    (snap) => {
-      state.profile = snap.exists() ? { id: snap.id, ...snap.data({ serverTimestamps: "estimate" }) } : null;
-      // Si el snapshot llega, la lectura funciona: se limpia cualquier error
-      // anterior (por ejemplo si acabas de publicar las reglas).
-      state.profileError = "";
-      renderSidebarIdentity();
-      // Configuración muestra los campos del perfil, así que hay que
-      // redibujarla cuando el perfil llega por primera vez. Pero NO mientras
-      // el usuario está escribiendo en ella: cada tecla dispara un guardado,
-      // el guardado dispara este snapshot, y redibujar le quitaría el foco
-      // (el mismo problema que ya se corrigió en las fichas de edición).
-      if (state.page === "settings" && !detailIsBeingEdited() && !isTypingInContent()) render();
-    },
-    (err) => {
-      console.error("No se pudo leer el perfil:", err);
-      state.profileError =
-        err && err.code === "permission-denied"
-          ? "Las reglas de seguridad todavía no permiten la colección “profiles”. Publica firestore.rules en la consola de Firebase para que el perfil se pueda guardar."
-          : "No se pudo leer el perfil (" + ((err && err.code) || "error desconocido") + ").";
-      if (state.page === "settings" && !detailIsBeingEdited() && !isTypingInContent()) render();
-    }
-  );
+// Se llama desde el snapshot de "entries": el perfil llega por la misma
+// suscripcion que todo lo demas, sin listener aparte.
+function actualizarPerfilDesdeEntries() {
+  const doc_ = state.entries.find((e) => e.section === "profile");
+  state.profile = doc_ || null;
+  renderSidebarIdentity();
 }
 
 // Pie del sidebar: nombre y título si el perfil ya está lleno, con el correo
@@ -3447,7 +3439,7 @@ onAuthStateChanged(auth, (user) => {
     render();
     adoptOrphanEntries().then(subscribeEntries);
     subscribeFormulario();
-    ensureProfile().then(subscribeProfile);
+    ensureProfile();
   } else {
     currentUid = null;
     if (unsubscribe) {
@@ -3457,10 +3449,6 @@ onAuthStateChanged(auth, (user) => {
     if (unsubscribeFormulario) {
       unsubscribeFormulario();
       unsubscribeFormulario = null;
-    }
-    if (unsubscribeProfile) {
-      unsubscribeProfile();
-      unsubscribeProfile = null;
     }
     state.entries = [];
     state.formulario = [];

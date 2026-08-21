@@ -6,6 +6,9 @@ service cloud.firestore {
         && request.auth.token.email in ['danielm76men@gmail.com', 'daniel.mendoza@ute.edu.ec'];
     }
 
+    // El perfil del veterinario vive dentro de "entries" con
+    // section: "profile", asi que estas mismas reglas ya lo cubren.
+    // No hace falta publicar nada nuevo para que el perfil funcione.
     match /entries/{entryId} {
       allow read, update, delete: if isAllowedUser() && request.auth.uid == resource.data.uid;
       allow create: if isAllowedUser() && request.auth.uid == request.resource.data.uid;
@@ -14,18 +17,6 @@ service cloud.firestore {
     match /formulario/{formularioId} {
       allow read, update, delete: if isAllowedUser() && request.auth.uid == resource.data.uid;
       allow create: if isAllowedUser() && request.auth.uid == request.resource.data.uid;
-    }
-
-    // Perfil del veterinario. A diferencia de las otras dos colecciones, aquí
-    // el ID del documento ES el uid, así que la pertenencia se puede exigir
-    // sobre el propio {uid} de la ruta y no solo sobre un campo del documento.
-    // Se exige ademas que el campo uid coincida, para que no se pueda escribir
-    // un documento con dueño falseado.
-    match /profiles/{uid} {
-      allow read, delete: if isAllowedUser() && request.auth.uid == uid;
-      allow create, update: if isAllowedUser()
-        && request.auth.uid == uid
-        && request.resource.data.uid == uid;
     }
   }
 }

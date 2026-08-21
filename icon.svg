@@ -1,24 +1,50 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="VetDiario">
   <title>VetDiario</title>
 
-  <!-- Disco de fondo en el verde de la app (variable teal) -->
+  <!-- Disco de fondo en el verde de la app -->
   <circle cx="256" cy="256" r="256" fill="#2e6659"/>
 
-  <!-- Huella en color papel: cuatro dedos y almohadilla.
-       Todo simetrico respecto al eje x=256. -->
-  <g fill="#f3f1e7">
-    <ellipse cx="152" cy="205" rx="37" ry="47" transform="rotate(-20 152 205)"/>
-    <ellipse cx="220" cy="165" rx="37" ry="51"/>
-    <ellipse cx="292" cy="165" rx="37" ry="51"/>
-    <ellipse cx="360" cy="205" rx="37" ry="47" transform="rotate(20 360 205)"/>
-    <ellipse cx="256" cy="332" rx="105" ry="80"/>
-  </g>
+  <!-- Todo el simbolo se reduce al 72% alrededor del centro para que quepa
+       dentro de la zona segura del icono maskable (radio 205 de 512), y sube 11 px
+       para quedar centrado en el disco. Sin
+       esto, Android recortaba las puntas de las alas. -->
+  <g id="simbolo" transform="translate(256,245) scale(0.68) translate(-256,-256)">
 
-  <!-- Cruz clinica recortada en la almohadilla: el cuidado veterinario y el
-       animal son la misma forma, no dos dibujos pegados. Va en el verde del
-       fondo para que se lea como hueco. Sin letras: legible a 32 px. -->
-  <g fill="#2e6659">
-    <rect x="239" y="284" width="34" height="96" rx="6"/>
-    <rect x="208" y="315" width="96" height="34" rx="6"/>
+    <g fill="#f3f1e7">
+      <!-- Ala derecha en tres capas de plumas. La izquierda es esta misma
+           forma reflejada, para que la simetria sea exacta. -->
+      <path id="ala" d="
+        M 272 148
+        C 322 116, 396 106, 460 122
+        C 424 146, 386 158, 344 162
+        C 382 170, 410 180, 436 196
+        C 392 206, 348 204, 308 194
+        C 332 204, 348 214, 362 226
+        C 322 226, 292 214, 272 196
+        Z"/>
+      <use href="#ala" transform="translate(512,0) scale(-1,1)"/>
+
+      <!-- Pomo y vara -->
+      <circle cx="256" cy="96" r="27"/>
+      <rect x="243" y="118" width="26" height="322" rx="13"/>
+    </g>
+
+    <!-- Serpiente enroscada. Va con trazo, no relleno: a tamano chico una
+         silueta fina se lee mejor que un contorno cerrado. -->
+    <path fill="none" stroke="#f3f1e7" stroke-width="19" stroke-linecap="round" stroke-linejoin="round" d="
+      M 196 232
+      C 244 218, 302 244, 306 282
+      C 310 320, 246 328, 238 358
+      C 230 390, 288 402, 288 430
+      C 288 452, 270 466, 256 474"/>
+    <ellipse cx="192" cy="231" rx="28" ry="14" fill="#f3f1e7" transform="rotate(-12 192 231)"/>
+
+    <!-- V de veterinaria. Primero un trazo grueso del color del fondo, que
+         actua de separacion para que la V no se confunda con la vara ni con
+         la serpiente por debajo; encima la V en color papel. -->
+    <g fill="none" stroke-linejoin="miter" stroke-linecap="butt">
+      <path d="M 172 280 L 256 438 L 340 280" stroke="#2e6659" stroke-width="62"/>
+      <path d="M 172 280 L 256 438 L 340 280" stroke="#f3f1e7" stroke-width="34"/>
+    </g>
   </g>
 </svg>

@@ -14,6 +14,7 @@
   --rust-soft: #f3e2d7;
   --amber: #a1780f;
   --amber-soft: #f2e8d3;
+  --amber-ink: #84620c;
   --shadow: 0 1px 2px rgba(36, 41, 32, 0.06), 0 6px 20px rgba(36, 41, 32, 0.06);
   --fila-grupo: #bcd4c6;
   --fila-subgrupo: #e2dcc9;
@@ -42,6 +43,7 @@
     --rust-soft: #3a281d;
     --amber: #dcb24b;
     --amber-soft: #362c17;
+    --amber-ink: #dcb24b;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
     --fila-grupo: #37342b;
     --fila-subgrupo: #26241f;
@@ -53,7 +55,7 @@
   --line: #2b2d33; --line-soft: #24262b;
   --teal: #948d78; --teal-ink: #dcd7c7; --teal-soft: #2b2a22;
   --rust: #e38a5c; --rust-ink: #eeab84; --rust-soft: #3a281d;
-  --amber: #dcb24b; --amber-soft: #362c17;
+  --amber: #dcb24b; --amber-soft: #362c17; --amber-ink: #dcb24b;
   --fila-grupo: #37342b; --fila-subgrupo: #26241f;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
 }
@@ -63,7 +65,7 @@
   --line: #d9d2be; --line-soft: #e6e0cd;
   --teal: #2e6659; --teal-ink: #1d453b; --teal-soft: #e2ece6;
   --rust: #b14f2c; --rust-ink: #8a3d22; --rust-soft: #f3e2d7;
-  --amber: #a1780f; --amber-soft: #f2e8d3;
+  --amber: #a1780f; --amber-soft: #f2e8d3; --amber-ink: #84620c;
   --fila-grupo: #bcd4c6; --fila-subgrupo: #e2dcc9;
   --shadow: 0 1px 2px rgba(36, 41, 32, 0.06), 0 6px 20px rgba(36, 41, 32, 0.06);
 }
@@ -1475,3 +1477,223 @@ button, input, select, textarea { font-family: inherit; }
   border-radius: 0 6px 6px 0;
 }
 .calc-fases .calc-field:last-child { margin-bottom: 10px; }
+
+/* Fila de herramientas del formulario: la tabla manda y la calculadora es
+   una tarjeta de acceso. minmax(0, 1fr) y no 1fr a secas: con 1fr la
+   columna nunca baja del ancho natural de la tabla, así que una tabla
+   ancha empuja la rejilla y saca barra horizontal a toda la página. */
+.tools-grid {
+  display: grid; grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 18px; align-items: start;
+}
+/* Se apilan a 1100 px y no a 900 como el resto de rejillas. La barra
+   lateral se lleva 268 px hasta los 860, asi que en una pantalla de 1024
+   la tabla se quedaba en 390 px contra los 300 de la calculadora: casi
+   empatadas, que es justo lo que habia que arreglar. Apilando, la tabla se
+   lleva el ancho entero. */
+@media (max-width: 1100px) {
+  .tools-grid { grid-template-columns: 1fr; }
+}
+
+
+/* =====================================================================
+   VOLVER Y ETIQUETAS DE SECCION
+   =====================================================================
+
+   Dos problemas distintos que se veian juntos en la misma esquina.
+
+   1. El boton de volver era texto pelado: 0,82 rem, sin relleno, sin
+      fondo. Alto real de la zona pulsable: unos 13 px. Las guias de
+      Apple y de Google piden 44. Con el dedo mojado y el animal encima
+      eso es una diana imposible, y ademas no parecia un boton: parecia
+      una linea de texto que resulta que se puede pulsar.
+
+   2. La etiqueta de seccion se partia en dos lineas ("CASO / CLINICO").
+      No era falta de sitio: en .name-row el campo del nombre lleva
+      width:100% y, siendo los dos hijos de un flex, el que se encoge es
+      la etiqueta. La solucion no es achicar la letra, es prohibirle
+      encogerse.
+
+   Va al final del archivo a proposito: se apoya en lo que ya hay arriba
+   (linea ~519 y ~538) en vez de reescribirlo, asi se ve de un vistazo
+   que cambio y por que. */
+
+/* ---------- Boton de volver ---------- */
+
+/* display:flex y no inline-flex: asi ocupa su propia linea. Antes la
+   etiqueta de seccion se le pegaba al lado por ser los dos elementos en
+   linea, y quedaban apretados sin que nadie lo hubiera decidido.
+   width:fit-content evita que el fondo se estire de lado a lado. */
+.back-link {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 6px 16px 6px 6px;
+  min-height: 44px;
+  border-radius: 24px;
+  border: 1px solid transparent;
+  background: transparent;
+  margin-bottom: 16px;
+  transition: background var(--rapido) ease, border-color var(--rapido) ease,
+              color var(--rapido) ease, transform var(--rapido) ease;
+}
+.back-link:hover {
+  background: var(--paper-raised);
+  border-color: var(--line);
+  color: var(--ink);
+}
+.back-link:active { transform: scale(0.97); }
+.back-link:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+/* El circulo de la flecha. Es lo que convierte la linea de texto en un
+   control: se reconoce como boton antes de leer el rotulo. */
+.back-flecha {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--paper-alt);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  transition: transform var(--medio) var(--sale), background var(--rapido) ease,
+              border-color var(--rapido) ease, color var(--rapido) ease;
+}
+/* La flecha se va 3 px hacia la izquierda: senala a donde te lleva. */
+.back-link:hover .back-flecha {
+  transform: translateX(-3px);
+  background: var(--teal);
+  border-color: var(--teal);
+  color: var(--paper);
+}
+.back-link:active .back-flecha { transform: translateX(-1px); }
+
+/* En pantallas estrechas el nombre del destino se recorta con puntos
+   suspensivos en vez de partirse en dos lineas y descuadrar el boton. */
+.back-texto {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Etiqueta de seccion ---------- */
+
+/* flex:none es la linea que arregla el "CASO / CLINICO": le prohibe
+   encogerse dentro del flex, asi que ya no se estrecha por debajo de su
+   propio texto. white-space:nowrap lo sella por si acaso. */
+.section-tag {
+  font-size: 0.74rem;
+  letter-spacing: 0.07em;
+  padding: 7px 14px;
+  border-radius: 24px;
+  gap: 7px;
+  flex: none;
+  white-space: nowrap;
+  align-self: center;
+}
+
+/* El punto del principio. Da a cada seccion una segunda senal ademas del
+   color: en el tema oscuro los fondos de estas pastillas quedan muy
+   juntos y el punto se ve aunque el fondo casi no. */
+.section-tag::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.65;
+}
+
+/* La fila del nombre del paciente. Se le permite pasar a dos lineas
+   cuando de verdad no cabe -- que es distinto de encoger la etiqueta --
+   y el campo del nombre deja de reclamar el 100 % del ancho. */
+.patient-head-info .name-row { flex-wrap: wrap; row-gap: 6px; }
+.patient-head-info .name-row .field-title {
+  flex: 1 1 180px;
+  width: auto;
+  min-width: 0;
+}
+
+/* Debajo de 480 px el boton crece un poco mas: es donde se usa con una
+   sola mano. */
+@media (max-width: 480px) {
+  .back-link { min-height: 46px; font-size: 0.9rem; }
+  .back-flecha { width: 34px; height: 34px; }
+}
+
+/* Contraste del texto de las pastillas. Medido sobre su propio fondo:
+   "casos" daba 3,31 en el tema claro y "farmacos" 4,35 en el oscuro, los
+   dos por debajo del 4,5 que necesita la letra pequeña. Con estos dos
+   tokens quedan en 4,62 y 10,01. Es el mismo texto de antes, solo que
+   ahora se lee. */
+.section-tag.casos { color: var(--amber-ink); }
+.section-tag.farmacos { color: var(--teal-ink); }
+
+/* ================= Constantes fisiológicas =================
+   Rejilla de cinco columnas: nombre · valor · unidad · referencia · marca.
+   Las columnas fijas hacen que los números queden alineados en vertical,
+   que es lo que permite recorrer la exploración de un vistazo. */
+.const-tabla { display: flex; flex-direction: column; gap: 2px; }
+.const-fila {
+  display: grid;
+  grid-template-columns: 1fr 84px 34px auto auto;
+  align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 6px;
+  border-left: 3px solid transparent;
+}
+.const-nombre {
+  font-size: 0.82rem; font-weight: 600; color: var(--ink);
+  text-transform: none; letter-spacing: normal; margin: 0;
+}
+.const-input {
+  width: 100%; padding: 5px 7px; font: inherit; font-size: 0.86rem;
+  font-family: var(--mono);
+  border: 1px solid var(--line); border-radius: 5px;
+  background: var(--paper-raised); color: var(--ink);
+}
+.const-input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.const-input-ancho { grid-column: 2 / 4; font-family: inherit; }
+.const-unidad { font-size: 0.74rem; color: var(--muted); font-family: var(--mono); }
+.const-ref { font-size: 0.72rem; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+.const-marca { font-size: 0.72rem; font-weight: 700; white-space: nowrap; min-width: 52px; text-align: right; }
+
+/* Fuera de rango: banda, fondo y texto. Tres señales, porque en una fila de
+   30 px un cambio de fondo solo no se ve (el mismo error que hubo con los
+   grupos del formulario). */
+.const-fila[data-estado="alto"], .const-fila[data-estado="bajo"] {
+  background: var(--rust-soft); border-left-color: var(--rust);
+}
+.const-fila[data-estado="alto"] .const-marca,
+.const-fila[data-estado="bajo"] .const-marca { color: var(--rust-ink); }
+.const-fila[data-estado="alto"] .const-input,
+.const-fila[data-estado="bajo"] .const-input { border-color: var(--rust); }
+
+/* La nota de la especie ocupa la fila entera bajo su constante. */
+.const-nota {
+  grid-column: 1 / -1; font-size: 0.7rem; color: var(--muted);
+  margin-top: 2px; line-height: 1.35;
+}
+.const-aviso-especie {
+  font-size: 0.78rem; color: var(--muted); margin: 0 0 10px; line-height: 1.4;
+}
+.const-fuente {
+  font-size: 0.7rem; color: var(--muted); margin-top: 12px;
+  border-top: 1px solid var(--line-soft); padding-top: 8px; line-height: 1.4;
+}
+
+/* En pantalla estrecha la referencia estorba más de lo que ayuda: se pasa
+   debajo del valor en vez de comprimir la columna del nombre. */
+@media (max-width: 600px) {
+  .const-fila { grid-template-columns: 1fr 76px 30px auto; }
+  .const-ref { grid-column: 1 / -1; text-align: left; }
+}

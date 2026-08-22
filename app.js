@@ -2379,6 +2379,254 @@ function buildFluidCalculator(context) {
   return wrap;
 }
 
+/* ================= Constantes fisiológicas =================
+
+   Rangos de referencia del Merck Veterinary Manual, tablas "Normal Rectal
+   Temperature Ranges", "Resting Heart Rates", "Resting Respiratory Rates"
+   y "Parameters to Evaluate During Triage". Cuando Merck no da un valor
+   para la especie, se indica la otra fuente en la nota.
+
+   Por que UNA sola fuente y no la mejor cifra de cada sitio: los rangos
+   varian bastante entre autores (en porcino, Merck da 32-58 rpm y
+   Virginia Tech 8-18). Mezclarlos produce una tabla que no se puede
+   rastrear ni discutir. Con una fuente principal, cualquier cifra rara se
+   puede ir a comprobar a su tabla.
+
+   La frecuencia cardiaca de perro y gato sale de la tabla de TRIAJE y no
+   de la de reposo a proposito: la de reposo da 120-140 en gato, y con ese
+   techo casi todo gato explorado en consulta saldria taquicardico. El
+   aviso dejaria de significar nada. */
+
+const CONSTANTES_REFERENCIA = {
+  canino: {
+    temp: { min: 37.5, max: 39.2 },
+    fc: { min: 60, max: 120, nota: "60–120 en perro grande, 70–120 en pequeño." },
+    fr: { min: 18, max: 34 }
+  },
+  felino: {
+    temp: { min: 38.1, max: 39.2 },
+    fc: { min: 150, max: 220, nota: "En consulta 150–220. Un gato relajado en casa baja a 120–140." },
+    fr: { min: 16, max: 40 }
+  },
+  bovino: {
+    temp: { min: 38.0, max: 39.3, nota: "Vaca de leche. En bovino de carne, 36,7–39,1 °C." },
+    fc: { min: 48, max: 84, nota: "Vaca de leche. El buey adulto baja a 36–60." },
+    fr: { min: 26, max: 50, nota: "Vaca de leche." }
+  },
+  equino: {
+    temp: { min: 37.2, max: 38.2, nota: "Yegua 37,3–38,2; semental 37,2–38,1." },
+    fc: { min: 28, max: 40 },
+    fr: { min: 10, max: 14 }
+  },
+  porcino: {
+    temp: { min: 38.7, max: 39.8 },
+    fc: { min: 70, max: 120 },
+    fr: { min: 32, max: 58 }
+  },
+  ovino: {
+    temp: { min: 38.3, max: 39.9 },
+    fc: { min: 70, max: 80 },
+    fr: { min: 16, max: 34 }
+  },
+  caprino: {
+    temp: { min: 38.5, max: 39.7 },
+    fc: { min: 70, max: 80 },
+    fr: { min: 12, max: 20, nota: "Merck no da caprino aquí; cifra de Virginia Tech (APSC-169)." }
+  }
+};
+
+// El tiempo de llenado capilar no cambia con la especie: es una medida de
+// perfusion, no un valor de especie.
+const CONSTANTES_TLLC = { min: 1, max: 2 };
+
+const CONSTANTES_MUCOSAS = [
+  { valor: "rosadas", texto: "Rosadas", normal: true },
+  { valor: "palidas", texto: "Pálidas" },
+  { valor: "congestivas", texto: "Congestivas / rojas" },
+  { valor: "ictericas", texto: "Ictéricas" },
+  { valor: "cianoticas", texto: "Cianóticas" },
+  { valor: "grisaceas", texto: "Grisáceas / porcelana" }
+];
+
+const CONSTANTES_FUENTE =
+  "Merck Veterinary Manual — Normal Rectal Temperature Ranges, Resting Heart Rates, " +
+  "Resting Respiratory Rates y Parameters to Evaluate During Triage.";
+
+/* La especie del caso se guarda capitalizada ("Canino") y la tabla usa
+   minusculas. Aves, Exotico y Otro no tienen rango: en vez de inventarlos
+   se dice que no hay, que es informacion correcta. */
+function referenciaDeEspecie(especie) {
+  const clave = normalizarBusqueda(especie).trim();
+  return CONSTANTES_REFERENCIA[clave] || null;
+}
+
+/* Devuelve "" (dentro), "bajo" o "alto". Separar los dos lados no es
+   cosmetico: una bradicardia y una taquicardia se manejan al reves. */
+function estadoDeConstante(valor, rango) {
+  if (!rango) return "";
+  const n = parseFloat(String(valor).replace(",", "."));
+  if (!isFinite(n)) return "";
+  if (n < rango.min) return "bajo";
+  if (n > rango.max) return "alto";
+  return "";
+}
+
+function textoDeRango(rango, unidad) {
+  if (!rango) return "";
+  const min = String(rango.min).replace(".", ",");
+  const max = String(rango.max).replace(".", ",");
+  return min + " – " + max + " " + unidad;
+}
+
+function buildConstantesSection(entry, save) {
+  const wrap = document.createElement("div");
+
+  const label = document.createElement("label");
+  label.className = "checkbox-group-label";
+  label.style.margin = "0 0 8px";
+  label.textContent = "Constantes fisiológicas";
+  wrap.appendChild(label);
+
+  const ref = referenciaDeEspecie(entry.especie);
+
+  const aviso = document.createElement("p");
+  aviso.className = "const-aviso-especie";
+  if (!entry.especie) {
+    aviso.textContent = "Elige la especie del paciente para ver los rangos de referencia.";
+  } else if (!ref) {
+    aviso.textContent =
+      "No hay rangos cargados para " + entry.especie.toLowerCase() +
+      ": las cifras varían demasiado entre especies para dar uno solo. Puedes anotar los valores igual.";
+  } else {
+    aviso.hidden = true;
+  }
+  wrap.appendChild(aviso);
+
+  const tabla = document.createElement("div");
+  tabla.className = "const-tabla";
+
+  const filas = [
+    { campo: "constTemp", etiqueta: "Temperatura", unidad: "°C", paso: "0.1", rango: ref && ref.temp },
+    { campo: "constFc", etiqueta: "Frec. cardíaca", unidad: "lpm", paso: "1", rango: ref && ref.fc },
+    { campo: "constFr", etiqueta: "Frec. respiratoria", unidad: "rpm", paso: "1", rango: ref && ref.fr },
+    { campo: "constTllc", etiqueta: "Llenado capilar", unidad: "s", paso: "0.5", rango: CONSTANTES_TLLC }
+  ];
+
+  filas.forEach(function (f) {
+    const fila = document.createElement("div");
+    fila.className = "const-fila";
+
+    const nombre = document.createElement("label");
+    nombre.className = "const-nombre";
+    nombre.textContent = f.etiqueta;
+
+    const input = document.createElement("input");
+    input.type = "number";
+    input.step = f.paso;
+    input.min = "0";
+    input.className = "const-input";
+    input.value = entry[f.campo] == null ? "" : entry[f.campo];
+    input.setAttribute("aria-label", f.etiqueta + " en " + f.unidad);
+
+    const unidad = document.createElement("span");
+    unidad.className = "const-unidad";
+    unidad.textContent = f.unidad;
+
+    const referencia = document.createElement("span");
+    referencia.className = "const-ref";
+    referencia.textContent = f.rango ? textoDeRango(f.rango, f.unidad) : "sin referencia";
+
+    const marca = document.createElement("span");
+    marca.className = "const-marca";
+
+    function pintar() {
+      const estado = estadoDeConstante(input.value, f.rango);
+      fila.setAttribute("data-estado", estado);
+      marca.textContent = estado === "alto" ? "↑ alto" : estado === "bajo" ? "↓ bajo" : "";
+    }
+
+    input.addEventListener("input", function () {
+      pintar();
+      // Vacio se guarda como null y no como "": asi la ficha distingue
+      // "no lo medi" de un cero.
+      save(f.campo, input.value === "" ? null : Number(input.value));
+    });
+    pintar();
+
+    fila.appendChild(nombre);
+    fila.appendChild(input);
+    fila.appendChild(unidad);
+    fila.appendChild(referencia);
+    fila.appendChild(marca);
+
+    if (f.rango && f.rango.nota) {
+      const nota = document.createElement("div");
+      nota.className = "const-nota";
+      nota.textContent = f.rango.nota;
+      fila.appendChild(nota);
+    }
+
+    tabla.appendChild(fila);
+  });
+
+  /* Mucosas: no es un numero, pero se comporta igual — hay un valor normal
+     y el resto son hallazgos. Va en la misma rejilla para que se lea como
+     una fila mas de la exploracion. */
+  const filaMuc = document.createElement("div");
+  filaMuc.className = "const-fila";
+  const mucNombre = document.createElement("label");
+  mucNombre.className = "const-nombre";
+  mucNombre.textContent = "Mucosas";
+  const mucSelect = document.createElement("select");
+  mucSelect.className = "const-input const-input-ancho";
+  const vacio = document.createElement("option");
+  vacio.value = "";
+  vacio.textContent = "— sin valorar —";
+  mucSelect.appendChild(vacio);
+  CONSTANTES_MUCOSAS.forEach(function (m) {
+    const o = document.createElement("option");
+    o.value = m.valor;
+    o.textContent = m.texto;
+    mucSelect.appendChild(o);
+  });
+  mucSelect.value = entry.constMucosas || "";
+  const mucRef = document.createElement("span");
+  mucRef.className = "const-ref";
+  mucRef.textContent = "rosadas";
+  const mucMarca = document.createElement("span");
+  mucMarca.className = "const-marca";
+
+  function pintarMucosas() {
+    const elegida = CONSTANTES_MUCOSAS.find(function (m) { return m.valor === mucSelect.value; });
+    const alterada = !!(elegida && !elegida.normal);
+    filaMuc.setAttribute("data-estado", alterada ? "alto" : "");
+    mucMarca.textContent = alterada ? "⚠ alterado" : "";
+  }
+  mucSelect.addEventListener("change", function () {
+    pintarMucosas();
+    save("constMucosas", mucSelect.value || null);
+  });
+  pintarMucosas();
+
+  filaMuc.appendChild(mucNombre);
+  filaMuc.appendChild(mucSelect);
+  filaMuc.appendChild(document.createElement("span"));
+  filaMuc.appendChild(mucRef);
+  filaMuc.appendChild(mucMarca);
+  tabla.appendChild(filaMuc);
+
+  wrap.appendChild(tabla);
+
+  const fuente = document.createElement("div");
+  fuente.className = "const-fuente";
+  fuente.textContent =
+    CONSTANTES_FUENTE +
+    " Un valor dentro del rango no descarta enfermedad, y uno fuera puede ser estrés de la consulta.";
+  wrap.appendChild(fuente);
+
+  return wrap;
+}
+
 /* ================= Modal de confirmación =================
    Reemplaza al confirm() nativo, que se dibuja con el estilo del navegador
    y rompe la identidad visual de la app. Devuelve una promesa que resuelve
@@ -2632,11 +2880,30 @@ function pageHead(title, subtitle) {
   return head;
 }
 
+/* La flecha va en su propio <span> y no dentro del texto. Asi puede
+   tener su propio circulo y desplazarse sola al pasar por encima, que
+   es lo que hace que el boton se lea como un control de volver y no
+   como una linea de texto mas. El <span> del rotulo permite ademas
+   recortarlo con puntos suspensivos en pantallas estrechas, en vez de
+   partir el nombre del destino en dos lineas. */
 function backLink(label, onClick) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "back-link";
-  btn.textContent = "← " + label;
+
+  const flecha = document.createElement("span");
+  flecha.className = "back-flecha";
+  flecha.setAttribute("aria-hidden", "true");
+  flecha.textContent = "←";
+
+  const texto = document.createElement("span");
+  texto.className = "back-texto";
+  texto.textContent = label;
+
+  btn.appendChild(flecha);
+  btn.appendChild(texto);
+  // El rotulo visible dice solo el destino; en voz alta conviene el verbo.
+  btn.setAttribute("aria-label", "Volver a " + label);
   btn.addEventListener("click", onClick);
   return btn;
 }
@@ -2810,8 +3077,13 @@ function renderDashboardPage(root) {
   overviewCard.appendChild(buildPatientsTable(casos, true));
   root.appendChild(overviewCard);
 
+  /* Rejilla propia y NO .detail-grid: aquella es 320px + resto, pensada
+     para una barra lateral estrecha junto al contenido. Aqui los papeles
+     estan al reves — la tabla es el contenido y la calculadora es una
+     tarjeta con un boton — asi que reutilizarla dejaba la tabla apretada
+     en 320 px y media pantalla vacia al lado. */
   const toolsRow = document.createElement("div");
-  toolsRow.className = "detail-grid";
+  toolsRow.className = "tools-grid";
   toolsRow.style.marginTop = "18px";
 
   const drugCard = document.createElement("div");
@@ -3239,6 +3511,52 @@ function buildPrintableCase(entry, fotos) {
   consulta.appendChild(motivo);
   root.appendChild(consulta);
 
+  /* Las constantes tambien se imprimen: es lo primero que mira quien
+     recibe el caso, y sin ellas el PDF no sirve para derivar. */
+  const constantesImpresas = [
+    ["Temperatura", caso.constTemp, "°C"],
+    ["Frec. cardíaca", caso.constFc, "lpm"],
+    ["Frec. respiratoria", caso.constFr, "rpm"],
+    ["Llenado capilar", caso.constTllc, "s"]
+  ].filter(function (c) { return c[1] != null && c[1] !== ""; });
+  const mucosaImpresa = CONSTANTES_MUCOSAS.find(function (m) { return m.valor === caso.constMucosas; });
+
+  if (constantesImpresas.length || mucosaImpresa) {
+    const refCaso = referenciaDeEspecie(caso.especie);
+    const sec = bloqueImpreso("Constantes fisiológicas");
+    const tabla = document.createElement("table");
+    tabla.className = "print-table";
+    tabla.innerHTML = "<thead><tr><th>Constante</th><th>Valor</th><th>Referencia</th></tr></thead>";
+    const tb = document.createElement("tbody");
+    const clavesRango = { "Temperatura": "temp", "Frec. cardíaca": "fc", "Frec. respiratoria": "fr" };
+    constantesImpresas.forEach(function (c) {
+      const rango = c[0] === "Llenado capilar" ? CONSTANTES_TLLC : (refCaso && refCaso[clavesRango[c[0]]]);
+      const estado = estadoDeConstante(c[1], rango);
+      const tr = document.createElement("tr");
+      [c[0],
+       String(c[1]).replace(".", ",") + " " + c[2] + (estado ? " (" + estado + ")" : ""),
+       rango ? textoDeRango(rango, c[2]) : "—"
+      ].forEach(function (v) {
+        const td = document.createElement("td");
+        td.textContent = v;
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    });
+    if (mucosaImpresa) {
+      const tr = document.createElement("tr");
+      ["Mucosas", mucosaImpresa.texto + (mucosaImpresa.normal ? "" : " (alterado)"), "rosadas"].forEach(function (v) {
+        const td = document.createElement("td");
+        td.textContent = v;
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    }
+    tabla.appendChild(tb);
+    sec.appendChild(tabla);
+    root.appendChild(sec);
+  }
+
   if (caso.body && caso.body.trim()) {
     const notas = bloqueImpreso("Anamnesis, examen físico, diagnóstico, tratamiento");
     const p = document.createElement("p");
@@ -3648,9 +3966,17 @@ function renderPatientDetail(root, entry) {
   medsCard.appendChild(buildMedsSection(entry, statusText));
   leftCol.appendChild(medsCard);
 
-  /* --- columna derecha: notas clínicas + evoluciones --- */
+  /* --- columna derecha: constantes + notas clínicas + evoluciones --- */
   const rightCol = document.createElement("div");
   rightCol.className = "detail-col";
+
+  /* Las constantes van ARRIBA de las notas y no dentro: son lo primero
+     que se toma en la consulta, y con la especie ya elegida en la
+     columna de al lado los rangos ya salen bien al abrir la ficha. */
+  const constCard = document.createElement("div");
+  constCard.className = "card card-pad";
+  constCard.appendChild(buildConstantesSection(entry, save));
+  rightCol.appendChild(constCard);
 
   const notesCard = document.createElement("div");
   notesCard.className = "card card-pad";

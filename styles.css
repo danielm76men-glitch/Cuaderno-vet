@@ -1238,3 +1238,49 @@ button, input, select, textarea { font-family: inherit; }
 /* La pista deja de ser un susurro cuando hay una especie activa: cambia lo
    que significan dos columnas de la tabla, y eso hay que poder verlo. */
 .form-pista-activa { color: var(--teal-ink); font-weight: 600; }
+
+/* ================= Calculadora de fluidos =================
+   Las pestañas del overlay reutilizan .subtabs/.subtab de Estudio; aquí solo
+   se recorta el margen, porque dentro de la tarjeta hay menos aire. */
+.calc-tabs { margin-bottom: 12px; }
+
+/* Casilla de verificación en línea. Sin esto hereda el label en versalitas
+   de .calc-field y el texto de la casilla sale gritando. */
+/* Especificidad a proposito: .calc-field label ya pone versalitas, 0.66rem
+   y color apagado, y con una sola clase gana esa regla. El texto de una
+   casilla es una frase que se lee, no un rotulo de campo. */
+.calc-field label.calc-check {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 0.86rem; font-weight: 600; color: var(--ink);
+  text-transform: none; letter-spacing: normal;
+}
+.calc-field label.calc-check input { width: 16px; height: 16px; accent-color: var(--teal); flex: none; }
+
+/* Cabecera de cada etapa del plan (bolo, déficit, mantenimiento). El plan
+   son cuatro bloques distintos y sin separarlos se leía como una lista
+   plana de números sin saber cuál iba con cuál. */
+.calc-sub {
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.06em;
+  font-weight: 800; color: var(--teal-ink); margin: 14px 0 6px;
+  padding-bottom: 4px; border-bottom: 1px solid var(--line-soft);
+}
+.calc-sub:first-child { margin-top: 0; }
+
+/* Las tres fórmulas de mantenimiento se muestran siempre juntas: dan cifras
+   muy distintas y esconder dos fingiría una precisión que no existe. La que
+   entra en el plan se marca por color, por peso y por el ▸ del principio —
+   tres señales, para que se distinga aunque el contraste quede justo. */
+.calc-mant {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  font-family: var(--mono); font-size: 0.78rem; color: var(--muted);
+  padding: 4px 6px 4px 8px; border-radius: 5px;
+  border-left: 3px solid transparent;
+}
+
+/* La banda de la izquierda, no un fondo. Se probaron los dos: --teal-soft
+   sobre la caja del resultado da 1,02 de contraste en claro y 1,18 en
+   oscuro, o sea invisible en ambos temas. La banda en --teal da 5,37 y
+   5,14: esa sí se ve. */
+.calc-mant-activa {
+  color: var(--teal-ink); font-weight: 700; border-left-color: var(--teal);
+}

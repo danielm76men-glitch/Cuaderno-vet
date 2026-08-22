@@ -1932,6 +1932,12 @@ function mlKgMantenimiento(pesoKg) {
   return pesoKg > FLUIDOS_CORTE_KG ? FLUIDOS_ML_KG_SOBRE_CORTE : FLUIDOS_ML_KG_BAJO_CORTE;
 }
 
+/* Por debajo de 3 kg el macrogotero no sirve: un gatito de 2 kg solo de
+   mantenimiento va a 5 mL/h, que con 15 gotas/mL es UNA GOTA CADA 48
+   SEGUNDOS. Eso no se ajusta ni se vigila. Con microgotero son 5 gotas
+   por minuto, que sí. */
+const FLUIDOS_CORTE_MICRO_KG = 3;
+
 // Pérdidas sensibles: cada vómito o cada deposición diarreica.
 const FLUIDOS_ML_KG_EPISODIO = 4;
 
@@ -2081,6 +2087,13 @@ function buildFluidCalculator(context) {
     equipoSelect.appendChild(o);
   });
 
+  const equipoPista = pistaEl("");
+
+  /* El equipo se propone solo, pero deja de hacerlo en cuanto lo tocas.
+     Una sugerencia que te pisa la elección cada vez que corriges el peso
+     no es una ayuda, es una pelea. */
+  let equipoAMano = false;
+
   const shock = casilla("Hay shock: añadir bolo de reanimación");
 
   const result = document.createElement("div");
@@ -2123,7 +2136,15 @@ function buildFluidCalculator(context) {
     const peso = parseFloat(String(pesoInput.value).replace(",", "."));
     const pct = parseFloat(String(pctInput.value).replace(",", ".")) || 0;
     const episodios = parseFloat(String(episodiosInput.value).replace(",", ".")) || 0;
+    if (!equipoAMano && isFinite(peso) && peso > 0) {
+      // Asignar .value no dispara "change", así que esto no se realimenta.
+      const sugerido = peso < FLUIDOS_CORTE_MICRO_KG ? "60" : "15";
+      if (equipoSelect.value !== sugerido) equipoSelect.value = sugerido;
+    }
     const gtt = Number(equipoSelect.value) || 15;
+    equipoPista.textContent = equipoAMano
+      ? "Lo elegiste tú; ya no se cambia solo."
+      : "Se pone solo: por debajo de " + FLUIDOS_CORTE_MICRO_KG + " kg, microgotero.";
     const especie = especieSelect.value;
 
     resumenPlan = "";
@@ -2196,8 +2217,9 @@ function buildFluidCalculator(context) {
       linea("= " + roundNice(mlHora) + " mL/h", "calc-total");
       linea("= " + roundNice(gotasMin) + " gotas/min", "calc-total");
       if (gotasMin > 0) {
-        linea("Una gota cada " + roundNice(60 / gotasMin) + " segundos, con equipo de " + gtt + " gotas/mL.", "calc-line-suave");
+        linea("= 1 gota cada " + roundNice(60 / gotasMin) + " s", "calc-total");
       }
+      linea("Con equipo de " + gtt + " gotas/mL.", "calc-line-suave");
       return { mlHora: mlHora, gotasMin: gotasMin };
     }
 
@@ -2300,8 +2322,10 @@ function buildFluidCalculator(context) {
   [pesoInput, pctInput, episodiosInput, fasePctInput, faseHorasInput].forEach(function (i) {
     i.addEventListener("input", render);
   });
-  [especieSelect, equipoSelect].forEach(function (s) {
-    s.addEventListener("change", render);
+  especieSelect.addEventListener("change", render);
+  equipoSelect.addEventListener("change", function () {
+    equipoAMano = true;
+    render();
   });
   [ped.input, fases.input, shock.input].forEach(function (c) {
     c.addEventListener("change", render);
@@ -2315,7 +2339,7 @@ function buildFluidCalculator(context) {
   wrap.appendChild(campo("Vómitos o diarreas", episodiosInput, pistaEl("Número de episodios. Cada uno cuenta como " + FLUIDOS_ML_KG_EPISODIO + " mL/kg.")));
   wrap.appendChild(fases.campo);
   wrap.appendChild(faseCaja);
-  wrap.appendChild(campo("Equipo de goteo", equipoSelect));
+  wrap.appendChild(campo("Equipo de goteo", equipoSelect, equipoPista));
   wrap.appendChild(shock.campo);
   wrap.appendChild(result);
 

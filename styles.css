@@ -15,6 +15,7 @@
   --amber: #a1780f;
   --amber-soft: #f2e8d3;
   --amber-ink: #84620c;
+  --velo-contador: rgba(0, 0, 0, 0.18);
   --shadow: 0 1px 2px rgba(36, 41, 32, 0.06), 0 6px 20px rgba(36, 41, 32, 0.06);
   --fila-grupo: #bcd4c6;
   --fila-subgrupo: #e2dcc9;
@@ -44,6 +45,7 @@
     --amber: #dcb24b;
     --amber-soft: #362c17;
     --amber-ink: #dcb24b;
+    --velo-contador: rgba(255, 255, 255, 0.16);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
     --fila-grupo: #37342b;
     --fila-subgrupo: #26241f;
@@ -56,6 +58,7 @@
   --teal: #948d78; --teal-ink: #dcd7c7; --teal-soft: #2b2a22;
   --rust: #e38a5c; --rust-ink: #eeab84; --rust-soft: #3a281d;
   --amber: #dcb24b; --amber-soft: #362c17; --amber-ink: #dcb24b;
+  --velo-contador: rgba(255, 255, 255, 0.16);
   --fila-grupo: #37342b; --fila-subgrupo: #26241f;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
 }
@@ -66,6 +69,7 @@
   --teal: #2e6659; --teal-ink: #1d453b; --teal-soft: #e2ece6;
   --rust: #b14f2c; --rust-ink: #8a3d22; --rust-soft: #f3e2d7;
   --amber: #a1780f; --amber-soft: #f2e8d3; --amber-ink: #84620c;
+  --velo-contador: rgba(0, 0, 0, 0.18);
   --fila-grupo: #bcd4c6; --fila-subgrupo: #e2dcc9;
   --shadow: 0 1px 2px rgba(36, 41, 32, 0.06), 0 6px 20px rgba(36, 41, 32, 0.06);
 }
@@ -233,7 +237,7 @@ button, input, select, textarea { font-family: inherit; }
 }
 .nav-item:hover { background: var(--line-soft); color: var(--ink); }
 .nav-item[aria-current="true"] { background: var(--teal); color: var(--paper); }
-.nav-item[aria-current="true"] .count { background: rgba(0, 0, 0, 0.18); border-color: transparent; color: var(--paper); }
+.nav-item[aria-current="true"] .count { background: var(--velo-contador); border-color: transparent; color: var(--paper); }
 
 .sidebar-foot { padding: 10px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
 .sidebar-identity { display: flex; flex-direction: column; padding: 8px 12px 0; gap: 1px; }
@@ -1656,7 +1660,19 @@ button, input, select, textarea { font-family: inherit; }
   display: grid;
   /* 110 px medidos, no elegidos a ojo: a 100 px "Frec. respiratoria" se
      parte en dos lineas y la fila crece. 110 deja margen sin abrir hueco. */
-  grid-template-columns: 110px 74px 26px 1fr auto;
+  /* minmax(0, 1fr) y no 1fr: cada fila es su PROPIA rejilla, y con 1fr
+     (que es minmax(auto,1fr)) la columna se ajustaba al contenido de esa
+     fila. Resultado: la fila con nota larga tenia una columna mas ancha que
+     la de al lado y los rangos no cuadraban en vertical. Con minimo 0, la
+     columna vale lo mismo en todas.
+
+     Y el alto fijo iguala las que llevan aclaracion con las que no; sin el,
+     la tabla iba a saltos. */
+  grid-template-columns: 104px 70px 24px minmax(0, 1fr) 46px;
+  /* 60 px: medido, no a ojo. Las notas mas largas (equino y caprino) se
+     van a tres lineas y llegaban a 59; por debajo de eso, esas dos filas
+     sobresalian y la tabla volvia a ir a saltos. */
+  min-height: 60px;
   align-items: center; column-gap: 10px;
   padding: 7px 10px 7px 8px;
   border-left: 3px solid transparent;
@@ -1684,13 +1700,15 @@ button, input, select, textarea { font-family: inherit; }
    empujar la rejilla y estirar la fila. */
 .const-refbox {
   display: flex; flex-direction: column; align-items: flex-end;
-  gap: 1px; min-width: 0;
+  justify-content: center; gap: 1px; min-width: 0;
 }
+/* Los numeros del rango son lo que se compara con lo medido: van al mismo
+   cuerpo que el valor tecleado, no en letra de pie de pagina. */
 .const-ref {
-  font-size: 0.72rem; color: var(--muted); font-family: var(--mono);
-  white-space: nowrap; text-align: right;
+  font-size: 0.86rem; font-weight: 600; color: var(--ink); font-family: var(--mono);
+  white-space: nowrap; text-align: right; letter-spacing: -0.01em;
 }
-.const-marca { font-size: 0.72rem; font-weight: 700; white-space: nowrap; min-width: 50px; text-align: right; }
+.const-marca { font-size: 0.7rem; font-weight: 700; white-space: nowrap; text-align: right; }
 
 /* Fuera de rango: banda, fondo y borde del campo. Tres señales, porque en
    una fila de 30 px un cambio de fondo solo no se ve (el mismo error que
@@ -1704,9 +1722,11 @@ button, input, select, textarea { font-family: inherit; }
 .const-fila[data-estado="bajo"] .const-input { border-color: var(--rust); }
 
 .const-nota {
-  font-size: 0.66rem; color: var(--muted); line-height: 1.3;
-  text-align: right; font-style: italic;
+  font-size: 0.67rem; color: var(--muted); line-height: 1.25;
+  text-align: right; font-style: italic; max-width: 100%;
 }
+.const-joven { margin: 0 0 10px; }
+.const-joven[hidden] { display: none; }
 .const-aviso-especie {
   font-size: 0.78rem; color: var(--muted); margin: 0 0 10px; line-height: 1.4;
 }
@@ -1937,3 +1957,41 @@ button, input, select, textarea { font-family: inherit; }
   min-width: 34px; text-align: center;
 }
 .apunte-img-sep { width: 1px; height: 16px; background: var(--line); margin: 0 3px; }
+
+/* =====================================================================
+   CONTRASTE DE TEXTO SOBRE FONDOS DE COLOR
+   =====================================================================
+
+   Auditoría de los 52 pares texto/fondo que declara esta hoja, medidos en
+   los dos temas. Fallaban por debajo de 4,5:1 — el mínimo para leer letra
+   pequeña — los avisos, las alertas y los estados. Justo lo que no puede
+   costar esfuerzo leer en una app que se usa para dosificar.
+
+   El arreglo no cambia ningún color de la paleta ni mueve nada: cada uno
+   pasa a la variante -ink del MISMO color, que ya existía y ya se usaba en
+   otros sitios. Es el mismo tono, más oscuro lo justo.
+
+     alertas (teja)    4,14 -> 6,02
+     avisos  (ámbar)   3,31 -> 4,62
+     estables (verde)  4,35 -> 10,01   (fallaba solo en tema oscuro)
+     salir sobre línea 3,95 -> 5,74                                      */
+
+.badge.stable, .badge.improving, .badge.ok { color: var(--teal-ink); }
+.badge.guarded, .badge.pending { color: var(--amber-ink); }
+.badge.critical, .badge.error { color: var(--rust-ink); }
+.form-aviso-legal { color: var(--amber-ink); }
+.sign-out-btn:hover { color: var(--rust-ink); }
+.icon-btn.danger:hover { color: var(--rust-ink); }
+.voice-btn[data-listening="true"] { color: var(--rust-ink); }
+
+/* Prevalencia del hato: es la cifra que decide si esto es un caso aislado o
+   un brote, así que se calcula sola y se muestra al lado de los datos. */
+.hato-prevalencia {
+  font-size: 0.78rem; color: var(--teal-ink); font-weight: 600;
+  margin: 10px 0 0; font-family: var(--mono);
+}
+.hato-prevalencia-error { color: var(--rust-ink); }
+
+/* El avatar con emoji necesita más cuerpo que una letra para llenar el
+   mismo círculo. */
+.patient-avatar-icono { font-size: 1.5rem; line-height: 1; }

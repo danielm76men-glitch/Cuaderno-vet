@@ -40,6 +40,37 @@ enableIndexedDbPersistence(db).catch((err) => {
   }
 });
 
+/* El icono de la ficha era la inicial del nombre, que no dice nada: en una
+   lista de casos todas las "M" se parecen. Con la especie delante se
+   reconoce el paciente de un vistazo. "Otro" y los que no esten aqui caen
+   en la inicial de siempre. */
+const ICONO_ESPECIE = {
+  bovino: "🐄",
+  equino: "🐴",
+  porcino: "🐖",
+  aves: "🐔",
+  canino: "🐕",
+  felino: "🐈",
+  ovino: "🐑",
+  caprino: "🐐",
+  exotico: "🦎"
+};
+
+/* En produccion casi nunca se atiende a UN animal: se atiende un hato, un
+   lote o una parvada, y el caso necesita saber de que finca es, cuantos
+   animales hay y cuantos estan afectados. Las aves entran aunque no sean
+   "hato" en sentido estricto: el problema es el mismo. */
+const ESPECIES_HATO = ["bovino", "porcino", "ovino", "caprino", "equino", "aves"];
+
+function esEspecieDeHato(especie) {
+  return ESPECIES_HATO.indexOf(normalizarBusqueda(especie).trim()) >= 0;
+}
+
+function iconoDeEspecie(especie, nombre) {
+  const clave = normalizarBusqueda(especie).trim();
+  return ICONO_ESPECIE[clave] || (String(nombre || "?").trim().charAt(0).toUpperCase() || "?");
+}
+
 const SPECIES_OPTIONS = ["Bovino", "Equino", "Porcino", "Aves", "Canino", "Felino", "Ovino", "Caprino", "Exótico", "Otro"];
 const AREA_OPTIONS = ["Cirugía", "Medicina interna", "Reproducción", "Emergencia", "Seguimiento", "Otro"];
 
@@ -2834,8 +2865,34 @@ function buildFluidCalculator(context) {
 
 /* ================= Constantes fisiológicas =================
 
-   Rangos de referencia del Merck Veterinary Manual. Cuando Merck no da un
-   valor para la especie, se indica la otra fuente en la nota de la fila.
+   Base: Merck Veterinary Manual. Donde hay evidencia reciente que lo
+   contradice o lo precisa, manda la evidencia y se dice en la nota.
+
+   Lo que cambio tras revisarlo (agosto 2026):
+
+   - FC del perro. Es creencia extendida que el perro pequeno late mas
+     rapido, y de ahi salen las tablas por tamano (100-140 en pequenos,
+     60-100 en grandes). Ferasin et al. (J Small Anim Pract 2010;51:412-8,
+     doi 10.1111/j.1748-5827.2010.00954.x) lo midieron en 243 ECG y 153
+     exploraciones y NO encontraron correlacion con el peso. Lo que si
+     encontraron: los menores de 1 ano laten significativamente mas, y el
+     caracter del animal (relajado vs nervioso) influye. Por eso aqui la
+     banda cambia con la EDAD y no con el tamano.
+
+   - Temperatura del perro. Rostami et al. (Am J Vet Res 2026,
+     doi 10.2460/ajvr.26.04.0160) calcularon el intervalo de referencia en
+     78 perros sanos: 37,5-39,7 C, mas ancho por arriba que el 39,2 de
+     Merck. Se mantiene 39,2 como umbral de aviso, que es el conservador,
+     y el dato nuevo va en la nota: entre 39,2 y 39,7 hay que mirar al
+     paciente antes de llamarlo fiebre.
+
+   - FC del gato. Donat Almagro et al. (J Feline Med Surg 2024;26:3,
+     doi 10.1177/1098612X241233116) midieron 171,5 +- 28,6 lpm sin estres
+     y 213,4 +- 37,5 con estres. Confirma la banda de consulta 150-220 y
+     explica por que la de reposo (120-140) no sirve aqui.
+
+   Para bovino, equino, porcino, ovino y caprino sigue mandando Merck: no
+   se encontro evidencia reciente que lo corrija.
 
      Temperatura  merckvetmanual.com/reference-values-and-conversion-tables/
                   reference-guides/normal-rectal-temperature-ranges
@@ -2862,13 +2919,14 @@ function buildFluidCalculator(context) {
 
 const CONSTANTES_REFERENCIA = {
   canino: {
-    temp: { min: 37.5, max: 39.2 },
-    fc: { min: 60, max: 120, nota: "grande 60–120 · pequeño 70–120" },
+    temp: { min: 37.5, max: 39.2, nota: "hasta 39,7 en perros sanos (RI 2026)" },
+    fc: { min: 60, max: 120, nota: "no depende del tamaño; sí de la edad" },
+    fcJoven: { min: 120, max: 160, nota: "cachorro menor de 1 año" },
     fr: { min: 18, max: 34 }
   },
   felino: {
     temp: { min: 38.1, max: 39.2 },
-    fc: { min: 150, max: 220, nota: "relajado en casa, 120–140" },
+    fc: { min: 150, max: 220, nota: "en consulta; relajado en casa 120–140" },
     fr: { min: 16, max: 40 }
   },
   bovino: {
@@ -2915,9 +2973,15 @@ const CONSTANTES_MUCOSAS = [
 /* La especie del caso se guarda capitalizada ("Canino") y la tabla usa
    minusculas. Aves, Exotico y Otro no tienen rango: en vez de inventarlos
    se dice que no hay, que es informacion correcta. */
-function referenciaDeEspecie(especie) {
+function referenciaDeEspecie(especie, esJoven) {
   const clave = normalizarBusqueda(especie).trim();
-  return CONSTANTES_REFERENCIA[clave] || null;
+  const base = CONSTANTES_REFERENCIA[clave] || null;
+  if (!base) return null;
+  /* La banda de cachorro sustituye a la de adulto solo donde existe. En
+     las demas especies no hay dato propio y se deja la de adulto: mejor
+     un rango de adulto declarado que uno de cachorro inventado. */
+  if (esJoven && base.fcJoven) return { temp: base.temp, fc: base.fcJoven, fr: base.fr };
+  return base;
 }
 
 /* Devuelve "" (dentro), "bajo" o "alto". Separar los dos lados no es
@@ -2946,6 +3010,20 @@ function buildConstantesSection(entry, save) {
   label.style.margin = "0 0 8px";
   label.textContent = "Constantes fisiológicas";
   wrap.appendChild(label);
+
+  /* La edad cambia la frecuencia cardiaca del perro y es lo unico que la
+     evidencia sostiene (el tamano no). Se pregunta con una casilla en vez
+     de leer el campo "edad" del caso porque ahi se escribe libre — "6
+     meses", "2 anos", "cachorro" — y adivinarlo mal cambiaria el rango sin
+     que se note. */
+  const joven = document.createElement("label");
+  joven.className = "calc-check const-joven";
+  const jovenInput = document.createElement("input");
+  jovenInput.type = "checkbox";
+  jovenInput.checked = !!entry.constJoven;
+  joven.appendChild(jovenInput);
+  joven.appendChild(document.createTextNode(" Menor de 1 año"));
+  wrap.appendChild(joven);
 
   const aviso = document.createElement("p");
   aviso.className = "const-aviso-especie";
@@ -3078,7 +3156,9 @@ function buildConstantesSection(entry, save) {
 
   filaMuc.appendChild(mucNombre);
   filaMuc.appendChild(mucSelect);
-  filaMuc.appendChild(document.createElement("span"));
+  // Sin span de relleno: el select ya ocupa las pistas 2 y 3 (const-input-ancho).
+  // Con el, la caja del rango caia una pista mas a la derecha y esta fila
+  // se desalineaba con las otras cuatro.
   filaMuc.appendChild(mucRefBox);
   filaMuc.appendChild(mucMarca);
   tabla.appendChild(filaMuc);
@@ -3087,8 +3167,14 @@ function buildConstantesSection(entry, save) {
 
   /* Se cuelga del nodo para que quien lo monte pueda avisarle del cambio de
      especie sin tener que volver a construirlo. */
+  let especieActual = entry.especie || "";
+
   wrap.setEspecie = function (especie) {
-    const ref = referenciaDeEspecie(especie);
+    especieActual = especie;
+    const ref = referenciaDeEspecie(especie, jovenInput.checked);
+    // La casilla solo sirve donde hay una banda propia para cachorros.
+    const base = CONSTANTES_REFERENCIA[normalizarBusqueda(especie).trim()];
+    joven.hidden = !(base && base.fcJoven);
     if (!especie) {
       aviso.hidden = false;
       aviso.textContent = "Elige la especie del paciente para ver los rangos de referencia.";
@@ -3106,6 +3192,11 @@ function buildConstantesSection(entry, save) {
       f.aplicarRango(f.clave === "tllc" ? CONSTANTES_TLLC : ref && ref[f.clave]);
     });
   };
+
+  jovenInput.addEventListener("change", function () {
+    save("constJoven", jovenInput.checked ? true : null);
+    wrap.setEspecie(especieActual);
+  });
 
   wrap.setEspecie(entry.especie);
 
@@ -4011,7 +4102,7 @@ function buildPrintableCase(entry, fotos) {
   const mucosaImpresa = CONSTANTES_MUCOSAS.find(function (m) { return m.valor === caso.constMucosas; });
 
   if (constantesImpresas.length || mucosaImpresa) {
-    const refCaso = referenciaDeEspecie(caso.especie);
+    const refCaso = referenciaDeEspecie(caso.especie, caso.constJoven);
     const sec = bloqueImpreso("Constantes fisiológicas");
     const tabla = document.createElement("table");
     tabla.className = "print-table";
@@ -4202,7 +4293,13 @@ function renderPatientDetail(root, entry) {
 
   const avatar = document.createElement("div");
   avatar.className = "patient-avatar";
-  avatar.textContent = (entry.meta || "?").trim().charAt(0).toUpperCase() || "?";
+  function pintarAvatar(especie, nombre) {
+    const icono = iconoDeEspecie(especie, nombre);
+    avatar.textContent = icono;
+    // El emoji necesita mas cuerpo que una letra para ocupar el mismo circulo.
+    avatar.classList.toggle("patient-avatar-icono", icono.length > 1 || /\p{Emoji}/u.test(icono));
+  }
+  pintarAvatar(entry.especie, entry.meta);
 
   const info = document.createElement("div");
   info.className = "patient-head-info";
@@ -4230,6 +4327,9 @@ function renderPatientDetail(root, entry) {
     sub.textContent =
       [speciesSelect.value, razaInput.value, pesoInput.value].filter(Boolean).join(" · ") ||
       "Especie, raza y peso sin especificar";
+    // El icono cambia con la especie en el momento, sin recargar.
+    pintarAvatar(speciesSelect.value, nameInput.value);
+    if (typeof actualizarHato === "function") actualizarHato(speciesSelect.value);
   }
   sub.textContent = [entry.especie, entry.raza, entry.peso].filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
 
@@ -4394,6 +4494,94 @@ function renderPatientDetail(root, entry) {
   baseCard.appendChild(row2);
   baseCard.appendChild(row3);
   leftCol.appendChild(baseCard);
+
+  /* --- Datos de hato: solo en especies de produccion ---
+     Aparece y desaparece al cambiar la especie, sin recargar. Los campos
+     se guardan siempre: si te equivocas de especie y la corriges, lo que
+     habias escrito sigue ahi al volver. */
+  const hatoCard = document.createElement("div");
+  hatoCard.className = "card card-pad";
+  const hatoLabel = document.createElement("label");
+  hatoLabel.className = "checkbox-group-label";
+  hatoLabel.style.margin = "0 0 10px";
+  hatoLabel.textContent = "Datos de hato / explotación";
+  hatoCard.appendChild(hatoLabel);
+
+  function campoHato(etiqueta, campo, marcador, tipo) {
+    const g = document.createElement("div");
+    g.className = "field-group";
+    const l = document.createElement("label");
+    l.textContent = etiqueta;
+    const i = document.createElement("input");
+    if (tipo === "numero") {
+      i.type = "number";
+      i.min = "0";
+      i.step = "1";
+    }
+    i.placeholder = marcador;
+    i.value = entry[campo] == null ? "" : entry[campo];
+    i.addEventListener("input", function () {
+      const v = i.value;
+      save(campo, v === "" ? null : (tipo === "numero" ? Number(v) : v));
+      if (campo === "hatoAfectados" || campo === "hatoTamano") pintarPrevalencia();
+    });
+    g.appendChild(l);
+    g.appendChild(i);
+    return { grupo: g, input: i };
+  }
+
+  const hatoFila1 = document.createElement("div");
+  hatoFila1.className = "field-row";
+  hatoFila1.appendChild(campoHato("Finca, hacienda o quinta", "hatoFinca", "Ej. Hacienda La Esperanza").grupo);
+  hatoCard.appendChild(hatoFila1);
+
+  const hatoFila2 = document.createElement("div");
+  hatoFila2.className = "field-row";
+  /* El numero o arete identifica al animal cuando no tiene nombre, que es
+     lo habitual en produccion. El nombre sigue arriba para los que si lo
+     tienen: en muchas fincas la vaca lechera tiene los dos. */
+  hatoFila2.appendChild(campoHato("N.º o arete del animal", "hatoNumero", "Ej. 1042").grupo);
+  hatoCard.appendChild(hatoFila2);
+
+  const hatoFila3 = document.createElement("div");
+  hatoFila3.className = "field-row";
+  const campoTamano = campoHato("Tamaño del hato", "hatoTamano", "Ej. 120", "numero");
+  hatoFila3.appendChild(campoTamano.grupo);
+  const campoAfectados = campoHato("Animales afectados", "hatoAfectados", "Ej. 8", "numero");
+  hatoFila3.appendChild(campoAfectados.grupo);
+  hatoCard.appendChild(hatoFila3);
+
+  /* La prevalencia se calcula sola: es el numero que se usa para decidir
+     si esto es un caso aislado o un brote, y hacerla a mano con el animal
+     delante es justo cuando no se hace. */
+  const prevalencia = document.createElement("p");
+  prevalencia.className = "hato-prevalencia";
+  hatoCard.appendChild(prevalencia);
+
+  function pintarPrevalencia() {
+    const total = parseFloat(String(campoTamano.input.value).replace(",", "."));
+    const afect = parseFloat(String(campoAfectados.input.value).replace(",", "."));
+    if (!isFinite(total) || total <= 0 || !isFinite(afect) || afect < 0) {
+      prevalencia.hidden = true;
+      return;
+    }
+    prevalencia.hidden = false;
+    if (afect > total) {
+      prevalencia.className = "hato-prevalencia hato-prevalencia-error";
+      prevalencia.textContent = "Hay más afectados (" + afect + ") que animales en el hato (" + total + ").";
+      return;
+    }
+    prevalencia.className = "hato-prevalencia";
+    prevalencia.textContent =
+      "Prevalencia: " + roundNice((afect / total) * 100) + " % (" + afect + " de " + total + ").";
+  }
+  pintarPrevalencia();
+
+  function actualizarHato(especie) {
+    hatoCard.hidden = !esEspecieDeHato(especie);
+  }
+  actualizarHato(entry.especie);
+  leftCol.appendChild(hatoCard);
 
   /* --- tutor: solo nombres, teléfono y correo. Sin cédula ni ningún
      otro identificador nacional — decisión explícita, no agregar sin

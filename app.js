@@ -917,14 +917,325 @@ function abrirVisorFoto(lista, indiceInicial) {
   cerrar.focus();
 }
 
-function buildPhotosSection(entry, statusText) {
+/* ================= Apuntes con imágenes intercaladas =================
+
+   El apunte de una materia era un <textarea>: solo texto. Ahora es un
+   contenteditable donde las imágenes viven DENTRO del texto, como en un
+   documento de Word: escribes, pegas una radiografía, sigues escribiendo
+   debajo.
+
+   Dónde vive cada cosa, que es lo que hace que esto no reviente:
+
+     entries/{id}.bodyHtml   el texto con formato y <img data-foto="ID">
+     entries/{id}.body       el mismo texto en plano
+     fotos/{ID}.datos        la imagen en base64
+
+   Las imágenes NO se guardan dentro del apunte. Un documento de Firestore
+   no puede pasar de 1 MB y una sola foto comprimida ya ronda el medio
+   mega: con dos imágenes el apunte entero dejaría de poder guardarse y se
+   perdería también el texto. Por eso en bodyHtml solo queda la referencia
+   y el src se rellena al abrir.
+
+   Y se sigue escribiendo "body" en plano ademas de "bodyHtml" porque el
+   buscador y el resto de la app leen "body": si solo guardara el HTML,
+   buscar un apunte por su contenido dejaria de funcionar. */
+
+/* Adaptador de lectura: los apuntes viejos solo tienen "body" en texto
+   plano. En vez de migrarlos, se convierten al vuelo. Asi nada se rompe
+   mientras existan los dos formatos. */
+function apunteComoHtml(entry) {
+  if (entry.bodyHtml && String(entry.bodyHtml).trim()) return limpiarHtmlApunte(entry.bodyHtml);
+  const plano = String(entry.body || "");
+  if (!plano.trim()) return "";
+  const div = document.createElement("div");
+  div.textContent = plano;
+  return div.innerHTML.split("\n").join("<br>");
+}
+
+/* El HTML vuelve de Firestore y se inyecta con innerHTML. Aunque solo
+   pueden escribir dos correos, un innerHTML sin filtrar es una puerta que
+   no hace falta dejar abierta: fuera scripts, marcos y cualquier atributo
+   que ejecute algo. */
+const APUNTE_ETIQUETAS_FUERA = ["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "FORM"];
+
+function limpiarHtmlApunte(html) {
+  const caja = document.createElement("div");
+  caja.innerHTML = String(html);
+  APUNTE_ETIQUETAS_FUERA.forEach(function (tag) {
+    Array.from(caja.getElementsByTagName(tag)).forEach(function (n) { n.remove(); });
+  });
+  Array.from(caja.querySelectorAll("*")).forEach(function (n) {
+    Array.from(n.attributes).forEach(function (a) {
+      const nombre = a.name.toLowerCase();
+      const valor = String(a.value || "").replace(/\s/g, "").toLowerCase();
+      if (nombre.indexOf("on") === 0) n.removeAttribute(a.name);
+      else if ((nombre === "href" || nombre === "src") && valor.indexOf("javascript:") === 0) n.removeAttribute(a.name);
+    });
+  });
+  return caja.innerHTML;
+}
+
+/* Lo que se guarda NO es lo que se ve: a las imágenes se les quita el src
+   antes de escribir. Con el src puesto, cada guardado subiría medio mega
+   de base64 dentro del apunte y Firestore lo rechazaría. */
+function apunteParaGuardar(editor) {
+  const copia = editor.cloneNode(true);
+  Array.from(copia.querySelectorAll("img")).forEach(function (img) {
+    if (img.getAttribute("data-foto")) img.removeAttribute("src");
+    else img.remove(); // una imagen sin ficha no se puede recuperar luego
+  });
+  return copia.innerHTML;
+}
+
+/* Guarda la imagen y devuelve su id SIN esperar al servidor. doc() sobre
+   una coleccion genera el identificador en local, asi que la imagen se ve
+   en el apunte al instante y la escritura viaja por detras. Esperar al
+   servidor dejaria el apunte bloqueado cada vez que se pega una foto sin
+   cobertura, que es justo cuando mas se usa. */
+async function guardarImagenDeApunte(entryId, file) {
+  const datos = await prepararFotoParaFirestore(file);
+  const ref = doc(collection(db, "fotos"));
+  setDoc(ref, {
+    uid: currentUid,
+    entryId: entryId,
+    uidEntrada: claveFotos(entryId),
+    nombre: file.name || "imagen.jpg",
+    datos: datos,
+    enApunte: true,
+    orden: Date.now(),
+    createdAt: serverTimestamp()
+  }).catch(function (err) {
+    logFoto("no se pudo guardar la imagen del apunte: " + (err && err.code ? err.code : err));
+  });
+  return { id: ref.id, datos: datos };
+}
+
+function buildApunteEditor(entry, statusText) {
+  const wrap = document.createElement("div");
+  wrap.className = "apunte";
+
+  const barra = document.createElement("div");
+  barra.className = "apunte-barra";
+
+  const editor = document.createElement("div");
+  editor.className = "field-body apunte-editor";
+  editor.contentEditable = "true";
+  editor.setAttribute("role", "textbox");
+  editor.setAttribute("aria-multiline", "true");
+  editor.setAttribute("aria-label", "Apuntes de clase");
+  editor.dataset.vacio = "Escribe tus apuntes de clase…";
+  editor.innerHTML = apunteComoHtml(entry);
+
+  const fileInput = document.createElement("input");
+  fileInput.type = "file";
+  fileInput.accept = "image/*";
+  fileInput.multiple = true;
+  fileInput.style.display = "none";
+
+  const estado = document.createElement("span");
+  estado.className = "apunte-estado";
+
+  function marcarVacio() {
+    // El placeholder es CSS y necesita saber si hay algo dentro. innerText
+    // no basta: un apunte que solo tiene una imagen no tiene texto.
+    const vacio = !editor.textContent.trim() && !editor.querySelector("img");
+    editor.dataset.estaVacio = vacio ? "si" : "no";
+  }
+
+  function guardar() {
+    scheduleSave(
+      "entries",
+      entry.id,
+      { bodyHtml: apunteParaGuardar(editor), body: editor.innerText },
+      statusText
+    );
+    marcarVacio();
+  }
+
+  /* Botones de formato. execCommand esta marcado como obsoleto pero es lo
+     unico que funciona igual en todos los navegadores sin traerse una
+     libreria, y aqui no hay paso de compilacion. */
+  function botonFormato(etiqueta, titulo, comando) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "apunte-btn";
+    b.title = titulo;
+    b.innerHTML = etiqueta;
+    // mousedown y no click: al pulsar con click el editor ya perdio la
+    // seleccion y el formato se aplicaria a la nada.
+    b.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      editor.focus();
+      document.execCommand(comando, false, null);
+      guardar();
+    });
+    return b;
+  }
+
+  barra.appendChild(botonFormato("<b>N</b>", "Negrita", "bold"));
+  barra.appendChild(botonFormato("<i>C</i>", "Cursiva", "italic"));
+  barra.appendChild(botonFormato("<u>S</u>", "Subrayado", "underline"));
+  const sep = document.createElement("span");
+  sep.className = "apunte-sep";
+  barra.appendChild(sep);
+  barra.appendChild(botonFormato("• —", "Lista con viñetas", "insertUnorderedList"));
+  barra.appendChild(botonFormato("1. —", "Lista numerada", "insertOrderedList"));
+  const sep2 = document.createElement("span");
+  sep2.className = "apunte-sep";
+  barra.appendChild(sep2);
+
+  const btnImagen = document.createElement("button");
+  btnImagen.type = "button";
+  btnImagen.className = "apunte-btn apunte-btn-imagen";
+  btnImagen.textContent = "🖼 Imagen";
+  btnImagen.title = "Insertar una imagen aquí";
+  btnImagen.addEventListener("click", function () { fileInput.click(); });
+  barra.appendChild(btnImagen);
+  barra.appendChild(estado);
+
+  /* Insertar en el punto del cursor. Si el cursor no esta dentro del
+     editor (por ejemplo si vienes de pulsar el boton), va al final. */
+  function insertarNodo(nodo) {
+    editor.focus();
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && editor.contains(sel.anchorNode)) {
+      const rango = sel.getRangeAt(0);
+      rango.deleteContents();
+      rango.insertNode(nodo);
+      rango.setStartAfter(nodo);
+      rango.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(rango);
+    } else {
+      editor.appendChild(nodo);
+    }
+  }
+
+  let subiendo = 0;
+  function pintarEstado() {
+    estado.textContent = subiendo ? "Preparando " + subiendo + " imagen(es)…" : "";
+  }
+
+  async function agregarImagenes(archivos) {
+    const lista = Array.from(archivos || []).filter(function (f) { return f && f.type && f.type.indexOf("image/") === 0; });
+    if (!lista.length) return;
+    for (const file of lista) {
+      subiendo++;
+      pintarEstado();
+      try {
+        const guardada = await guardarImagenDeApunte(entry.id, file);
+        const img = document.createElement("img");
+        img.src = guardada.datos;
+        img.setAttribute("data-foto", guardada.id);
+        img.alt = file.name || "Imagen del apunte";
+        const salto = document.createElement("br");
+        insertarNodo(salto);
+        insertarNodo(img);
+        guardar();
+      } catch (err) {
+        alert(
+          err && err.message === "foto-demasiado-grande"
+            ? "Esa imagen es demasiado grande incluso comprimida. Prueba con una captura más pequeña."
+            : "No se pudo preparar la imagen. Inténtalo de nuevo."
+        );
+      } finally {
+        subiendo--;
+        pintarEstado();
+      }
+    }
+  }
+
+  fileInput.addEventListener("change", function () {
+    agregarImagenes(fileInput.files);
+    fileInput.value = "";
+  });
+
+  /* Pegar. Si en el portapapeles hay una imagen (una captura de pantalla,
+     lo mas habitual copiando de una diapositiva) se inserta; si hay texto,
+     se pega en PLANO a proposito: copiar de una web arrastra su hoja de
+     estilos entera y el apunte queda con tipografias y colores ajenos. */
+  editor.addEventListener("paste", function (e) {
+    const datos = e.clipboardData;
+    if (!datos) return;
+    const imagenes = Array.from(datos.items || [])
+      .filter(function (i) { return i.kind === "file" && i.type.indexOf("image/") === 0; })
+      .map(function (i) { return i.getAsFile(); })
+      .filter(Boolean);
+    if (imagenes.length) {
+      e.preventDefault();
+      agregarImagenes(imagenes);
+      return;
+    }
+    e.preventDefault();
+    const texto = datos.getData("text/plain");
+    if (texto) document.execCommand("insertText", false, texto);
+  });
+
+  // Arrastrar y soltar una imagen encima del apunte.
+  editor.addEventListener("dragover", function (e) {
+    if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) {
+      e.preventDefault();
+      editor.classList.add("apunte-soltar");
+    }
+  });
+  editor.addEventListener("dragleave", function () { editor.classList.remove("apunte-soltar"); });
+  editor.addEventListener("drop", function (e) {
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    editor.classList.remove("apunte-soltar");
+    agregarImagenes(e.dataTransfer.files);
+  });
+
+  editor.addEventListener("input", guardar);
+
+  // Ver una imagen a pantalla completa, igual que en las fotos del caso.
+  editor.addEventListener("click", function (e) {
+    const img = e.target && e.target.tagName === "IMG" ? e.target : null;
+    if (!img || !img.getAttribute("src")) return;
+    abrirVisorFoto([{ datos: img.getAttribute("src"), nombre: img.alt || "Imagen del apunte" }], 0);
+  });
+
+  wrap.appendChild(barra);
+  wrap.appendChild(editor);
+  wrap.appendChild(fileInput);
+  marcarVacio();
+
+  /* Rellenar los src. En bodyHtml las imagenes van sin src (ver arriba),
+     asi que hasta que llega esta consulta se ven como huecos. Una sola
+     consulta para todas: son la misma coleccion y el mismo uidEntrada. */
+  const pendientes = Array.from(editor.querySelectorAll("img[data-foto]"));
+  if (pendientes.length) {
+    pendientes.forEach(function (img) { img.classList.add("apunte-img-cargando"); });
+    fotosDeEntrada(entry.id)
+      .then(function (fotos) {
+        const porId = {};
+        fotos.forEach(function (f) { porId[f.id] = f; });
+        pendientes.forEach(function (img) {
+          const f = porId[img.getAttribute("data-foto")];
+          img.classList.remove("apunte-img-cargando");
+          if (f && f.datos) img.src = f.datos;
+          else img.classList.add("apunte-img-rota");
+        });
+      })
+      .catch(function () {
+        pendientes.forEach(function (img) {
+          img.classList.remove("apunte-img-cargando");
+          img.classList.add("apunte-img-rota");
+        });
+      });
+  }
+
+  return wrap;
+}
+
+function buildPhotosSection(entry, statusText, etiqueta) {
   const wrap = document.createElement("div");
   wrap.className = "photos";
 
   const head = document.createElement("div");
   head.className = "subcard-head";
   const label = document.createElement("span");
-  label.textContent = "Fotos (radiografías, ecografías, paciente)";
+  label.textContent = etiqueta || "Fotos (radiografías, ecografías, paciente)";
   head.appendChild(label);
   wrap.appendChild(head);
 
@@ -2410,21 +2721,21 @@ function buildFluidCalculator(context) {
 const CONSTANTES_REFERENCIA = {
   canino: {
     temp: { min: 37.5, max: 39.2 },
-    fc: { min: 60, max: 120, nota: "60–120 en perro grande, 70–120 en pequeño." },
+    fc: { min: 60, max: 120, nota: "grande 60–120 · pequeño 70–120" },
     fr: { min: 18, max: 34 }
   },
   felino: {
     temp: { min: 38.1, max: 39.2 },
-    fc: { min: 150, max: 220, nota: "En consulta 150–220. Un gato relajado en casa baja a 120–140." },
+    fc: { min: 150, max: 220, nota: "relajado en casa, 120–140" },
     fr: { min: 16, max: 40 }
   },
   bovino: {
-    temp: { min: 38.0, max: 39.3, nota: "Vaca de leche. En bovino de carne, 36,7–39,1 °C." },
-    fc: { min: 48, max: 84, nota: "Vaca de leche. El buey adulto baja a 36–60." },
-    fr: { min: 26, max: 50, nota: "Vaca de leche." }
+    temp: { min: 38.0, max: 39.3, nota: "vaca de leche · de carne 36,7–39,1" },
+    fc: { min: 48, max: 84, nota: "vaca de leche · buey 36–60" },
+    fr: { min: 26, max: 50, nota: "vaca de leche" }
   },
   equino: {
-    temp: { min: 37.2, max: 38.2, nota: "Yegua 37,3–38,2; semental 37,2–38,1." },
+    temp: { min: 37.2, max: 38.2, nota: "yegua 37,3–38,2 · semental 37,2–38,1" },
     fc: { min: 28, max: 40 },
     fr: { min: 10, max: 14 }
   },
@@ -2441,7 +2752,7 @@ const CONSTANTES_REFERENCIA = {
   caprino: {
     temp: { min: 38.5, max: 39.7 },
     fc: { min: 70, max: 80 },
-    fr: { min: 12, max: 20, nota: "Merck no da caprino aquí; cifra de Virginia Tech (APSC-169)." }
+    fr: { min: 12, max: 20, nota: "no está en Merck · Virginia Tech APSC-169" }
   }
 };
 
@@ -2494,29 +2805,26 @@ function buildConstantesSection(entry, save) {
   label.textContent = "Constantes fisiológicas";
   wrap.appendChild(label);
 
-  const ref = referenciaDeEspecie(entry.especie);
-
   const aviso = document.createElement("p");
   aviso.className = "const-aviso-especie";
-  if (!entry.especie) {
-    aviso.textContent = "Elige la especie del paciente para ver los rangos de referencia.";
-  } else if (!ref) {
-    aviso.textContent =
-      "No hay rangos cargados para " + entry.especie.toLowerCase() +
-      ": las cifras varían demasiado entre especies para dar uno solo. Puedes anotar los valores igual.";
-  } else {
-    aviso.hidden = true;
-  }
   wrap.appendChild(aviso);
 
   const tabla = document.createElement("div");
   tabla.className = "const-tabla";
 
+  /* Las filas se construyen UNA vez y luego solo se les cambia el rango.
+     Antes la tarjeta entera se armaba con la especie que hubiera al abrir
+     la ficha y no volvía a mirarla: cambiabas de bovino a caprino en la
+     columna de al lado y los rangos seguían siendo los de la vaca hasta
+     recargar la página.
+
+     Se actualiza en vez de reconstruir a propósito: reconstruir perdería
+     lo que estés tecleando y el foco del campo. */
   const filas = [
-    { campo: "constTemp", etiqueta: "Temperatura", unidad: "°C", paso: "0.1", rango: ref && ref.temp },
-    { campo: "constFc", etiqueta: "Frec. cardíaca", unidad: "lpm", paso: "1", rango: ref && ref.fc },
-    { campo: "constFr", etiqueta: "Frec. respiratoria", unidad: "rpm", paso: "1", rango: ref && ref.fr },
-    { campo: "constTllc", etiqueta: "Llenado capilar", unidad: "s", paso: "0.5", rango: CONSTANTES_TLLC }
+    { campo: "constTemp", clave: "temp", etiqueta: "Temperatura", unidad: "°C", paso: "0.1" },
+    { campo: "constFc", clave: "fc", etiqueta: "Frec. cardíaca", unidad: "lpm", paso: "1" },
+    { campo: "constFr", clave: "fr", etiqueta: "Frec. respiratoria", unidad: "rpm", paso: "1" },
+    { campo: "constTllc", clave: "tllc", etiqueta: "Llenado capilar", unidad: "s", paso: "0.5" }
   ];
 
   filas.forEach(function (f) {
@@ -2539,9 +2847,17 @@ function buildConstantesSection(entry, save) {
     unidad.className = "const-unidad";
     unidad.textContent = f.unidad;
 
+    /* El rango y su matiz van en la MISMA celda, uno encima del otro. La
+       nota aclara el rango, no el nombre de la constante. */
+    const refBox = document.createElement("div");
+    refBox.className = "const-refbox";
     const referencia = document.createElement("span");
     referencia.className = "const-ref";
-    referencia.textContent = f.rango ? textoDeRango(f.rango, f.unidad) : "sin referencia";
+    const nota = document.createElement("span");
+    nota.className = "const-nota";
+    nota.hidden = true;
+    refBox.appendChild(referencia);
+    refBox.appendChild(nota);
 
     const marca = document.createElement("span");
     marca.className = "const-marca";
@@ -2558,27 +2874,27 @@ function buildConstantesSection(entry, save) {
       // "no lo medi" de un cero.
       save(f.campo, input.value === "" ? null : Number(input.value));
     });
-    pintar();
 
     fila.appendChild(nombre);
     fila.appendChild(input);
     fila.appendChild(unidad);
-    fila.appendChild(referencia);
+    fila.appendChild(refBox);
     fila.appendChild(marca);
-
-    if (f.rango && f.rango.nota) {
-      const nota = document.createElement("div");
-      nota.className = "const-nota";
-      nota.textContent = f.rango.nota;
-      fila.appendChild(nota);
-    }
-
     tabla.appendChild(fila);
+
+    f.aplicarRango = function (rango) {
+      f.rango = rango || null;
+      referencia.textContent = f.rango ? textoDeRango(f.rango, f.unidad) : "sin referencia";
+      const hayNota = !!(f.rango && f.rango.nota);
+      nota.hidden = !hayNota;
+      nota.textContent = hayNota ? f.rango.nota : "";
+      pintar();
+    };
   });
 
   /* Mucosas: no es un numero, pero se comporta igual — hay un valor normal
      y el resto son hallazgos. Va en la misma rejilla para que se lea como
-     una fila mas de la exploracion. */
+     una fila mas de la exploracion. No depende de la especie. */
   const filaMuc = document.createElement("div");
   filaMuc.className = "const-fila";
   const mucNombre = document.createElement("label");
@@ -2597,9 +2913,12 @@ function buildConstantesSection(entry, save) {
     mucSelect.appendChild(o);
   });
   mucSelect.value = entry.constMucosas || "";
+  const mucRefBox = document.createElement("div");
+  mucRefBox.className = "const-refbox";
   const mucRef = document.createElement("span");
   mucRef.className = "const-ref";
   mucRef.textContent = "rosadas";
+  mucRefBox.appendChild(mucRef);
   const mucMarca = document.createElement("span");
   mucMarca.className = "const-marca";
 
@@ -2618,11 +2937,35 @@ function buildConstantesSection(entry, save) {
   filaMuc.appendChild(mucNombre);
   filaMuc.appendChild(mucSelect);
   filaMuc.appendChild(document.createElement("span"));
-  filaMuc.appendChild(mucRef);
+  filaMuc.appendChild(mucRefBox);
   filaMuc.appendChild(mucMarca);
   tabla.appendChild(filaMuc);
 
   wrap.appendChild(tabla);
+
+  /* Se cuelga del nodo para que quien lo monte pueda avisarle del cambio de
+     especie sin tener que volver a construirlo. */
+  wrap.setEspecie = function (especie) {
+    const ref = referenciaDeEspecie(especie);
+    if (!especie) {
+      aviso.hidden = false;
+      aviso.textContent = "Elige la especie del paciente para ver los rangos de referencia.";
+    } else if (!ref) {
+      aviso.hidden = false;
+      aviso.textContent =
+        "No hay rangos cargados para " + String(especie).toLowerCase() +
+        ": las cifras varían demasiado entre especies para dar uno solo. Puedes anotar los valores igual.";
+    } else {
+      aviso.hidden = true;
+      aviso.textContent = "";
+    }
+    filas.forEach(function (f) {
+      // El llenado capilar mide perfusion, no especie: su rango no cambia.
+      f.aplicarRango(f.clave === "tllc" ? CONSTANTES_TLLC : ref && ref[f.clave]);
+    });
+  };
+
+  wrap.setEspecie(entry.especie);
 
   return wrap;
 }
@@ -2945,6 +3288,10 @@ function detailIsBeingEdited() {
 function isTypingInContent() {
   const el = document.activeElement;
   if (!el || !els.content.contains(el)) return false;
+  // isContentEditable ademas de los tres campos clasicos: el apunte de
+  // una materia es un contenteditable y no es ninguno de ellos. Sin esta
+  // linea, el eco del propio guardado lo borraria bajo el cursor.
+  if (el.isContentEditable) return true;
   return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT";
 }
 
@@ -3703,6 +4050,11 @@ function renderPatientDetail(root, entry) {
     scheduleSave("entries", entry.id, { [field]: value }, statusText);
   }
 
+  /* La tarjeta de constantes se construye más abajo, pero el selector de
+     especie está más arriba: hace falta el hueco declarado antes para que
+     el listener pueda avisarle. */
+  let constantesNodo = null;
+
   const head = document.createElement("div");
   head.className = "patient-head";
 
@@ -3827,6 +4179,9 @@ function renderPatientDetail(root, entry) {
   speciesSelect.addEventListener("change", () => {
     save("especie", speciesSelect.value);
     refreshSub();
+    // Los rangos de referencia dependen de la especie y tienen que
+    // cambiar aquí mismo, no en la siguiente recarga.
+    if (constantesNodo) constantesNodo.setEspecie(speciesSelect.value);
   });
   speciesGroup.appendChild(speciesLabel);
   speciesGroup.appendChild(speciesSelect);
@@ -3975,7 +4330,8 @@ function renderPatientDetail(root, entry) {
      columna de al lado los rangos ya salen bien al abrir la ficha. */
   const constCard = document.createElement("div");
   constCard.className = "card card-pad";
-  constCard.appendChild(buildConstantesSection(entry, save));
+  constantesNodo = buildConstantesSection(entry, save);
+  constCard.appendChild(constantesNodo);
   rightCol.appendChild(constCard);
 
   const notesCard = document.createElement("div");
@@ -4310,13 +4666,7 @@ function renderMateriaDetail(root, entry) {
 
   const card = document.createElement("div");
   card.className = "card card-pad";
-  const body = document.createElement("textarea");
-  body.className = "field-body";
-  body.style.minHeight = "50vh";
-  body.placeholder = "Escribe tus apuntes de clase…";
-  body.value = entry.body || "";
-  body.addEventListener("input", () => scheduleSave("entries", entry.id, { body: body.value }, statusText));
-  card.appendChild(body);
+  card.appendChild(buildApunteEditor(entry, statusText));
 
   const foot = document.createElement("div");
   foot.className = "editor-foot";
@@ -4778,6 +5128,106 @@ function selectDe(opciones, valor, textoVacio) {
   });
   sel.value = valor || "";
   return sel;
+}
+
+
+/* ---------- Tarjeta plegable ----------
+   Es un <button> y no un <div> con listener: asi funciona con Tab, Enter y
+   Espacio sin reimplementar nada, y los lectores de pantalla saben decir si
+   esta abierta o cerrada. */
+function tarjetaPlegable(titulo, opciones) {
+  const opts = opciones || {};
+  const card = document.createElement("div");
+  card.className = "card card-pad plegable" + (opts.clase ? " " + opts.clase : "");
+
+  const cab = document.createElement("button");
+  cab.type = "button";
+  cab.className = "plegable-cab";
+
+  const flecha = document.createElement("span");
+  flecha.className = "plegable-flecha";
+  flecha.textContent = "›";
+  const texto = document.createElement("span");
+  texto.className = "plegable-titulo";
+  texto.textContent = titulo;
+  const contador = document.createElement("span");
+  contador.className = "plegable-contador";
+
+  cab.appendChild(flecha);
+  cab.appendChild(texto);
+  cab.appendChild(contador);
+
+  const cuerpo = document.createElement("div");
+  cuerpo.className = "plegable-cuerpo";
+
+  function aplicar(abierta) {
+    cuerpo.hidden = !abierta;
+    cab.setAttribute("aria-expanded", abierta ? "true" : "false");
+  }
+  aplicar(!!opts.abierta);
+
+  cab.addEventListener("click", function () {
+    const abrir = cuerpo.hidden;
+    aplicar(abrir);
+    if (typeof opts.onToggle === "function") opts.onToggle(abrir);
+  });
+
+  card.appendChild(cab);
+  card.appendChild(cuerpo);
+
+  return {
+    card: card,
+    cuerpo: cuerpo,
+    setContador: function (t) { contador.textContent = t || ""; }
+  };
+}
+
+/* Las especies de produccion son las unicas donde el tiempo de retiro
+   significa algo: en un perro no hay carne ni leche que retirar. */
+const ESPECIES_PRODUCCION = ["bovino", "porcino", "ovino", "caprino", "equino"];
+
+function esEspecieDeProduccion(especie) {
+  return ESPECIES_PRODUCCION.indexOf(normalizarBusqueda(especie).trim()) >= 0;
+}
+
+/* El retiro paso a vivir DENTRO de cada dosis, pero los farmacos cargados
+   antes lo tienen en el array "retiro" aparte. Se lee de los dos sitios:
+   primero el de la dosis, y si no hay, el del array antiguo que coincida en
+   especie. Asi no hay que migrar nada y lo viejo se sigue viendo. */
+function retiroDeDosis(farmaco, dosis) {
+  if (dosis.retiroCarneDias != null || dosis.retiroLecheHoras != null || dosis.retiroFuente) {
+    return {
+      carneDias: dosis.retiroCarneDias == null ? null : dosis.retiroCarneDias,
+      lecheHoras: dosis.retiroLecheHoras == null ? null : dosis.retiroLecheHoras,
+      fuente: dosis.retiroFuente || ""
+    };
+  }
+  const e = normalizarBusqueda(dosis.especie).trim();
+  const viejo = (farmaco.retiro || []).find(function (r) {
+    return normalizarBusqueda(r.especie).trim() === e;
+  });
+  if (!viejo) return { carneDias: null, lecheHoras: null, fuente: "" };
+  return {
+    carneDias: viejo.carneDias == null ? null : viejo.carneDias,
+    lecheHoras: viejo.lecheHoras == null ? null : viejo.lecheHoras,
+    fuente: viejo.fuente || ""
+  };
+}
+
+/* Una sola lista de contraindicaciones. Antes habia dos — "alertas
+   (contraindicaciones absolutas)" arriba en rojo y "contraindicaciones"
+   abajo — y la division no ayudaba: al escribir una habia que decidir en
+   cual iba, y la misma frase acababa en sitios distintos segun el dia.
+
+   El almacen es "alertas" porque es el campo que consulta la calculadora
+   para bloquear un calculo cuando el texto nombra la especie elegida.
+   Guardar en el otro campo habria perdido ese bloqueo en silencio, que es
+   la peor forma de perder una comprobacion de seguridad.
+
+   Los textos del campo viejo se muestran igual y se pasan a "alertas" la
+   primera vez que se edita la lista. Hasta entonces no se escribe nada. */
+function contraindicacionesDe(farmaco) {
+  return (farmaco.alertas || []).concat(farmaco.contraindicaciones || []);
 }
 
 function subtituloModulo(texto, extraClase) {
@@ -5369,8 +5819,9 @@ function buildMantenimientoFormulario() {
 }
 
 /* ---------- Ficha del fármaco ----------
-   Orden fijo: alertas, presentaciones, dosis por especie, retiro,
-   contraindicaciones, y por ultimo verificacion. */
+   Orden: foto del producto, presentaciones (plegadas), dosis plegadas
+   por especie con su tiempo de retiro dentro, verificacion y, al final,
+   las contraindicaciones en rojo. */
 
 function renderFormularioDetail(root, item) {
   mountedDetailId = item.id;
@@ -5413,7 +5864,7 @@ function renderFormularioDetail(root, item) {
   tag.style.display = "inline-flex";
 
   const titleInput = document.createElement("input");
-  titleInput.className = "field-title";
+  titleInput.className = "field-title field-title-farmaco";
   titleInput.placeholder = "Nombre genérico";
   titleInput.value = far.nombreGenerico;
   titleInput.style.margin = "10px 0 8px";
@@ -5423,69 +5874,38 @@ function renderFormularioDetail(root, item) {
   root.appendChild(titleInput);
 
   const familiaRow = document.createElement("div");
-  familiaRow.className = "field-row";
+  familiaRow.className = "field-row field-row-familia";
   const familiaInput = inputTexto(far.familia, "Ej. AINE, aminoglucósido, fluoroquinolona");
+  familiaInput.className += " input-familia";
   familiaInput.addEventListener("input", () => save("familia", familiaInput.value));
   familiaRow.appendChild(campoFormulario("Familia", familiaInput));
   root.appendChild(familiaRow);
 
-  /* --- 1. Alertas (primero y en rojo, antes que cualquier dosis) --- */
-  const alertasCard = document.createElement("div");
-  alertasCard.className = "card card-pad form-alertas";
-  alertasCard.appendChild(subtituloModulo("Alertas — contraindicaciones absolutas"));
-
-  const alertasLista = document.createElement("div");
-  alertasCard.appendChild(alertasLista);
-
-  function pintarAlertas() {
-    alertasLista.innerHTML = "";
-    if (!far.alertas.length) {
-      const vacio = document.createElement("p");
-      vacio.className = "form-vacio";
-      vacio.textContent = "Sin alertas registradas.";
-      alertasLista.appendChild(vacio);
-    }
-    far.alertas.forEach((texto, i) => {
-      const fila = document.createElement("div");
-      fila.className = "form-fila form-fila-alerta";
-      const input = inputTexto(texto, "Ej. Felinos: no usar en pautas repetidas");
-      input.addEventListener("input", () => {
-        const copia = far.alertas.slice();
-        copia[i] = input.value;
-        guardarLista("alertas", copia);
-      });
-      fila.appendChild(input);
-      fila.appendChild(
-        botonQuitar("Quitar alerta", () => {
-          guardarLista("alertas", far.alertas.filter((_, j) => j !== i));
-          pintarAlertas();
-        })
-      );
-      alertasLista.appendChild(fila);
-    });
-  }
-  pintarAlertas();
-
-  const addAlerta = document.createElement("button");
-  addAlerta.type = "button";
-  addAlerta.className = "btn-secondary";
-  addAlerta.textContent = "+ Agregar alerta";
-  addAlerta.addEventListener("click", () => {
-    guardarLista("alertas", far.alertas.concat(""));
-    pintarAlertas();
-  });
-  alertasCard.appendChild(addAlerta);
-  root.appendChild(alertasCard);
+  /* --- 1. Foto del producto --- */
+  /* Reutiliza la seccion de fotos de los casos tal cual: solo necesitaba
+     un id, y la coleccion "fotos" ya guarda uidEntrada = uid + id, sirva
+     ese id para un caso o para un farmaco. La etiqueta si cambia: aqui no
+     se guardan radiografias, se guarda la caja del producto. */
+  const fotoCard = document.createElement("div");
+  fotoCard.className = "card card-pad";
+  fotoCard.appendChild(buildPhotosSection(far, statusText, "Fotos del producto (caja, etiqueta, inserto)"));
+  root.appendChild(fotoCard);
 
   /* --- 2. Presentaciones --- */
-  const presCard = document.createElement("div");
-  presCard.className = "card card-pad";
-  presCard.appendChild(subtituloModulo("Presentaciones"));
+  /* Plegada de entrada: la mayoria de las veces se abre la ficha para
+     mirar una dosis, no la concentracion del frasco. */
+  const presPlegable = tarjetaPlegable("Presentaciones", { abierta: false });
+  const presCard = presPlegable.card;
   const presLista = document.createElement("div");
-  presCard.appendChild(presLista);
+  presPlegable.cuerpo.appendChild(presLista);
 
   function pintarPresentaciones() {
     presLista.innerHTML = "";
+    presPlegable.setContador(
+      far.presentaciones.length
+        ? far.presentaciones.length + (far.presentaciones.length === 1 ? " presentación" : " presentaciones")
+        : "ninguna"
+    );
     if (!far.presentaciones.length) {
       const vacio = document.createElement("p");
       vacio.className = "form-vacio";
@@ -5541,7 +5961,7 @@ function renderFormularioDetail(root, item) {
     );
     pintarPresentaciones();
   });
-  presCard.appendChild(addPres);
+  presPlegable.cuerpo.appendChild(addPres);
   root.appendChild(presCard);
 
   /* --- 3. Dosis agrupadas por especie --- */
@@ -5657,6 +6077,40 @@ function renderFormularioDetail(root, item) {
     bloque.appendChild(avisoRango);
     bloque.appendChild(fila3);
 
+    /* El tiempo de retiro va aqui dentro y solo en especies de
+       produccion. Estaba en una tarjeta aparte al final, y eso obligaba a
+       cruzar a mano dos listas para saber cuantos dias de retiro tiene la
+       pauta que estas mirando. En un perro no aparece porque no hay carne
+       ni leche que retirar. */
+    if (esEspecieDeProduccion(d.especie)) {
+      const ret = retiroDeDosis(far, d);
+      const fila4 = document.createElement("div");
+      fila4.className = "field-row field-row-retiro";
+
+      const carne = inputNumero(ret.carneDias, "Días");
+      carne.addEventListener("input", () => editar("retiroCarneDias", carne.value === "" ? null : Number(carne.value)));
+      fila4.appendChild(campoFormulario("Retiro carne (días)", carne));
+
+      const leche = inputNumero(ret.lecheHoras, "Horas");
+      leche.addEventListener("input", () => editar("retiroLecheHoras", leche.value === "" ? null : Number(leche.value)));
+      fila4.appendChild(campoFormulario("Retiro leche (horas)", leche));
+
+      const fuenteRet = inputTexto(ret.fuente, "AGROCALIDAD, FDA, EMA…");
+      fuenteRet.addEventListener("input", () => editar("retiroFuente", fuenteRet.value));
+      fila4.appendChild(campoFormulario("Fuente del retiro", fuenteRet));
+
+      bloque.appendChild(fila4);
+
+      // Fuera de AGROCALIDAD el dato no es vinculante en Ecuador.
+      if ((ret.carneDias != null || ret.lecheHoras != null) && retiroEsOrientativo(ret)) {
+        const avisoRet = document.createElement("p");
+        avisoRet.className = "form-aviso-legal";
+        avisoRet.textContent =
+          "Retiro orientativo: la fuente no es AGROCALIDAD. En Ecuador el vinculante es el de la etiqueta del producto registrado localmente.";
+        bloque.appendChild(avisoRet);
+      }
+    }
+
     if (!String(d.fuente || "").trim()) {
       const aviso = document.createElement("p");
       aviso.className = "form-aviso-error";
@@ -5672,6 +6126,10 @@ function renderFormularioDetail(root, item) {
     );
     return bloque;
   }
+
+  /* Que especies dejaste abiertas. Vive fuera de pintarDosis para que
+     quitar una pauta no vuelva a cerrarlo todo. */
+  const dosisEspeciesAbiertas = new Set();
 
   function pintarDosis() {
     dosisLista.innerHTML = "";
@@ -5690,8 +6148,27 @@ function renderFormularioDetail(root, item) {
       grupos.get(clave).push({ d, i });
     });
     grupos.forEach((filas, especie) => {
-      dosisLista.appendChild(subtituloModulo(especie, "form-subtitulo-especie"));
-      filas.forEach(({ d, i }) => dosisLista.appendChild(filaDosis(d, i)));
+      /* Una tarjeta plegable por especie, cerrada de entrada. Con seis
+         especies y varias pautas cada una, la ficha abierta entera eran
+         tres pantallas de campos entre las que buscar la tuya. */
+      const pleg = tarjetaPlegable(especie, {
+        clase: "form-especie",
+        abierta: dosisEspeciesAbiertas.has(especie),
+        onToggle: (abierta) => {
+          if (abierta) dosisEspeciesAbiertas.add(especie);
+          else dosisEspeciesAbiertas.delete(especie);
+        }
+      });
+      const conRetiro = filas.filter(({ d }) => {
+        const r = retiroDeDosis(far, d);
+        return r.carneDias != null || r.lecheHoras != null;
+      }).length;
+      pleg.setContador(
+        filas.length + (filas.length === 1 ? " pauta" : " pautas") +
+          (conRetiro ? " · " + conRetiro + " con retiro" : "")
+      );
+      filas.forEach(({ d, i }) => pleg.cuerpo.appendChild(filaDosis(d, i)));
+      dosisLista.appendChild(pleg.card);
     });
   }
   pintarDosis();
@@ -5783,136 +6260,7 @@ function renderFormularioDetail(root, item) {
   dosisCard.appendChild(altaDosis);
   root.appendChild(dosisCard);
 
-  /* --- 4. Tiempos de retiro --- */
-  const retiroCard = document.createElement("div");
-  retiroCard.className = "card card-pad";
-  retiroCard.appendChild(subtituloModulo("Tiempos de retiro"));
-  const retiroLista = document.createElement("div");
-  retiroCard.appendChild(retiroLista);
-
-  function pintarRetiro() {
-    retiroLista.innerHTML = "";
-    if (!far.retiro.length) {
-      const vacio = document.createElement("p");
-      vacio.className = "form-vacio";
-      vacio.textContent = "Sin tiempos de retiro registrados.";
-      retiroLista.appendChild(vacio);
-    }
-    far.retiro.forEach((r, i) => {
-      const bloque = document.createElement("div");
-      bloque.className = "form-fila-bloque";
-
-      function editar(campo, valor) {
-        const copia = far.retiro.map((x, j) => (j === i ? { ...x, [campo]: valor } : x));
-        guardarLista("retiro", copia);
-      }
-
-      const f1 = document.createElement("div");
-      f1.className = "field-row";
-      const esp = selectDe(ESPECIES_FORMULARIO, r.especie, "Especie…");
-      esp.addEventListener("change", () => editar("especie", esp.value));
-      f1.appendChild(campoFormulario("Especie", esp));
-      const prod = inputTexto(r.producto, "Producto registrado");
-      prod.addEventListener("input", () => editar("producto", prod.value));
-      f1.appendChild(campoFormulario("Producto", prod));
-
-      const f2 = document.createElement("div");
-      f2.className = "field-row";
-      const carne = inputNumero(r.carneDias, "Días");
-      carne.addEventListener("input", () => editar("carneDias", carne.value === "" ? null : Number(carne.value)));
-      f2.appendChild(campoFormulario("Carne (días)", carne));
-      const leche = inputNumero(r.lecheHoras, "Horas");
-      leche.addEventListener("input", () => editar("lecheHoras", leche.value === "" ? null : Number(leche.value)));
-      f2.appendChild(campoFormulario("Leche (horas)", leche));
-      const fue = inputTexto(r.fuente, "AGROCALIDAD, FDA, EMA…");
-      fue.addEventListener("input", () => editar("fuente", fue.value));
-      f2.appendChild(campoFormulario("Fuente", fue));
-
-      bloque.appendChild(f1);
-      bloque.appendChild(f2);
-
-      // El aviso legal: fuera de AGROCALIDAD el dato no es vinculante aqui.
-      if (retiroEsOrientativo(r)) {
-        const aviso = document.createElement("p");
-        aviso.className = "form-aviso-legal";
-        aviso.textContent =
-          "Dato orientativo: la fuente no es AGROCALIDAD. En Ecuador el tiempo de retiro vinculante es el de la etiqueta del producto registrado localmente.";
-        bloque.appendChild(aviso);
-      }
-
-      bloque.appendChild(
-        botonQuitar("Quitar retiro", () => {
-          guardarLista("retiro", far.retiro.filter((_, j) => j !== i));
-          pintarRetiro();
-        })
-      );
-      retiroLista.appendChild(bloque);
-    });
-  }
-  pintarRetiro();
-
-  const addRetiro = document.createElement("button");
-  addRetiro.type = "button";
-  addRetiro.className = "btn-secondary";
-  addRetiro.textContent = "+ Agregar tiempo de retiro";
-  addRetiro.addEventListener("click", () => {
-    guardarLista(
-      "retiro",
-      far.retiro.concat({ especie: "", producto: "", carneDias: null, lecheHoras: null, fuente: "" })
-    );
-    pintarRetiro();
-  });
-  retiroCard.appendChild(addRetiro);
-  root.appendChild(retiroCard);
-
-  /* --- 5. Contraindicaciones --- */
-  const contraCard = document.createElement("div");
-  contraCard.className = "card card-pad";
-  contraCard.appendChild(subtituloModulo("Contraindicaciones"));
-  const contraLista = document.createElement("div");
-  contraCard.appendChild(contraLista);
-
-  function pintarContra() {
-    contraLista.innerHTML = "";
-    if (!far.contraindicaciones.length) {
-      const vacio = document.createElement("p");
-      vacio.className = "form-vacio";
-      vacio.textContent = "Sin contraindicaciones registradas.";
-      contraLista.appendChild(vacio);
-    }
-    far.contraindicaciones.forEach((texto, i) => {
-      const fila = document.createElement("div");
-      fila.className = "form-fila";
-      const input = inputTexto(texto, "Ej. Insuficiencia renal");
-      input.addEventListener("input", () => {
-        const copia = far.contraindicaciones.slice();
-        copia[i] = input.value;
-        guardarLista("contraindicaciones", copia);
-      });
-      fila.appendChild(input);
-      fila.appendChild(
-        botonQuitar("Quitar contraindicación", () => {
-          guardarLista("contraindicaciones", far.contraindicaciones.filter((_, j) => j !== i));
-          pintarContra();
-        })
-      );
-      contraLista.appendChild(fila);
-    });
-  }
-  pintarContra();
-
-  const addContra = document.createElement("button");
-  addContra.type = "button";
-  addContra.className = "btn-secondary";
-  addContra.textContent = "+ Agregar contraindicación";
-  addContra.addEventListener("click", () => {
-    guardarLista("contraindicaciones", far.contraindicaciones.concat(""));
-    pintarContra();
-  });
-  contraCard.appendChild(addContra);
-  root.appendChild(contraCard);
-
-  /* --- 6. Verificacion --- */
+  /* --- 4. Verificación --- */
   const verifCard = document.createElement("div");
   verifCard.className = "card card-pad";
   verifCard.appendChild(subtituloModulo("Verificación"));
@@ -5981,6 +6329,94 @@ function renderFormularioDetail(root, item) {
   }
   pintarEstadoVerif();
   root.appendChild(verifCard);
+
+  /* --- Contraindicaciones (al final, en rojo y en UNA sola lista) ---
+
+     Antes habia dos listas: "Alertas — contraindicaciones absolutas"
+     arriba del todo y "Contraindicaciones" abajo. La division obligaba a
+     decidir en cual iba cada frase, y la misma acababa en un sitio u otro
+     segun el dia. Ahora es una.
+
+     Se guardan en "alertas" porque ese es el campo que mira la calculadora
+     para BLOQUEAR un calculo cuando el texto nombra la especie elegida.
+     Guardarlas en el otro campo habria quitado ese bloqueo sin que se
+     notara, que es la peor forma de perder una comprobacion de seguridad.
+
+     Lo que ya estaba en "contraindicaciones" se muestra igual (ver
+     contraindicacionesDe) y se pasa a "alertas" la primera vez que tocas
+     la lista. Hasta entonces no se escribe nada: abrir la ficha para mirar
+     no cambia los datos. */
+  const contraWrap = document.createElement("div");
+  contraWrap.className = "form-contra";
+  const contraTitulo = document.createElement("div");
+  contraTitulo.className = "form-contra-titulo";
+  contraTitulo.textContent = "⚠ Contraindicaciones y advertencias";
+  contraWrap.appendChild(contraTitulo);
+  const contraLista = document.createElement("div");
+  contraWrap.appendChild(contraLista);
+
+  // Copia de trabajo: mezcla los dos campos y a partir de aqui es la unica
+  // fuente de verdad mientras la ficha esta abierta.
+  let contras = contraindicacionesDe(far);
+
+  function guardarContras(lista) {
+    contras = lista;
+    far.alertas = lista;
+    save("alertas", lista);
+    // Solo se vacia el campo viejo si de verdad tenia algo: si no, seria
+    // una escritura inutil en cada tecla.
+    if ((far.contraindicaciones || []).length) {
+      far.contraindicaciones = [];
+      save("contraindicaciones", []);
+    }
+  }
+
+  function pintarContra() {
+    contraLista.innerHTML = "";
+    if (!contras.length) {
+      const vacio = document.createElement("p");
+      vacio.className = "form-vacio";
+      vacio.textContent = "Sin contraindicaciones registradas.";
+      contraLista.appendChild(vacio);
+    }
+    contras.forEach((texto, i) => {
+      const fila = document.createElement("div");
+      fila.className = "form-fila form-fila-contra";
+      const input = inputTexto(texto, "Ej. Insuficiencia renal · Felinos: no usar");
+      input.addEventListener("input", () => {
+        const copia = contras.slice();
+        copia[i] = input.value;
+        guardarContras(copia);
+      });
+      fila.appendChild(input);
+      fila.appendChild(
+        botonQuitar("Quitar contraindicación", () => {
+          guardarContras(contras.filter((_, j) => j !== i));
+          pintarContra();
+        })
+      );
+      contraLista.appendChild(fila);
+    });
+  }
+  pintarContra();
+
+  const addContra = document.createElement("button");
+  addContra.type = "button";
+  addContra.className = "btn-secondary";
+  addContra.textContent = "+ Agregar contraindicación";
+  addContra.addEventListener("click", () => {
+    guardarContras(contras.concat(""));
+    pintarContra();
+  });
+  contraWrap.appendChild(addContra);
+
+  const contraNota = document.createElement("p");
+  contraNota.className = "form-contra-nota";
+  contraNota.textContent =
+    "Si el texto nombra una especie (p. ej. “felinos”), la calculadora bloquea el cálculo para esa especie.";
+  contraWrap.appendChild(contraNota);
+  root.appendChild(contraWrap);
+
 
   const foot = document.createElement("div");
   foot.className = "editor-foot";

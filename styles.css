@@ -1679,6 +1679,13 @@ button, input, select, textarea { font-family: inherit; }
   grid-column: 2 / 4; font-family: inherit; text-align: left; font-size: 0.8rem;
 }
 .const-unidad { font-size: 0.74rem; color: var(--muted); font-family: var(--mono); }
+/* El rango y su matiz, apilados y pegados al borde derecho de su columna.
+   min-width: 0 para que la nota pueda partirse en dos lineas en vez de
+   empujar la rejilla y estirar la fila. */
+.const-refbox {
+  display: flex; flex-direction: column; align-items: flex-end;
+  gap: 1px; min-width: 0;
+}
 .const-ref {
   font-size: 0.72rem; color: var(--muted); font-family: var(--mono);
   white-space: nowrap; text-align: right;
@@ -1696,10 +1703,9 @@ button, input, select, textarea { font-family: inherit; }
 .const-fila[data-estado="alto"] .const-input,
 .const-fila[data-estado="bajo"] .const-input { border-color: var(--rust); }
 
-/* La nota de la especie cuelga bajo su constante, alineada con el nombre. */
 .const-nota {
-  grid-column: 1 / -1; font-size: 0.7rem; color: var(--muted);
-  margin-top: 4px; line-height: 1.35;
+  font-size: 0.66rem; color: var(--muted); line-height: 1.3;
+  text-align: right; font-style: italic;
 }
 .const-aviso-especie {
   font-size: 0.78rem; color: var(--muted); margin: 0 0 10px; line-height: 1.4;
@@ -1713,6 +1719,134 @@ button, input, select, textarea { font-family: inherit; }
   /* 1/4 y no 1/-1: ocupando TODA la fila, la marca ("↑ alto") no cabía
      detrás y se iba sola a una tercera línea, debajo del nombre. Dejando
      libre la última pista se queda al lado y la fila baja de 72 a 57 px. */
-  .const-ref { grid-column: 1 / 4; text-align: left; margin-top: 3px; }
+  .const-refbox { grid-column: 1 / 4; align-items: flex-start; margin-top: 3px; }
+  .const-ref, .const-nota { text-align: left; }
   .const-input-ancho { grid-column: 2 / 4; }
 }
+
+/* ================= Apuntes con imágenes intercaladas =================
+   El editor hereda .field-body (el papel rayado) y solo añade lo que un
+   contenteditable necesita y un <textarea> no. */
+.apunte-editor {
+  min-height: 50vh;
+  overflow-y: auto;
+  resize: none;           /* un contenteditable crece solo con el contenido */
+  padding-top: 8px;
+  white-space: pre-wrap;  /* respeta los saltos y los espacios seguidos */
+  word-break: break-word;
+}
+.apunte-editor:focus { outline: none; border-color: var(--teal); }
+
+/* ::placeholder no existe fuera de los campos de formulario, así que el
+   texto de ayuda se pinta con ::before y una bandera que el editor
+   mantiene. No basta con :empty: un apunte que solo tiene una imagen no
+   está vacío pero tampoco tiene texto. */
+.apunte-editor[data-esta-vacio="si"]::before {
+  content: attr(data-vacio);
+  color: var(--muted); opacity: 0.7; pointer-events: none;
+}
+
+.apunte-editor img {
+  max-width: 100%; height: auto; display: block;
+  margin: 10px 0; border-radius: 8px; border: 1px solid var(--line);
+  cursor: zoom-in;
+}
+/* Mientras llega su base64 desde la colección de fotos, la imagen no tiene
+   src y el navegador la dibujaría como un icono roto de 0 px. */
+.apunte-editor img.apunte-img-cargando,
+.apunte-editor img.apunte-img-rota {
+  min-height: 90px; width: 100%;
+  background: var(--paper-alt);
+  border-style: dashed;
+}
+.apunte-editor img.apunte-img-rota { border-color: var(--rust); }
+
+/* Al arrastrar una imagen encima, el borde avisa de que se puede soltar. */
+.apunte-editor.apunte-soltar { border-color: var(--teal); border-style: dashed; }
+
+.apunte-barra {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.apunte-btn {
+  appearance: none; border: 1px solid var(--line); background: var(--paper-raised);
+  color: var(--ink); font: inherit; font-size: 0.78rem;
+  padding: 4px 9px; border-radius: 6px; cursor: pointer; line-height: 1.4;
+}
+.apunte-btn:hover { border-color: var(--teal); color: var(--teal-ink); }
+.apunte-btn:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.apunte-btn-imagen { font-weight: 600; }
+.apunte-sep { width: 1px; height: 18px; background: var(--line); margin: 0 4px; }
+.apunte-estado { margin-left: auto; font-size: 0.74rem; color: var(--muted); }
+
+/* Las listas de execCommand vienen sin sangrado propio. */
+.apunte-editor ul, .apunte-editor ol { margin: 0; padding-left: 24px; }
+
+/* ================= Ficha del fármaco =================
+   El nombre y su familia son la identidad del fármaco: se leen antes que
+   nada y estaban al mismo tamaño que cualquier campo del formulario. */
+.field-title-farmaco { font-size: 1.85rem; line-height: 1.2; }
+@media (max-width: 600px) {
+  .field-title-farmaco { font-size: 1.45rem; }
+}
+.field-row-familia { margin-bottom: 14px; }
+/* Dos clases y no una: .field-group input ya fija el tamano de todos los
+   campos del formulario y con una sola clase esa regla ganaba, asi que la
+   familia se quedaba igual de pequena. */
+.field-group .input-familia {
+  font-family: var(--serif); font-size: 1.05rem; font-weight: 600; color: var(--ink);
+}
+
+/* ---------- Tarjeta plegable ---------- */
+.plegable { padding-top: 0; padding-bottom: 0; }
+.plegable-cab {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  appearance: none; border: none; background: transparent; color: var(--ink);
+  font: inherit; font-family: var(--serif); font-size: 0.95rem; font-weight: 700;
+  padding: 14px 0; cursor: pointer; text-align: left;
+}
+.plegable-cab:hover .plegable-titulo { color: var(--teal-ink); }
+.plegable-cab:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 4px; }
+/* El triángulo gira en vez de cambiar de dibujo: así se ve de dónde sale y
+   a dónde va. */
+.plegable-flecha {
+  display: inline-block; color: var(--teal); font-size: 1.1rem;
+  transition: transform 0.15s ease;
+}
+.plegable-cab[aria-expanded="true"] .plegable-flecha { transform: rotate(90deg); }
+.plegable-contador {
+  margin-left: auto; font-family: var(--mono); font-size: 0.72rem;
+  font-weight: 400; color: var(--muted); text-transform: none; letter-spacing: 0;
+}
+.plegable-cuerpo { padding-bottom: 16px; }
+
+/* Una especie dentro de las dosis: se distingue por color, por versalitas y
+   por la banda de la izquierda, no solo por el color. */
+.form-especie { border-left: 3px solid var(--teal); margin-bottom: 10px; }
+.form-especie .plegable-cab {
+  font-family: inherit; font-size: 0.74rem; font-weight: 800;
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--teal-ink);
+  padding: 11px 0 11px 10px;
+}
+.form-especie .plegable-cuerpo { padding: 0 0 12px 10px; }
+
+/* La fila del retiro va dentro de la pauta y se separa con una línea, para
+   que se lea como lo que es: un dato de esa dosis, no otra sección. */
+.field-row-retiro {
+  border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 10px;
+}
+
+/* ---------- Contraindicaciones ----------
+   Sin tarjeta alrededor: es lo último de la ficha y el recuadro solo añadía
+   un borde más. El rojo lo lleva el título y el borde izquierdo de cada
+   línea, que es donde se mira. */
+.form-contra { margin-top: 22px; padding-left: 12px; border-left: 3px solid var(--rust); }
+.form-contra-titulo {
+  font-family: var(--serif); font-size: 1rem; font-weight: 700;
+  color: var(--rust-ink); margin-bottom: 10px;
+}
+.form-fila-contra input {
+  border-color: var(--rust); color: var(--rust-ink); background: var(--rust-soft);
+}
+.form-fila-contra input::placeholder { color: var(--rust-ink); opacity: 0.55; }
+.form-contra-nota { font-size: 0.72rem; color: var(--muted); margin: 10px 0 0; line-height: 1.4; }

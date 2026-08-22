@@ -1528,6 +1528,11 @@ function buildDoseCalculator(context) {
       o.textContent = e;
       speciesSelect.appendChild(o);
     });
+    /* Si vienes filtrando por una especie, la calculadora arranca en ella.
+       Si no, se quedaría en la primera de la lista y tendrías que volver a
+       elegirla — justo lo que acabas de decirle a la app. */
+    const filtrada = especieActiva();
+    if (filtrada && especies.includes(filtrada)) speciesSelect.value = filtrada;
   }
 
   function updateIndicacionField() {
@@ -2220,16 +2225,35 @@ function renderDashboardPage(root) {
 
   const stats = document.createElement("div");
   stats.className = "stat-grid";
+  /* Cada tarjeta lleva a donde están las cosas que cuenta. Antes eran
+     números muertos: leías "61 Formulario" y tenías que ir a buscarlo al
+     menú, cuando el sitio obvio para pulsar era el número.
+
+     Las dos de Estudio además dejan abierta la pestaña correcta, porque
+     "Materias" y "Formulario" viven en la misma página. */
   const statDefs = [
-    ["Casos activos", entriesForSection("casos").length],
-    ["Materias", entriesForSection("materias").length],
-    ["Fármacos usados", getMedUsageList().length],
-    ["Formulario", state.formulario.length]
+    ["Casos activos", entriesForSection("casos").length, "patients", null],
+    ["Materias", entriesForSection("materias").length, "study", "materias"],
+    ["Fármacos usados", getMedUsageList().length, "farmacos", null],
+    ["Formulario", state.formulario.length, "formulario_tab", "formulario"]
   ];
-  statDefs.forEach(([l, n]) => {
-    const c = document.createElement("div");
+  statDefs.forEach(([l, n, destino, pestana]) => {
+    // Botón y no div: se enfoca con el teclado y se activa con Enter sin
+    // tener que reimplementar nada de eso a mano.
+    const c = document.createElement("button");
+    c.type = "button";
     c.className = "stat-card";
     c.innerHTML = '<span class="n">' + n + '</span><span class="l">' + l + "</span>";
+    c.setAttribute("aria-label", l + ": " + n + ". Ver.");
+    c.addEventListener("click", () => {
+      // goToPage limpia búsqueda y filtros, así que la pestaña se fija
+      // después: si no, la borraría al pasar.
+      goToPage(destino === "formulario_tab" ? "study" : destino);
+      if (pestana) {
+        state.studyTab = pestana;
+        render();
+      }
+    });
     stats.appendChild(c);
   });
   root.appendChild(stats);
@@ -3710,6 +3734,21 @@ function especiesDelFormulario() {
   return Array.from(vistas);
 }
 
+/* La especie por la que se está mirando el formulario, venga del
+   desplegable o de haberla escrito en el buscador.
+
+   Escribir "canino" es lo que sale natural, y hasta ahora solo servía para
+   dejar fuera los fármacos sin uso canino: la fila seguía diciendo "3
+   pautas" y "canino, felino, bovino". Eso obliga a abrir la ficha para
+   averiguar qué parte de esos datos te sirve. Si has dicho canino, la vista
+   debería hablarte de canino. */
+function especieActiva() {
+  if (state.formularioEspecieFilter) return state.formularioEspecieFilter;
+  const q = normalizarBusqueda(state.query).trim();
+  if (!q) return "";
+  return especiesDelFormulario().find((e) => normalizarBusqueda(e) === q) || "";
+}
+
 function especiesDe(farmaco) {
   const set = new Set();
   farmaco.dosis.forEach((d) => {
@@ -4013,6 +4052,8 @@ function buildFormularioTable(list, withActions) {
   table.innerHTML = "<thead><tr>" + cols.map((c) => "<th>" + c + "</th>").join("") + "</tr></thead>";
   const tbody = document.createElement("tbody");
 
+  const especie = especieActiva();
+
   function filaDeFarmaco(crudo) {
     const far = farmacoNormalizado(crudo);
     const tr = document.createElement("tr");
@@ -4047,14 +4088,26 @@ function buildFormularioTable(list, withActions) {
     if (withActions) {
       const doseTd = document.createElement("td");
       doseTd.className = "cell-muted";
-      doseTd.textContent = far.dosis.length ? far.dosis.length + " pauta(s)" : "—";
+      // Con una especie elegida se cuentan solo SUS pautas, no todas.
+      const pautas = especie
+        ? far.dosis.filter((d) => String(d.especie || "").toLowerCase() === especie)
+        : far.dosis;
+      doseTd.textContent = pautas.length ? pautas.length + " pauta(s)" : "—";
       tr.appendChild(doseTd);
     }
 
     const specTd = document.createElement("td");
     specTd.className = "cell-muted";
     const esp = especiesDe(far);
-    specTd.textContent = esp.length ? esp.join(", ") : "—";
+    if (especie) {
+      // Se muestra la especie elegida y, si el fármaco sirve para más, un
+      // "+N" que avisa de que hay más datos sin esconderlos del todo.
+      const otras = esp.filter((e) => e !== especie).length;
+      specTd.textContent = especie + (otras ? " +" + otras : "");
+      if (otras) specTd.title = "También: " + esp.filter((e) => e !== especie).join(", ");
+    } else {
+      specTd.textContent = esp.length ? esp.join(", ") : "—";
+    }
     tr.appendChild(specTd);
 
     if (withActions) {
@@ -4306,15 +4359,21 @@ function renderFormularioTab(root) {
   // segundo campo de busqueda que haria lo mismo.
   const pista = document.createElement("span");
   pista.className = "form-pista";
-  pista.textContent = state.query
-    ? 'Filtrando por “' + state.query + '” (nombre genérico, familia, vía o indicación).'
-    : "Usa el buscador de arriba para filtrar por nombre genérico, familia, vía o indicación.";
+  const espPista = especieActiva();
+  pista.textContent = espPista
+    ? "Mostrando solo lo de " + espPista + ": las dosis y especies de cada fila son las de esa especie."
+    : state.query
+      ? 'Filtrando por “' + state.query + '” (nombre genérico, familia, vía o indicación).'
+      : "Usa el buscador de arriba para filtrar por nombre genérico, familia, vía o indicación.";
+  if (espPista) pista.classList.add("form-pista-activa");
   filterRow.appendChild(pista);
   card.appendChild(filterRow);
 
   const listWrap = document.createElement("div");
   listWrap.style.padding = "14px 0 4px";
-  const filtro = state.formularioEspecieFilter;
+  // Si escribiste una especie, filtra como si la hubieras elegido en el
+  // desplegable: es lo que esperas al escribir "canino".
+  const filtro = especieActiva();
   const list = state.formulario
     .filter((f) => matchesFormularioQuery(f, state.query))
     .filter((f) => !filtro || especiesDe(farmacoNormalizado(f)).includes(filtro))

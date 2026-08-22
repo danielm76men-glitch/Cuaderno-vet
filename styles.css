@@ -167,7 +167,7 @@ button, input, select, textarea { font-family: inherit; }
    tienen border-bottom y juntas se leen como UNA sola linea horizontal
    cruzando la cabecera; si sus alturas no coinciden, esa linea sale
    quebrada. Antes median 67px y 62px, un desfase de 5px. */
-.app { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; --franja-sup: 62px; }
+.app { display: grid; grid-template-columns: 268px 1fr; min-height: 100vh; --franja-sup: 62px; }
 
 /* ---------- Barra lateral (navegación por íconos) ---------- */
 .app-sidebar {
@@ -185,7 +185,7 @@ button, input, select, textarea { font-family: inherit; }
   padding: 0 18px;
   min-height: var(--franja-sup);
   font-family: var(--serif);
-  font-size: 1.05rem;
+  font-size: 1.18rem;
   font-weight: 700;
   color: var(--ink);
   border-bottom: 1px solid var(--line);
@@ -195,7 +195,7 @@ button, input, select, textarea { font-family: inherit; }
 /* Logo. Va como <img> del mismo icon.svg que usa la PWA, para no tener dos
    dibujos que mantener en paralelo. El disco verde ya trae su propio fondo,
    asi que se ve igual en modo claro y en oscuro. */
-.brand-mark { display: block; width: 26px; height: 26px; flex: 0 0 auto; border-radius: 50%; }
+.brand-mark { display: block; width: 30px; height: 30px; flex: 0 0 auto; border-radius: 50%; }
 .brand-mark-lg { width: 44px; height: 44px; }
 .auth-card h1 { display: flex; align-items: center; justify-content: center; gap: 10px; }
 
@@ -206,10 +206,10 @@ button, input, select, textarea { font-family: inherit; }
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 0.86rem;
+  font-size: 0.95rem;
   font-weight: 600;
   text-align: left;
-  padding: 9px 12px;
+  padding: 12px 14px;
   border-radius: 8px;
   cursor: pointer;
   display: flex;
@@ -217,11 +217,11 @@ button, input, select, textarea { font-family: inherit; }
   gap: 10px;
   width: 100%;
 }
-.nav-item .ico { font-size: 1rem; width: 1.2em; text-align: center; flex-shrink: 0; }
+.nav-item .ico { font-size: 1.2rem; width: 1.3em; text-align: center; flex-shrink: 0; }
 .nav-item .count {
   margin-left: auto;
   font-family: var(--mono);
-  font-size: 0.66rem;
+  font-size: 0.74rem;
   color: var(--muted);
   background: var(--paper-raised);
   border: 1px solid var(--line);
@@ -383,8 +383,19 @@ button, input, select, textarea { font-family: inherit; }
 .card-head h2 { font-family: var(--serif); font-size: 1.02rem; font-weight: 700; margin: 0; color: var(--ink); }
 
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 20px; }
-.stat-card { background: var(--paper-raised); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow); }
-.stat-card .n { font-family: var(--serif); font-size: 1.7rem; font-weight: 700; color: var(--ink); display: block; line-height: 1.15; }
+/* Ahora son <button>: hay que neutralizar los estilos que trae el
+   navegador (fuente, alineación) y dejar claro que se pueden pulsar. */
+.stat-card {
+  background: var(--paper-raised); border: 1px solid var(--line); border-radius: 12px;
+  padding: 16px 18px; box-shadow: var(--shadow);
+  font: inherit; text-align: left; cursor: pointer; width: 100%;
+  display: flex; flex-direction: column; gap: 2px;
+  transition: border-color 0.12s, transform 0.12s;
+}
+.stat-card:hover { border-color: var(--teal); transform: translateY(-1px); }
+.stat-card:active { transform: none; }
+.stat-card:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.stat-card .n { font-family: var(--serif); font-size: 2rem; font-weight: 700; color: var(--ink); display: block; line-height: 1.15; }
 .stat-card .l { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
 
 .subject-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-bottom: 22px; }
@@ -1223,3 +1234,7 @@ button, input, select, textarea { font-family: inherit; }
 @media (max-width: 480px) {
   .brand-mark-boot { width: 80px; height: 80px; }
 }
+
+/* La pista deja de ser un susurro cuando hay una especie activa: cambia lo
+   que significan dos columnas de la tabla, y eso hay que poder verlo. */
+.form-pista-activa { color: var(--teal-ink); font-weight: 600; }

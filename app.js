@@ -1907,30 +1907,37 @@ function buildDoseCalculator(context) {
 
 /* ================= Calculadora de fluidos =================
 
-   Sigue el esquema de la diapositiva "Terapia de líquidos en perros y
-   gatos" (Clínica y Cirugía de Pequeñas Especies I, UTE; las fórmulas
-   proceden de Aldridge & O'Dwyer, Practical Emergency and Critical Care
-   Veterinary Nursing, Wiley 2013):
+   Sigue el esquema de "Terapia de líquidos en perros y gatos" (Clínica y
+   Cirugía de Pequeñas Especies I, UTE; fórmulas de Aldridge & O'Dwyer,
+   Practical Emergency and Critical Care Veterinary Nursing, Wiley 2013):
 
-     Mantenimiento   peso x mL/kg/día según el tamaño
+     Mantenimiento   peso x 40 o x 60 mL/kg/día según el corte de 14 kg
      Rehidratación   peso x % deshidratación x 10
      Pérdidas        peso x 4 mL/kg x número de episodios
-                     ------------------------------------
+                     -------------------------------------
                      todo se suma y se reparte en 24 h
 
-   Una versión anterior ofrecía tres fórmulas de mantenimiento a la vez y
-   dejaba elegir en cuántas horas reponer el déficit. Era más completo y
-   más difícil de usar con un animal delante. Aquí hay un solo camino. */
+   El plan del día se puede repartir en dos fases (por ejemplo el 40 % en
+   8 h y el resto en las 16 siguientes), que es como se pauta cuando hace
+   falta corregir rápido al principio sin llegar a un bolo. */
 
-const FLUIDOS_TAMANOS = [
-  { id: "perro-grande", etiqueta: "Perro grande — 40 mL/kg/día", mlKg: 40, especie: "canino" },
-  { id: "perro-mediano", etiqueta: "Perro mediano — 50 mL/kg/día", mlKg: 50, especie: "canino" },
-  { id: "perro-pequeno", etiqueta: "Perro pequeño — 60 mL/kg/día", mlKg: 60, especie: "canino" },
-  { id: "gato", etiqueta: "Gato — 60 mL/kg/día", mlKg: 60, especie: "felino" }
-];
+/* El tamaño ya no se elige a mano: sale del peso. Un desplegable de
+   grande/mediano/pequeño obligaba a decidir algo que el número ya dice, y
+   se prestaba a elegir mal la banda con el paciente delante. */
+const FLUIDOS_CORTE_KG = 14;
+const FLUIDOS_ML_KG_SOBRE_CORTE = 40;
+const FLUIDOS_ML_KG_BAJO_CORTE = 60;
+
+function mlKgMantenimiento(pesoKg) {
+  return pesoKg > FLUIDOS_CORTE_KG ? FLUIDOS_ML_KG_SOBRE_CORTE : FLUIDOS_ML_KG_BAJO_CORTE;
+}
 
 // Pérdidas sensibles: cada vómito o cada deposición diarreica.
 const FLUIDOS_ML_KG_EPISODIO = 4;
+
+// Pediátrico: multiplica SOLO el mantenimiento. El déficit y las pérdidas
+// ya salen del peso y del estado del animal que tienes delante.
+const FLUIDOS_PEDIATRICO = { canino: 3, felino: 2.5 };
 
 /* Los tramos de deshidratación son de exploración física: no se miden, se
    estiman mirando al paciente. Rellenan el campo del % y ese campo queda
@@ -1975,25 +1982,36 @@ function buildFluidCalculator(context) {
     l.textContent = etiqueta;
     d.appendChild(l);
     d.appendChild(control);
-    if (pista) {
-      const p = document.createElement("div");
-      p.className = "calc-pista";
-      p.textContent = pista;
-      d.appendChild(p);
-    }
+    if (pista) d.appendChild(pista);
     return d;
   }
+  function pistaEl(texto) {
+    const p = document.createElement("div");
+    p.className = "calc-pista";
+    p.textContent = texto || "";
+    return p;
+  }
+  function casilla(texto) {
+    const l = document.createElement("label");
+    l.className = "calc-check";
+    const i = document.createElement("input");
+    i.type = "checkbox";
+    l.appendChild(i);
+    l.appendChild(document.createTextNode(" " + texto));
+    const campo = document.createElement("div");
+    campo.className = "calc-field";
+    campo.appendChild(l);
+    return { campo: campo, input: i };
+  }
 
-  const tamanoSelect = document.createElement("select");
-  FLUIDOS_TAMANOS.forEach(function (t) {
+  const especieSelect = document.createElement("select");
+  [["canino", "Perro"], ["felino", "Gato"]].forEach(function (e) {
     const o = document.createElement("option");
-    o.value = t.id;
-    o.textContent = t.etiqueta;
-    tamanoSelect.appendChild(o);
+    o.value = e[0];
+    o.textContent = e[1];
+    especieSelect.appendChild(o);
   });
-  // Si vienes filtrando por felino, arranca en gato. En perro no se puede
-  // adivinar el tamaño, así que se deja como está.
-  if (especieActiva() === "felino") tamanoSelect.value = "gato";
+  if (especieActiva() === "felino") especieSelect.value = "felino";
 
   const pesoInput = document.createElement("input");
   pesoInput.type = "number";
@@ -2005,6 +2023,9 @@ function buildFluidCalculator(context) {
     const p = parseFloat(String(ctxCase.peso).replace(",", "."));
     if (isFinite(p)) pesoInput.value = p;
   }
+  const pesoPista = pistaEl("");
+
+  const ped = casilla("Paciente pediátrico");
 
   const gradoSelect = document.createElement("select");
   FLUIDOS_GRADOS.forEach(function (g, i) {
@@ -2026,6 +2047,32 @@ function buildFluidCalculator(context) {
   episodiosInput.min = "0";
   episodiosInput.value = "0";
 
+  /* Reparto en dos fases. Nace de la práctica de pasar una parte más
+     rápido al principio: "el 40 % en 8 h y el resto en las siguientes".
+     Los dos campos solo aparecen si se activa, para no dejar dos números
+     en pantalla que la mayoría de las veces no se usan. */
+  const fases = casilla("Repartir el plan en dos fases");
+
+  const faseCaja = document.createElement("div");
+  faseCaja.className = "calc-fases";
+  faseCaja.hidden = true;
+
+  const fasePctInput = document.createElement("input");
+  fasePctInput.type = "number";
+  fasePctInput.step = "any";
+  fasePctInput.min = "0";
+  fasePctInput.max = "100";
+  fasePctInput.value = "40";
+
+  const faseHorasInput = document.createElement("input");
+  faseHorasInput.type = "number";
+  faseHorasInput.step = "any";
+  faseHorasInput.min = "0";
+  faseHorasInput.value = "8";
+
+  faseCaja.appendChild(campo("% del volumen en la primera fase", fasePctInput));
+  faseCaja.appendChild(campo("Horas de la primera fase", faseHorasInput, pistaEl("El resto del volumen se pasa en las horas que queden hasta 24.")));
+
   const equipoSelect = document.createElement("select");
   FLUIDOS_EQUIPOS.forEach(function (e) {
     const o = document.createElement("option");
@@ -2034,12 +2081,7 @@ function buildFluidCalculator(context) {
     equipoSelect.appendChild(o);
   });
 
-  const shockLabel = document.createElement("label");
-  shockLabel.className = "calc-check";
-  const shockInput = document.createElement("input");
-  shockInput.type = "checkbox";
-  shockLabel.appendChild(shockInput);
-  shockLabel.appendChild(document.createTextNode(" Hay shock: añadir bolo de reanimación"));
+  const shock = casilla("Hay shock: añadir bolo de reanimación");
 
   const result = document.createElement("div");
   result.className = "calc-result";
@@ -2051,16 +2093,23 @@ function buildFluidCalculator(context) {
   function aplicarGrado() {
     const g = FLUIDOS_GRADOS[Number(gradoSelect.value) || 0];
     if (g) pctInput.value = String(g.pct);
-    if (g && g.pct >= 12) shockInput.checked = true;
+    if (g && g.pct >= 12) shock.input.checked = true;
   }
 
   function render() {
     result.innerHTML = "";
     fluidAddMsg = null;
+    faseCaja.hidden = !fases.input.checked;
 
     function linea(texto, cls) {
       const d = document.createElement("div");
       d.className = cls || "calc-line";
+      d.textContent = texto;
+      result.appendChild(d);
+    }
+    function subtitulo(texto) {
+      const d = document.createElement("div");
+      d.className = "calc-sub";
       d.textContent = texto;
       result.appendChild(d);
     }
@@ -2075,12 +2124,15 @@ function buildFluidCalculator(context) {
     const pct = parseFloat(String(pctInput.value).replace(",", ".")) || 0;
     const episodios = parseFloat(String(episodiosInput.value).replace(",", ".")) || 0;
     const gtt = Number(equipoSelect.value) || 15;
-    const tam = FLUIDOS_TAMANOS.find(function (t) { return t.id === tamanoSelect.value; }) || FLUIDOS_TAMANOS[0];
+    const especie = especieSelect.value;
 
     resumenPlan = "";
     if (fluidAddBtn) fluidAddBtn.disabled = true;
 
     if (!isFinite(peso) || peso <= 0) {
+      pesoPista.textContent = "El mantenimiento sale solo del peso: hasta " + FLUIDOS_CORTE_KG +
+        " kg son " + FLUIDOS_ML_KG_BAJO_CORTE + " mL/kg/día; por encima, " +
+        FLUIDOS_ML_KG_SOBRE_CORTE + ".";
       const v = document.createElement("div");
       v.className = "calc-empty";
       v.textContent = "Escribe el peso del paciente para calcular el plan.";
@@ -2088,8 +2140,14 @@ function buildFluidCalculator(context) {
       return;
     }
 
-    /* --- Las tres partidas, en el mismo orden de la diapositiva --- */
-    const mantenimiento = peso * tam.mlKg;
+    const mlKg = mlKgMantenimiento(peso);
+    pesoPista.textContent =
+      (peso > FLUIDOS_CORTE_KG ? "Más de " : "Hasta ") + FLUIDOS_CORTE_KG + " kg → " +
+      mlKg + " mL/kg/día.";
+
+    /* --- Las tres partidas --- */
+    const factorPed = ped.input.checked ? FLUIDOS_PEDIATRICO[especie] : 1;
+    const mantenimiento = peso * mlKg * factorPed;
     const rehidratacion = peso * pct * 10;
     const perdidas = peso * FLUIDOS_ML_KG_EPISODIO * episodios;
     const total = mantenimiento + rehidratacion + perdidas;
@@ -2106,7 +2164,11 @@ function buildFluidCalculator(context) {
       result.appendChild(d);
     }
 
-    partida(roundNice(peso) + " kg × " + tam.mlKg + " mL/kg/día", mantenimiento);
+    partida(
+      roundNice(peso) + " kg × " + mlKg + " mL/kg/día" +
+        (factorPed !== 1 ? " × " + String(factorPed).replace(".", ",") + " (pediátrico)" : ""),
+      mantenimiento
+    );
     if (pct > 0) partida(roundNice(peso) + " kg × " + roundNice(pct) + " % × 10", rehidratacion);
     if (episodios > 0) {
       partida(
@@ -2125,54 +2187,99 @@ function buildFluidCalculator(context) {
     suma.appendChild(vt);
     result.appendChild(suma);
 
-    /* --- De mL/día a gotas por minuto, paso a paso --- */
-    const mlHora = total / 24;
-    const mlMin = mlHora / 60;
-    const gotasMin = mlMin * gtt;
+    function goteo(volumen, horas, etiqueta) {
+      if (!(horas > 0)) return null;
+      const mlHora = volumen / horas;
+      const gotasMin = (mlHora / 60) * gtt;
+      if (etiqueta) subtitulo(etiqueta);
+      linea(roundNice(volumen) + " mL ÷ " + roundNice(horas) + " h", "calc-line");
+      linea("= " + roundNice(mlHora) + " mL/h", "calc-total");
+      linea("= " + roundNice(gotasMin) + " gotas/min", "calc-total");
+      if (gotasMin > 0) {
+        linea("Una gota cada " + roundNice(60 / gotasMin) + " segundos, con equipo de " + gtt + " gotas/mL.", "calc-line-suave");
+      }
+      return { mlHora: mlHora, gotasMin: gotasMin };
+    }
 
-    linea(roundNice(total) + " mL/día ÷ 24 h = " + roundNice(mlHora) + " mL/h", "calc-line");
-    linea(roundNice(mlHora) + " mL/h ÷ 60 min = " + roundNice(mlMin) + " mL/min", "calc-line");
-    linea(roundNice(mlMin) + " mL/min × " + gtt + " gotas/mL", "calc-line");
-    linea("= " + roundNice(mlHora) + " mL/h", "calc-total");
-    linea("= " + roundNice(gotasMin) + " gotas/min", "calc-total");
-    if (gotasMin > 0) {
-      linea("Una gota cada " + roundNice(60 / gotasMin) + " segundos.", "calc-line-suave");
+    let picoMlKgH = 0;
+
+    if (fases.input.checked) {
+      const fPct = parseFloat(String(fasePctInput.value).replace(",", ".")) || 0;
+      const fHoras = parseFloat(String(faseHorasInput.value).replace(",", ".")) || 0;
+      const horas2 = 24 - fHoras;
+      const vol1 = (total * fPct) / 100;
+      const vol2 = total - vol1;
+
+      const g1 = goteo(vol1, fHoras, "Fase 1 · " + roundNice(fPct) + " % en " + roundNice(fHoras) + " h");
+      if (g1) picoMlKgH = Math.max(picoMlKgH, g1.mlHora / peso);
+
+      const g2 = goteo(vol2, horas2, "Fase 2 · el " + roundNice(100 - fPct) + " % restante en " + roundNice(horas2) + " h");
+      if (g2) picoMlKgH = Math.max(picoMlKgH, g2.mlHora / peso);
+
+      if (g1 && g2) {
+        resumenPlan =
+          "Fluidos — " + roundNice(peso) + " kg: " + roundNice(total) + " mL/día en dos fases. " +
+          "Fase 1 " + roundNice(vol1) + " mL en " + roundNice(fHoras) + " h (" + roundNice(g1.mlHora) +
+          " mL/h, " + roundNice(g1.gotasMin) + " gotas/min); fase 2 " + roundNice(vol2) + " mL en " +
+          roundNice(horas2) + " h (" + roundNice(g2.mlHora) + " mL/h, " + roundNice(g2.gotasMin) + " gotas/min)";
+      }
+
+      if (!(fHoras > 0)) {
+        aviso("La primera fase necesita al menos una hora.");
+      } else if (horas2 <= 0) {
+        aviso(
+          "Con " + roundNice(fHoras) + " h en la primera fase no queda tiempo para la segunda. " +
+            "Ponle menos de 24 h."
+        );
+      }
+      if (fPct <= 0 || fPct >= 100) {
+        aviso("El porcentaje de la primera fase tiene que estar entre 1 y 99. Si no, no hay dos fases.");
+      }
+    } else {
+      const g = goteo(total, 24, null);
+      if (g) {
+        picoMlKgH = g.mlHora / peso;
+        resumenPlan =
+          "Fluidos — " + roundNice(peso) + " kg: mantenimiento " + roundNice(mantenimiento) +
+          " + rehidratación " + roundNice(rehidratacion) + " + pérdidas " + roundNice(perdidas) +
+          " = " + roundNice(total) + " mL/día. " + roundNice(g.mlHora) + " mL/h, " +
+          roundNice(g.gotasMin) + " gotas/min con equipo de " + gtt + " gotas/mL";
+      }
     }
 
     /* --- Bolo, aparte del plan del día --- */
-    if (shockInput.checked) {
-      const b = FLUIDOS_BOLO[tam.especie];
-      const bMin = b.min * peso;
-      const bMax = b.max * peso;
-      const sep = document.createElement("div");
-      sep.className = "calc-sub";
-      sep.textContent = "Antes del plan · bolo de reanimación";
-      result.appendChild(sep);
+    if (shock.input.checked) {
+      const b = FLUIDOS_BOLO[especie];
+      subtitulo("Antes del plan · bolo de reanimación");
       linea(b.min + "–" + b.max + " mL/kg × " + roundNice(peso) + " kg", "calc-line");
-      linea("= " + roundNice(bMin) + " – " + roundNice(bMax) + " mL en " + FLUIDOS_BOLO_MINUTOS + " min", "calc-total");
-      linea(
-        "Cristaloide isotónico, llave abierta. Reevalúa la perfusión al terminar; se puede repetir.",
-        "calc-line-suave"
-      );
+      linea("= " + roundNice(b.min * peso) + " – " + roundNice(b.max * peso) + " mL en " + FLUIDOS_BOLO_MINUTOS + " min", "calc-total");
+      linea("Cristaloide isotónico, llave abierta. Reevalúa la perfusión al terminar; se puede repetir.", "calc-line-suave");
     }
 
     /* --- Avisos --- */
-    if (pct >= 12 && !shockInput.checked) {
+    /* El corte de 14 kg es un escalón: 14 kg da 840 mL/día y 14,1 kg da
+       564. Cerca del borde conviene ver los dos números antes de fiarse
+       de la báscula. */
+    if (peso >= FLUIDOS_CORTE_KG - 2 && peso <= FLUIDOS_CORTE_KG + 3) {
+      const otro = mlKg === FLUIDOS_ML_KG_SOBRE_CORTE ? FLUIDOS_ML_KG_BAJO_CORTE : FLUIDOS_ML_KG_SOBRE_CORTE;
       aviso(
-        "Un " + roundNice(pct) + " % de deshidratación es shock hipovolémico: primero el bolo, " +
-          "y este plan después."
+        "Estás pegado al corte de " + FLUIDOS_CORTE_KG + " kg. Al otro lado el mantenimiento sería " +
+          roundNice(peso * otro * factorPed) + " mL/día en vez de " + roundNice(mantenimiento) + "."
       );
+    }
+    if (pct >= 12 && !shock.input.checked) {
+      aviso("Un " + roundNice(pct) + " % de deshidratación es shock hipovolémico: primero el bolo, y este plan después.");
     }
     if (pct > 12) {
       aviso("Por encima del 12 % ya no se estima por exploración. Revisa el número.");
     }
-    // El bolo es lo más rápido que se pauta. Si el goteo del día lo supera,
-    // hay un dato mal escrito.
-    const limite = (FLUIDOS_BOLO[tam.especie].max / FLUIDOS_BOLO_MINUTOS) * 60;
-    if (mlHora / peso > limite) {
+    // El bolo es lo más rápido que se pauta. Si alguna fase lo supera, hay
+    // un dato mal escrito.
+    const limite = (FLUIDOS_BOLO[especie].max / FLUIDOS_BOLO_MINUTOS) * 60;
+    if (picoMlKgH > limite) {
       aviso(
-        "Esta velocidad (" + roundNice(mlHora / peso) + " mL/kg/h) supera la del bolo de " +
-          "reanimación (" + roundNice(limite) + " mL/kg/h). Revisa el peso, el % y los episodios."
+        "La velocidad más alta del plan (" + roundNice(picoMlKgH) + " mL/kg/h) supera la del bolo de " +
+          "reanimación (" + roundNice(limite) + " mL/kg/h). Revisa el peso, el % y las horas."
       );
     }
 
@@ -2183,36 +2290,33 @@ function buildFluidCalculator(context) {
       " No contempla cardiopatía, nefropatía oligúrica ni hipoproteinemia, donde el volumen se reduce.";
     result.appendChild(nota);
 
-    resumenPlan =
-      "Fluidos — " + roundNice(peso) + " kg: mantenimiento " + roundNice(mantenimiento) +
-      " + rehidratación " + roundNice(rehidratacion) + " + pérdidas " + roundNice(perdidas) +
-      " = " + roundNice(total) + " mL/día. " + roundNice(mlHora) + " mL/h, " +
-      roundNice(gotasMin) + " gotas/min con equipo de " + gtt + " gotas/mL";
-    if (fluidAddBtn) fluidAddBtn.disabled = false;
+    if (fluidAddBtn) fluidAddBtn.disabled = !resumenPlan;
   }
 
   gradoSelect.addEventListener("change", function () {
     aplicarGrado();
     render();
   });
-  [pesoInput, pctInput, episodiosInput].forEach(function (i) {
+  [pesoInput, pctInput, episodiosInput, fasePctInput, faseHorasInput].forEach(function (i) {
     i.addEventListener("input", render);
   });
-  [tamanoSelect, equipoSelect].forEach(function (s) {
+  [especieSelect, equipoSelect].forEach(function (s) {
     s.addEventListener("change", render);
   });
-  shockInput.addEventListener("change", render);
+  [ped.input, fases.input, shock.input].forEach(function (c) {
+    c.addEventListener("change", render);
+  });
 
-  wrap.appendChild(campo("Paciente", tamanoSelect));
-  wrap.appendChild(campo("Peso (kg)", pesoInput));
+  wrap.appendChild(campo("Especie", especieSelect));
+  wrap.appendChild(campo("Peso (kg)", pesoInput, pesoPista));
+  wrap.appendChild(ped.campo);
   wrap.appendChild(campo("Deshidratación estimada", gradoSelect));
-  wrap.appendChild(campo("% a usar", pctInput, "Se propone el centro del tramo. Cámbialo si tu exploración dice otra cosa."));
-  wrap.appendChild(campo("Vómitos o diarreas", episodiosInput, "Número de episodios. Cada uno cuenta como " + FLUIDOS_ML_KG_EPISODIO + " mL/kg."));
+  wrap.appendChild(campo("% a usar", pctInput, pistaEl("Se propone el centro del tramo. Cámbialo si tu exploración dice otra cosa.")));
+  wrap.appendChild(campo("Vómitos o diarreas", episodiosInput, pistaEl("Número de episodios. Cada uno cuenta como " + FLUIDOS_ML_KG_EPISODIO + " mL/kg.")));
+  wrap.appendChild(fases.campo);
+  wrap.appendChild(faseCaja);
   wrap.appendChild(campo("Equipo de goteo", equipoSelect));
-  const shockCampo = document.createElement("div");
-  shockCampo.className = "calc-field";
-  shockCampo.appendChild(shockLabel);
-  wrap.appendChild(shockCampo);
+  wrap.appendChild(shock.campo);
   wrap.appendChild(result);
 
   // Igual que en la calculadora de dosis: deja el plan escrito como una

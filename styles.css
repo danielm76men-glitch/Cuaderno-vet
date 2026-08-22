@@ -1466,3 +1466,12 @@ button, input, select, textarea { font-family: inherit; }
    dos formas, así que van juntos. Con el margen suelto de .calc-total se
    separaban 10 px y parecían dos conclusiones distintas. */
 .calc-result .calc-total + .calc-total { margin-top: -6px; }
+
+/* Los dos campos del reparto por fases van sangrados y con una banda: son
+   hijos de la casilla que los enciende, no campos sueltos del formulario. */
+.calc-fases {
+  margin: -6px 0 14px 0; padding: 12px 12px 2px 12px;
+  border-left: 3px solid var(--teal); background: var(--paper-alt);
+  border-radius: 0 6px 6px 0;
+}
+.calc-fases .calc-field:last-child { margin-bottom: 10px; }

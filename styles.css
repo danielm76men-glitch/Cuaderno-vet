@@ -1266,24 +1266,19 @@ button, input, select, textarea { font-family: inherit; }
 }
 .calc-sub:first-child { margin-top: 0; }
 
-/* Las tres fórmulas de mantenimiento se muestran siempre juntas: dan cifras
-   muy distintas y esconder dos fingiría una precisión que no existe. La que
-   entra en el plan se marca por color, por peso y por el ▸ del principio —
-   tres señales, para que se distinga aunque el contraste quede justo. */
-.calc-mant {
+/* Cada partida del plan: la fórmula a la izquierda, el volumen a la derecha.
+   Alineadas en columna se comprueba la suma de un vistazo, que es como se
+   lee en la diapositiva. */
+.calc-partida {
   display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
   font-family: var(--mono); font-size: 0.78rem; color: var(--muted);
-  padding: 4px 6px 4px 8px; border-radius: 5px;
-  border-left: 3px solid transparent;
+  padding: 5px 2px;
 }
-
-/* La banda de la izquierda, no un fondo. Se probaron los dos: --teal-soft
-   sobre la caja del resultado da 1,02 de contraste en claro y 1,18 en
-   oscuro, o sea invisible en ambos temas. La banda en --teal da 5,37 y
-   5,14: esa sí se ve. */
-.calc-mant-activa {
-  color: var(--teal-ink); font-weight: 700; border-left-color: var(--teal);
+.calc-partida-total {
+  color: var(--teal-ink); font-size: 0.86rem;
+  border-top: 1px solid var(--line); margin-top: 4px; padding-top: 8px;
 }
+.calc-partida-total strong { font-size: 1rem; }
 
 
 /* =====================================================================

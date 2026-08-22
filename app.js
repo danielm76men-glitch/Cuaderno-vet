@@ -3932,9 +3932,68 @@ function grupoDeFarmaco(farmaco) {
   return SIN_GRUPO;
 }
 
+/* Subclase dentro de la categoría. La "familia" es más fina todavía
+   ("Betalactámico — aminopenicilina"), así que agrupar por ella daría
+   subgrupos de un solo fármaco. Aquí se normaliza al nombre de la clase
+   farmacológica, en plural, que es como se estudian. */
+const SUBCLASES_FARMACO = [
+  [/betalact/i, "Betalactámicos"],
+  [/cefalospor/i, "Cefalosporinas"],
+  [/quinolona/i, "Fluoroquinolonas"],
+  [/aminogluc/i, "Aminoglucósidos"],
+  [/tetraciclina/i, "Tetraciclinas"],
+  [/macrólido|macrolido/i, "Macrólidos"],
+  [/sulfonamida/i, "Sulfonamidas potenciadas"],
+  [/anfenicol/i, "Anfenicoles"],
+  [/nitroimidazol/i, "Nitroimidazoles"],
+  [/coxib/i, "Coxibs"],
+  [/propiónico|propionico/i, "Derivados propiónicos"],
+  [/oxicam/i, "Oxicams"],
+  [/pirazolona/i, "Pirazolonas"],
+  [/fenamato/i, "Fenamatos"],
+  [/agonista mu/i, "Agonistas mu puros"],
+  [/agonista parcial/i, "Agonistas parciales"],
+  [/kappa/i, "Agonistas kappa"],
+  [/atípico|atipico|acción central|accion central/i, "Opioides atípicos"],
+  [/inhalatorio/i, "Inhalatorios"],
+  [/inductor/i, "Inductores intravenosos"],
+  [/disociativo/i, "Disociativos"],
+  [/alfa-2/i, "Agonistas alfa-2"],
+  [/benzodiazepina/i, "Benzodiazepinas"],
+  [/fenotiazina/i, "Fenotiazinas"],
+  [/anestésico local|anestesico local/i, "Anestésicos locales"],
+  [/anticolinérgico|anticolinergico/i, "Anticolinérgicos"],
+  [/avermectina|lactona macroc/i, "Lactonas macrocíclicas"],
+  [/benzimidazol/i, "Benzimidazoles"],
+  [/isoxazolina/i, "Isoxazolinas"],
+  [/cestodicida/i, "Cestodicidas"],
+  [/tetrahidropirimidina/i, "Tetrahidropirimidinas"],
+  [/triazinona|anticoccidial|tiamina/i, "Anticoccidiales"],
+  [/glucocorticoide|corticoide/i, "Glucocorticoides"],
+  [/diurético|diuretico/i, "Diuréticos"],
+  [/alcalinizante/i, "Alcalinizantes"],
+  [/electrolito/i, "Electrolitos"],
+  [/fluido/i, "Fluidos"]
+];
+
+function subclaseDeFarmaco(farmaco) {
+  const f = (farmaco && farmaco.familia) || "";
+  for (const [patron, nombre] of SUBCLASES_FARMACO) {
+    if (patron.test(f)) return nombre;
+  }
+  // Sin regla propia: se usa el primer tramo de la familia tal cual.
+  const primero = f.split("—")[0].trim();
+  return primero || "Sin clasificar";
+}
+
 // Igual que en pacientes: fuera del closure, si no cada redibujado
 // volveria a cerrar todos los grupos que hubieras abierto.
 const gruposFarmacoExpandidos = new Set();
+
+/* Las subclases se guardan al revés: se anota la que CIERRAS, no la que
+   abres. Así, al desplegar una categoría se ven sus fármacos de una vez en
+   lugar de obligar a un segundo clic por cada subclase. */
+const subclasesColapsadas = new Set();
 
 function buildFormularioTable(list, withActions) {
   const wrap = document.createElement("div");
@@ -4073,11 +4132,81 @@ function buildFormularioTable(list, withActions) {
     headTr.appendChild(headTd);
     tbody.appendChild(headTr);
 
-    const filasTr = filas.map((crudo) => {
-      const tr = filaDeFarmaco(crudo);
-      tr.hidden = !expandido;
-      tbody.appendChild(tr);
-      return tr;
+    /* Segundo nivel: subclases dentro de la categoría. Cada una tiene su
+       propio plegado, y el de la categoría manda sobre todos: si la
+       categoría está cerrada no se ve nada suyo, esté como esté cada
+       subclase. */
+    const subgrupos = new Map();
+    filas.forEach((crudo) => {
+      const sc = subclaseDeFarmaco(farmacoNormalizado(crudo));
+      if (!subgrupos.has(sc)) subgrupos.set(sc, []);
+      subgrupos.get(sc).push(crudo);
+    });
+
+    const nombresSub = Array.from(subgrupos.keys()).sort((a, b) => a.localeCompare(b, "es"));
+    const controlados = [];
+
+    nombresSub.forEach((sub) => {
+      const clave = nombre + "/" + sub;
+      const subAbierto = abrirTodo || !subclasesColapsadas.has(clave);
+      const deLaSub = subgrupos.get(sub);
+
+      // Con una sola subclase el encabezado sobra: repetiría lo que ya dice
+      // la categoría y añadiría un clic para nada.
+      let subTr = null;
+      let subTd = null;
+      if (nombresSub.length > 1) {
+        subTr = document.createElement("tr");
+        subTr.className = "subgroup-row";
+        subTd = document.createElement("td");
+        subTd.colSpan = cols.length;
+        subTd.setAttribute("role", "button");
+        subTd.tabIndex = 0;
+        subTd.setAttribute("aria-expanded", subAbierto ? "true" : "false");
+        subTd.innerHTML =
+          '<span class="subgroup-caret"></span><span class="subgroup-name"></span>' +
+          '<span class="subgroup-count"></span>';
+        subTd.querySelector(".subgroup-caret").textContent = subAbierto ? "▾" : "▸";
+        subTd.querySelector(".subgroup-name").textContent = sub;
+        subTd.querySelector(".subgroup-count").textContent = deLaSub.length;
+        subTr.appendChild(subTd);
+        subTr.hidden = !expandido;
+        tbody.appendChild(subTr);
+      }
+
+      const filasSub = deLaSub.map((crudo) => {
+        const tr = filaDeFarmaco(crudo);
+        tr.hidden = !(expandido && subAbierto);
+        tbody.appendChild(tr);
+        return tr;
+      });
+
+      function alternarSub() {
+        const abierto = subTd.getAttribute("aria-expanded") === "true";
+        const ahora = !abierto;
+        if (ahora) subclasesColapsadas.delete(clave);
+        else subclasesColapsadas.add(clave);
+        subTd.setAttribute("aria-expanded", ahora ? "true" : "false");
+        subTd.querySelector(".subgroup-caret").textContent = ahora ? "▾" : "▸";
+        filasSub.forEach((tr) => {
+          tr.hidden = !ahora;
+        });
+      }
+
+      if (subTr) {
+        subTr.addEventListener("click", (e) => {
+          if (e.target.closest(".row-actions")) return;
+          alternarSub();
+        });
+        subTd.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            alternarSub();
+          }
+        });
+      }
+
+      controlados.push({ subTr, subTd, filasSub });
     });
 
     function alternar() {
@@ -4087,8 +4216,15 @@ function buildFormularioTable(list, withActions) {
       else gruposFarmacoExpandidos.delete(nombre);
       headTd.setAttribute("aria-expanded", nuevoEstado ? "true" : "false");
       headTd.querySelector(".group-caret").textContent = nuevoEstado ? "▾" : "▸";
-      filasTr.forEach((tr) => {
-        tr.hidden = !nuevoEstado;
+
+      controlados.forEach(({ subTr, subTd, filasSub }) => {
+        if (subTr) subTr.hidden = !nuevoEstado;
+        // Al reabrir la categoría se respeta el estado que dejaste en cada
+        // subclase, en vez de abrirlas todas de golpe.
+        const subAbierto = !subTd || subTd.getAttribute("aria-expanded") === "true";
+        filasSub.forEach((tr) => {
+          tr.hidden = !(nuevoEstado && subAbierto);
+        });
       });
     }
 

@@ -995,22 +995,8 @@ export const SEMILLA_FORMULARIO = [
     ],
     dosis: [
           {
-                "especie": "bovino",
-                "indicacion": "Pirexia asociada a enfermedad respiratoria",
-                "dosisMin": 2.2,
-                "dosisMax": 2.2,
-                "unidad": "mg/kg",
-                "via": [
-                      "IV"
-                ],
-                "frecuenciaH": 24,
-                "duracionMaxDias": 3,
-                "fuente": "FDA NADA 101-479 — Banamine (flunixin meglumine), etiqueta del fabricante",
-                "esExtralabel": false
-          },
-          {
                 "especie": "equino",
-                "indicacion": "Dolor cólico y musculoesquelético",
+                "indicacion": "Dolor musculoesquelético",
                 "dosisMin": 1.1,
                 "dosisMax": 1.1,
                 "unidad": "mg/kg",
@@ -1018,9 +1004,37 @@ export const SEMILLA_FORMULARIO = [
                       "IV",
                       "IM"
                 ],
-                "frecuenciaH": 12,
+                "frecuenciaH": 24,
                 "duracionMaxDias": 5,
-                "fuente": "FDA NADA 101-479 — Banamine (flunixin meglumine), etiqueta del fabricante",
+                "fuente": "FDA NADA 101-479 — Banamine (flunixin meglumina), etiqueta en DailyMed",
+                "esExtralabel": false
+          },
+          {
+                "especie": "equino",
+                "indicacion": "Cólico",
+                "dosisMin": 1.1,
+                "dosisMax": 1.1,
+                "unidad": "mg/kg",
+                "via": [
+                      "IV"
+                ],
+                "frecuenciaH": 24,
+                "duracionMaxDias": 5,
+                "fuente": "FDA NADA 101-479 — Banamine (flunixin meglumina), etiqueta en DailyMed",
+                "esExtralabel": false
+          },
+          {
+                "especie": "bovino",
+                "indicacion": "Pirexia asociada a enfermedad respiratoria",
+                "dosisMin": 1.1,
+                "dosisMax": 2.2,
+                "unidad": "mg/kg",
+                "via": [
+                      "IV"
+                ],
+                "frecuenciaH": 24,
+                "duracionMaxDias": 3,
+                "fuente": "FDA NADA 101-479 — Banamine (flunixin meglumina), etiqueta en DailyMed",
                 "esExtralabel": false
           }
     ],
@@ -1288,19 +1302,17 @@ export const SEMILLA_FORMULARIO = [
     ],
     dosis: [
           {
-                "especie": "canino",
-                "indicacion": "Analgesia y antitusígeno",
-                "dosisMin": 0.2,
-                "dosisMax": 0.8,
+                "especie": "felino",
+                "indicacion": "Analgesia",
+                "dosisMin": 0.4,
+                "dosisMax": 0.4,
                 "unidad": "mg/kg",
                 "via": [
-                      "IV",
-                      "IM",
                       "SC"
                 ],
                 "frecuenciaH": 6,
-                "duracionMaxDias": null,
-                "fuente": "FDA NADA 018-190 — Torbugesic (butorphanol tartrate), etiqueta del fabricante",
+                "duracionMaxDias": 2,
+                "fuente": "FDA — Torbugesic-SA (butorfanol), etiqueta felina en DailyMed",
                 "esExtralabel": false
           },
           {
@@ -1314,7 +1326,7 @@ export const SEMILLA_FORMULARIO = [
                 ],
                 "frecuenciaH": 4,
                 "duracionMaxDias": null,
-                "fuente": "FDA NADA 018-190 — Torbugesic (butorphanol tartrate), etiqueta del fabricante",
+                "fuente": "FDA — Torbugesic (butorfanol), etiqueta equina en DailyMed",
                 "esExtralabel": false
           }
     ],
@@ -1537,8 +1549,8 @@ export const SEMILLA_FORMULARIO = [
     ],
     dosis: [
           {
-                "especie": "equino",
-                "indicacion": "Sedación y analgesia",
+                "especie": "canino",
+                "indicacion": "Sedación y analgesia — vía intravenosa",
                 "dosisMin": 1.1,
                 "dosisMax": 1.1,
                 "unidad": "mg/kg",
@@ -1547,7 +1559,65 @@ export const SEMILLA_FORMULARIO = [
                 ],
                 "frecuenciaH": null,
                 "duracionMaxDias": null,
-                "fuente": "FDA NADA 047-956 — Rompun / AnaSed (xylazine), etiqueta del fabricante",
+                "fuente": "FDA — AnaSed / Rompun (xilazina), etiqueta en DailyMed",
+                "esExtralabel": false
+          },
+          {
+                "especie": "canino",
+                "indicacion": "Sedación y analgesia — vía IM o SC",
+                "dosisMin": 2.2,
+                "dosisMax": 2.2,
+                "unidad": "mg/kg",
+                "via": [
+                      "IM",
+                      "SC"
+                ],
+                "frecuenciaH": null,
+                "duracionMaxDias": null,
+                "fuente": "FDA — AnaSed / Rompun (xilazina), etiqueta en DailyMed",
+                "esExtralabel": false
+          },
+          {
+                "especie": "felino",
+                "indicacion": "Sedación y analgesia — vía IM o SC",
+                "dosisMin": 2.2,
+                "dosisMax": 2.2,
+                "unidad": "mg/kg",
+                "via": [
+                      "IM",
+                      "SC"
+                ],
+                "frecuenciaH": null,
+                "duracionMaxDias": null,
+                "fuente": "FDA — AnaSed / Rompun (xilazina), etiqueta en DailyMed",
+                "esExtralabel": false
+          },
+          {
+                "especie": "equino",
+                "indicacion": "Sedación y analgesia — vía intravenosa",
+                "dosisMin": 1.1,
+                "dosisMax": 1.1,
+                "unidad": "mg/kg",
+                "via": [
+                      "IV"
+                ],
+                "frecuenciaH": null,
+                "duracionMaxDias": null,
+                "fuente": "FDA — AnaSed / Rompun (xilazina), etiqueta en DailyMed",
+                "esExtralabel": false
+          },
+          {
+                "especie": "equino",
+                "indicacion": "Sedación y analgesia — vía intramuscular",
+                "dosisMin": 2.2,
+                "dosisMax": 2.2,
+                "unidad": "mg/kg",
+                "via": [
+                      "IM"
+                ],
+                "frecuenciaH": null,
+                "duracionMaxDias": null,
+                "fuente": "FDA — AnaSed / Rompun (xilazina), etiqueta en DailyMed",
                 "esExtralabel": false
           },
           {
@@ -1557,26 +1627,11 @@ export const SEMILLA_FORMULARIO = [
                 "dosisMax": 0.1,
                 "unidad": "mg/kg",
                 "via": [
-                      "IV",
-                      "IM"
+                      "IV"
                 ],
                 "frecuenciaH": null,
                 "duracionMaxDias": null,
-                "fuente": "FDA NADA 047-956 — Rompun (xylazine): el bovino es mucho más sensible que el equino",
-                "esExtralabel": false
-          },
-          {
-                "especie": "canino",
-                "indicacion": "Sedación y analgesia",
-                "dosisMin": 1.1,
-                "dosisMax": 1.1,
-                "unidad": "mg/kg",
-                "via": [
-                      "IM"
-                ],
-                "frecuenciaH": null,
-                "duracionMaxDias": null,
-                "fuente": "FDA NADA 047-956 — Rompun / AnaSed (xylazine), etiqueta del fabricante",
+                "fuente": "FDA — Rompun (xilazina), etiqueta bovina. El bovino es mucho más sensible que el equino",
                 "esExtralabel": false
           }
     ],
@@ -1608,22 +1663,49 @@ export const SEMILLA_FORMULARIO = [
     dosis: [
           {
                 "especie": "canino",
-                "indicacion": "Sedación y analgesia — dosificar por superficie corporal",
+                "indicacion": "Sedación y analgesia — vía intravenosa",
                 "dosisMin": 0.375,
+                "dosisMax": 0.375,
+                "unidad": "mg/m2",
+                "via": [
+                      "IV"
+                ],
+                "frecuenciaH": null,
+                "duracionMaxDias": null,
+                "fuente": "FDA NADA 141-267 — Dexdomitor (dexmedetomidina), etiqueta en DailyMed",
+                "esExtralabel": false
+          },
+          {
+                "especie": "canino",
+                "indicacion": "Sedación y analgesia — vía intramuscular",
+                "dosisMin": 0.5,
                 "dosisMax": 0.5,
                 "unidad": "mg/m2",
                 "via": [
-                      "IV",
                       "IM"
                 ],
                 "frecuenciaH": null,
                 "duracionMaxDias": null,
-                "fuente": "FDA NADA 141-267 — Dexdomitor (dexmedetomidine): la etiqueta canina dosifica en mcg/m2, no en mg/kg",
+                "fuente": "FDA NADA 141-267 — Dexdomitor (dexmedetomidina), etiqueta en DailyMed",
+                "esExtralabel": false
+          },
+          {
+                "especie": "canino",
+                "indicacion": "Premedicación anestésica",
+                "dosisMin": 0.125,
+                "dosisMax": 0.375,
+                "unidad": "mg/m2",
+                "via": [
+                      "IM"
+                ],
+                "frecuenciaH": null,
+                "duracionMaxDias": null,
+                "fuente": "FDA NADA 141-267 — Dexdomitor (dexmedetomidina), etiqueta en DailyMed",
                 "esExtralabel": false
           },
           {
                 "especie": "felino",
-                "indicacion": "Sedación y analgesia",
+                "indicacion": "Sedación, analgesia y premedicación",
                 "dosisMin": 0.04,
                 "dosisMax": 0.04,
                 "unidad": "mg/kg",
@@ -1632,7 +1714,7 @@ export const SEMILLA_FORMULARIO = [
                 ],
                 "frecuenciaH": null,
                 "duracionMaxDias": null,
-                "fuente": "FDA NADA 141-267 — Dexdomitor (dexmedetomidine), etiqueta felina",
+                "fuente": "FDA NADA 141-267 — Dexdomitor (dexmedetomidina), etiqueta en DailyMed",
                 "esExtralabel": false
           }
     ],
@@ -1753,30 +1835,30 @@ export const SEMILLA_FORMULARIO = [
     dosis: [
           {
                 "especie": "canino",
-                "indicacion": "DOSIS MÁXIMA por infiltración local (umbral de toxicidad)",
+                "indicacion": "Infiltración local — DOSIS MÁXIMA TOTAL (umbral de toxicidad)",
                 "dosisMin": 4,
                 "dosisMax": 4,
                 "unidad": "mg/kg",
                 "via": [
-                      "IU"
+                      "SC"
                 ],
                 "frecuenciaH": null,
                 "duracionMaxDias": null,
-                "fuente": "FDA — etiqueta de lidocaína 2% de uso veterinario: no superar este total",
+                "fuente": "FDA — etiqueta de lidocaína 2% de uso veterinario: tope, no dosis a administrar entera",
                 "esExtralabel": false
           },
           {
                 "especie": "felino",
-                "indicacion": "DOSIS MÁXIMA por infiltración local (umbral de toxicidad)",
+                "indicacion": "Infiltración local — DOSIS MÁXIMA TOTAL (umbral de toxicidad)",
                 "dosisMin": 2,
                 "dosisMax": 2,
                 "unidad": "mg/kg",
                 "via": [
-                      "IU"
+                      "SC"
                 ],
                 "frecuenciaH": null,
                 "duracionMaxDias": null,
-                "fuente": "FDA — etiqueta de lidocaína 2% de uso veterinario: el gato es más sensible",
+                "fuente": "FDA — etiqueta de lidocaína 2%: el gato tolera menos que el perro",
                 "esExtralabel": false
           }
     ],

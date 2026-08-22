@@ -15,6 +15,8 @@
   --amber: #a1780f;
   --amber-soft: #f2e8d3;
   --shadow: 0 1px 2px rgba(36, 41, 32, 0.06), 0 6px 20px rgba(36, 41, 32, 0.06);
+  --fila-grupo: #bcd4c6;
+  --fila-subgrupo: #e2dcc9;
   --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
@@ -41,6 +43,8 @@
     --amber: #dcb24b;
     --amber-soft: #362c17;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
+    --fila-grupo: #2e3d36;
+    --fila-subgrupo: #23252a;
   }
 }
 :root[data-theme="dark"] {
@@ -50,6 +54,7 @@
   --teal: #948d78; --teal-ink: #dcd7c7; --teal-soft: #2b2a22;
   --rust: #e38a5c; --rust-ink: #eeab84; --rust-soft: #3a281d;
   --amber: #dcb24b; --amber-soft: #362c17;
+  --fila-grupo: #2e3d36; --fila-subgrupo: #23252a;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
 }
 :root[data-theme="light"] {
@@ -59,6 +64,7 @@
   --teal: #2e6659; --teal-ink: #1d453b; --teal-soft: #e2ece6;
   --rust: #b14f2c; --rust-ink: #8a3d22; --rust-soft: #f3e2d7;
   --amber: #a1780f; --amber-soft: #f2e8d3;
+  --fila-grupo: #bcd4c6; --fila-subgrupo: #e2dcc9;
   --shadow: 0 1px 2px rgba(36, 41, 32, 0.06), 0 6px 20px rgba(36, 41, 32, 0.06);
 }
 
@@ -1170,3 +1176,42 @@ button, input, select, textarea { font-family: inherit; }
 /* Pista bajo el campo de dosis de la calculadora: recuerda el rango de
    etiqueta mientras escribes, para no tener que subir a mirarlo. */
 .calc-pista { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }
+
+/* ---------- Jerarquía del formulario: categoría y subclase ----------
+
+   El encabezado de grupo heredado de pacientes usa --paper-alt, que en modo
+   oscuro queda a un pelo del fondo (#1b1c21 sobre #15161a): la separación
+   se perdía justo donde hace falta. Aquí los dos niveles se distinguen por
+   COLOR y no solo por sangrado, y los tokens usados cambian de valor con el
+   tema, así que funciona igual en claro y en oscuro. */
+
+/* Nivel 1 — categoría. Fondo verdoso y una banda de acento a la izquierda. */
+.data-table tbody tr.group-row td {
+  background: var(--fila-grupo);
+  border-left: 3px solid var(--teal);
+}
+.data-table tbody tr.group-row:hover td { background: var(--fila-grupo); filter: brightness(1.08); }
+.data-table tbody tr.group-row .group-name { color: var(--teal-ink); }
+
+/* Nivel 2 — subclase. Subordinada: sangrada, en versalitas y sin fondo
+   propio, para que no compita con la categoría. */
+.data-table tbody tr.subgroup-row td {
+  background: var(--fila-subgrupo);
+  border-left: 3px solid var(--line);
+  padding: 6px 14px 6px 30px;
+  cursor: pointer;
+}
+.data-table tbody tr.subgroup-row:hover td { background: var(--line-soft); }
+.data-table tbody tr.subgroup-row td:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.data-table tbody tr.subgroup-row .subgroup-caret {
+  display: inline-block; width: 1em; color: var(--teal); font-size: 0.7rem;
+}
+.data-table tbody tr.subgroup-row .subgroup-name {
+  font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--teal-ink);
+}
+.data-table tbody tr.subgroup-row .subgroup-count {
+  margin-left: 8px; font-family: var(--mono); font-size: 0.66rem; color: var(--muted);
+}
+/* Las filas de fármaco quedan alineadas bajo su subclase. */
+.data-table tbody tr.subgroup-row ~ tr td:first-child { padding-left: 30px; }

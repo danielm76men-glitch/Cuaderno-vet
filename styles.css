@@ -1166,3 +1166,7 @@ button, input, select, textarea { font-family: inherit; }
   padding: 6px 8px;
   background: var(--rust-soft);
 }
+
+/* Pista bajo el campo de dosis de la calculadora: recuerda el rango de
+   etiqueta mientras escribes, para no tener que subir a mirarlo. */
+.calc-pista { font-size: 0.72rem; color: var(--muted); margin-top: 4px; }

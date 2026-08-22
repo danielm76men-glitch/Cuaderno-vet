@@ -1431,6 +1431,29 @@ function buildDoseCalculator(context) {
   indicacionField.appendChild(indicacionLabel);
   indicacionField.appendChild(indicacionSelect);
 
+  /* Dosis a usar. Antes la calculadora imponía el punto medio del rango, y
+     eso volvía inútil el aviso de "fuera de rango": el punto medio de un
+     rango válido SIEMPRE cae dentro. El aviso solo podía saltar con datos
+     corruptos, que es justo lo contrario de para lo que estaba.
+
+     Ahora se propone el punto medio pero se puede cambiar, que es como se
+     trabaja de verdad: la etiqueta da un rango y tú eliges dentro de él
+     según el caso. Y si te sales, el aviso por fin significa algo. */
+  const dosisField = document.createElement("div");
+  dosisField.className = "calc-field";
+  dosisField.hidden = true;
+  const dosisLabel = document.createElement("label");
+  dosisLabel.textContent = "Dosis a usar";
+  const dosisInput = document.createElement("input");
+  dosisInput.type = "number";
+  dosisInput.step = "any";
+  dosisInput.min = "0";
+  const dosisPista = document.createElement("div");
+  dosisPista.className = "calc-pista";
+  dosisField.appendChild(dosisLabel);
+  dosisField.appendChild(dosisInput);
+  dosisField.appendChild(dosisPista);
+
   const weightField = document.createElement("div");
   weightField.className = "calc-field";
   const weightLabel = document.createElement("label");
@@ -1510,11 +1533,17 @@ function buildDoseCalculator(context) {
   function updateIndicacionField() {
     indicacionSelect.innerHTML = "";
     const pautas = dosisUtilizables(selectedDrug, speciesSelect.value);
-    if (pautas.length <= 1) {
+    /* Antes esto se escondía cuando el fármaco tenía una sola pauta, y con
+       ello desaparecía la indicación: veías una dosis suelta sin saber PARA
+       QUÉ es. Ahora se muestra siempre que haya algo que mostrar; con una
+       sola pauta el desplegable simplemente no se despliega, pero la
+       indicación queda a la vista. */
+    if (!pautas.length) {
       indicacionField.hidden = true;
       return;
     }
     indicacionField.hidden = false;
+    indicacionLabel.textContent = pautas.length > 1 ? "Indicación / pauta" : "Indicación";
     pautas.forEach((d, i) => {
       const o = document.createElement("option");
       o.value = String(i);
@@ -1552,6 +1581,26 @@ function buildDoseCalculator(context) {
         (via ? " · " + via : "");
       presSelect.appendChild(o);
     });
+  }
+
+  /* Se repropone al cambiar de pauta: la dosis que elegiste para una
+     indicación no tiene por qué valer para otra. */
+  function actualizarCampoDosis() {
+    const pautas = dosisUtilizables(selectedDrug, speciesSelect.value);
+    const pauta = pautas[Number(indicacionSelect.value) || 0] || pautas[0];
+    if (!pauta) {
+      dosisField.hidden = true;
+      return;
+    }
+    const min = Number(pauta.dosisMin);
+    const max = pauta.dosisMax != null && isFinite(pauta.dosisMax) ? Number(pauta.dosisMax) : min;
+    dosisField.hidden = false;
+    dosisLabel.textContent = "Dosis a usar (" + (pauta.unidad || "mg/kg") + ")";
+    dosisInput.value = roundNice((min + max) / 2);
+    dosisPista.textContent =
+      min === max
+        ? "La etiqueta indica " + min + " " + (pauta.unidad || "") + "."
+        : "Rango de etiqueta: " + Math.min(min, max) + " – " + Math.max(min, max) + " " + (pauta.unidad || "") + ".";
   }
 
   function presentacionElegida() {
@@ -1645,7 +1694,28 @@ function buildDoseCalculator(context) {
 
     // Se calcula sobre el punto medio del rango; los extremos se muestran
     // debajo para que se vea el margen con el que se esta trabajando.
-    const dosisUsada = (dosisMin + dosisMax) / 2;
+    /* Un rango al revés (mínimo mayor que máximo) no es un caso raro: basta
+       un dedazo al teclear en la ficha. Antes se calculaba igual con un
+       punto medio sin sentido y se avisaba de "fuera de rango", que apunta
+       al sitio equivocado: el problema no es la dosis, son los datos. */
+    if (dosisMax < dosisMin) {
+      const bloque = document.createElement("div");
+      bloque.className = "calc-aviso";
+      bloque.textContent =
+        "⚠ El rango de esta pauta está invertido: el mínimo (" +
+        dosisMin +
+        ") es mayor que el máximo (" +
+        dosisMax +
+        " " +
+        unidad +
+        "). Corrígelo en la ficha del fármaco antes de calcular.";
+      result.appendChild(bloque);
+      if (addBtn) result.appendChild(addBtn);
+      return;
+    }
+
+    const escrita = parseFloat(dosisInput.value);
+    const dosisUsada = isFinite(escrita) && escrita > 0 ? escrita : (dosisMin + dosisMax) / 2;
     const especieCalc = speciesSelect.value;
     const tipoUnidad = tipoDeUnidad(unidad);
     const totalDose = totalSegunUnidad(dosisUsada, unidad, weight, especieCalc);
@@ -1674,7 +1744,9 @@ function buildDoseCalculator(context) {
     }
 
     lastSummaryLine =
-      selectedDrug.nombreGenerico + ": " + weight + " kg × " + roundNice(dosisUsada) + " " + unidad + especieNota;
+      selectedDrug.nombreGenerico +
+      (pauta.indicacion ? " (" + pauta.indicacion + ")" : "") +
+      ": " + weight + " kg × " + roundNice(dosisUsada) + " " + unidad + especieNota;
     lastTotalLine = "Dosis total = " + totalText;
 
     /* El volumen en mL es el resultado que importa: el error clinico real
@@ -1734,6 +1806,7 @@ function buildDoseCalculator(context) {
       result.appendChild(extra);
     }
 
+    if (pauta.indicacion) addLine("Indicación: " + pauta.indicacion, "calc-line-suave");
     const viasPauta = viaTexto(pauta.via);
     if (viasPauta) addLine("Vía: " + viasPauta, "calc-line-suave");
     if (pauta.frecuenciaH) {
@@ -1768,19 +1841,26 @@ function buildDoseCalculator(context) {
     updateSpeciesField();
     updateIndicacionField();
     updatePresField();
+    actualizarCampoDosis();
     renderResult();
   });
   speciesSelect.addEventListener("change", () => {
     updateIndicacionField();
+    actualizarCampoDosis();
     renderResult();
   });
-  indicacionSelect.addEventListener("change", renderResult);
+  indicacionSelect.addEventListener("change", () => {
+    actualizarCampoDosis();
+    renderResult();
+  });
+  dosisInput.addEventListener("input", renderResult);
   presSelect.addEventListener("change", renderResult);
   weightInput.addEventListener("input", renderResult);
 
   wrap.appendChild(nameField);
   wrap.appendChild(speciesField);
   wrap.appendChild(indicacionField);
+  wrap.appendChild(dosisField);
   wrap.appendChild(weightField);
   wrap.appendChild(presField);
   wrap.appendChild(result);
@@ -3524,10 +3604,29 @@ function fechaCorta(valor) {
   return d.toLocaleDateString("es-EC", { year: "numeric", month: "long", day: "numeric" });
 }
 
+/* Fecha en horario LOCAL, no en UTC.
+
+   toISOString() convierte a UTC antes de recortar, y en Ecuador (UTC-5)
+   cualquier hora a partir de las 19:00 ya cae en el dia siguiente. El
+   campo mostraba manana mientras el texto de al lado mostraba hoy. En el
+   unico campo cuyo sentido es "que dia exacto revisaste esto", un dia de
+   desfase lo invalida. */
 function paraInputFecha(valor) {
   const d = fechaDeVerificacion(valor);
   if (!d) return "";
-  return d.toISOString().slice(0, 10);
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return d.getFullYear() + "-" + mes + "-" + dia;
+}
+
+/* El camino inverso tiene el mismo problema al reves: new Date("2026-08-21")
+   se interpreta como medianoche UTC, que en Ecuador es el dia 20 a las
+   19:00. Construyendo la fecha por partes se queda en el dia que elegiste. */
+function desdeInputFecha(texto) {
+  if (!texto) return null;
+  const p = texto.split("-").map(Number);
+  if (p.length !== 3 || p.some((n) => !isFinite(n))) return null;
+  return new Date(p[0], p[1] - 1, p[2]);
 }
 
 /* Adaptador de lectura. Un documento del esquema viejo se ve por aqui como
@@ -3721,7 +3820,7 @@ async function cargarSemillaFormulario() {
           retiro: receta.retiro || [],
           contraindicaciones: receta.contraindicaciones || [],
           alertas: receta.alertas || [],
-          verificadoEl: receta.verificadoEl ? new Date(receta.verificadoEl) : null,
+          verificadoEl: desdeInputFecha(receta.verificadoEl),
           esquemaFormulario: 2,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
@@ -3802,6 +3901,41 @@ function botonQuitar(etiqueta, onClick) {
 
 /* ---------- Tabla del formulario ---------- */
 
+/* ---------- Agrupado por familia ----------
+
+   "familia" es deliberadamente fina ("Betalactámico — aminopenicilina")
+   porque al abrir una ficha esa precisión es la que orienta. Pero como
+   encabezado de grupo sería inútil: saldrían treinta y cinco grupos de uno
+   o dos fármacos, que es peor que no agrupar.
+
+   Asi que la lista se agrupa por CATEGORÍA amplia, deducida de la familia.
+   Cada fármaco sigue mostrando su familia completa en su fila. */
+const GRUPOS_FARMACO = [
+  ["Antibióticos", ["betalactámico", "cefalosporina", "penicilina", "fluoroquinolona", "quinolona", "aminoglucósido", "tetraciclina", "macrólido", "sulfonamida", "anfenicol", "nitroimidazol", "lincosamida"]],
+  ["AINEs", ["aine"]],
+  ["Corticoides", ["corticoide", "glucocorticoide"]],
+  ["Analgésicos opioides", ["opioide"]],
+  ["Anestésicos y sedantes", ["anestésico", "inductor", "alfa-2", "benzodiazepina", "fenotiazina", "disociativo", "anticolinérgico"]],
+  ["Antiparasitarios", ["lactona macrocíclica", "benzimidazol", "isoxazolina", "cestodicida", "tetrahidropirimidina", "triazinona", "anticoccidial", "antiparasitario", "avermectina"]],
+  ["Fluidos y electrolitos", ["electrolito", "fluido", "alcalinizante"]],
+  ["Otros", []]
+];
+
+const SIN_GRUPO = "Otros";
+
+function grupoDeFarmaco(farmaco) {
+  const f = normalizarBusqueda(farmaco && farmaco.familia);
+  if (!f) return SIN_GRUPO;
+  for (const [nombre, claves] of GRUPOS_FARMACO) {
+    if (claves.some((c) => f.includes(normalizarBusqueda(c)))) return nombre;
+  }
+  return SIN_GRUPO;
+}
+
+// Igual que en pacientes: fuera del closure, si no cada redibujado
+// volveria a cerrar todos los grupos que hubieras abierto.
+const gruposFarmacoExpandidos = new Set();
+
 function buildFormularioTable(list, withActions) {
   const wrap = document.createElement("div");
   wrap.className = "table-wrap";
@@ -3820,7 +3954,7 @@ function buildFormularioTable(list, withActions) {
   table.innerHTML = "<thead><tr>" + cols.map((c) => "<th>" + c + "</th>").join("") + "</tr></thead>";
   const tbody = document.createElement("tbody");
 
-  list.forEach((crudo) => {
+  function filaDeFarmaco(crudo) {
     const far = farmacoNormalizado(crudo);
     const tr = document.createElement("tr");
     if (!withActions) tr.style.cursor = "default";
@@ -3895,7 +4029,79 @@ function buildFormularioTable(list, withActions) {
       tr.appendChild(actTd);
     }
 
-    tbody.appendChild(tr);
+    return tr;
+  }
+
+  /* Agrupado por categoría, con el mismo comportamiento que la lista de
+     pacientes: encabezado plegable, contador, y todo abierto cuando hay
+     una búsqueda o un filtro activo — colapsar entonces escondería justo
+     lo que estás buscando. */
+  const grupos = new Map();
+  list.forEach((crudo) => {
+    const g = grupoDeFarmaco(farmacoNormalizado(crudo));
+    if (!grupos.has(g)) grupos.set(g, []);
+    grupos.get(g).push(crudo);
+  });
+
+  // Se respeta el orden de GRUPOS_FARMACO (antibióticos primero, "Otros"
+  // al final) en vez del alfabético: agrupa por afinidad de uso.
+  const ordenGrupos = GRUPOS_FARMACO.map((g) => g[0]);
+  const nombres = Array.from(grupos.keys()).sort(
+    (a, b) => ordenGrupos.indexOf(a) - ordenGrupos.indexOf(b)
+  );
+
+  const abrirTodo = !!state.query || !!state.formularioEspecieFilter;
+
+  nombres.forEach((nombre) => {
+    const filas = grupos.get(nombre);
+    const expandido = abrirTodo || gruposFarmacoExpandidos.has(nombre);
+
+    const headTr = document.createElement("tr");
+    headTr.className = "group-row";
+    const headTd = document.createElement("td");
+    headTd.colSpan = cols.length;
+    headTd.setAttribute("role", "button");
+    headTd.tabIndex = 0;
+    headTd.setAttribute("aria-expanded", expandido ? "true" : "false");
+    headTd.innerHTML =
+      '<span class="group-caret"></span><span class="group-name"></span>' +
+      '<span class="group-sep">·</span><span class="group-count"></span>';
+    headTd.querySelector(".group-caret").textContent = expandido ? "▾" : "▸";
+    headTd.querySelector(".group-name").textContent = nombre;
+    headTd.querySelector(".group-count").textContent =
+      filas.length + (filas.length === 1 ? " fármaco" : " fármacos");
+    headTr.appendChild(headTd);
+    tbody.appendChild(headTr);
+
+    const filasTr = filas.map((crudo) => {
+      const tr = filaDeFarmaco(crudo);
+      tr.hidden = !expandido;
+      tbody.appendChild(tr);
+      return tr;
+    });
+
+    function alternar() {
+      const abiertoAhora = headTd.getAttribute("aria-expanded") === "true";
+      const nuevoEstado = !abiertoAhora;
+      if (nuevoEstado) gruposFarmacoExpandidos.add(nombre);
+      else gruposFarmacoExpandidos.delete(nombre);
+      headTd.setAttribute("aria-expanded", nuevoEstado ? "true" : "false");
+      headTd.querySelector(".group-caret").textContent = nuevoEstado ? "▾" : "▸";
+      filasTr.forEach((tr) => {
+        tr.hidden = !nuevoEstado;
+      });
+    }
+
+    headTr.addEventListener("click", (e) => {
+      if (e.target.closest(".row-actions")) return;
+      alternar();
+    });
+    headTd.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        alternar();
+      }
+    });
   });
 
   table.appendChild(tbody);
@@ -4313,12 +4519,40 @@ function renderFormularioDetail(root, item) {
     fila2.className = "field-row";
 
     const dmin = inputNumero(d.dosisMin, "Mín.");
-    dmin.addEventListener("input", () => editar("dosisMin", dmin.value === "" ? null : Number(dmin.value)));
+    const dmax = inputNumero(d.dosisMax, "Máx.");
+
+    /* Un rango invertido se guardaba sin decir nada, y luego la calculadora
+       daba un resultado raro sin explicar de dónde venía. Se avisa aquí,
+       donde se puede corregir, y no tres pantallas después. */
+    const avisoRango = document.createElement("p");
+    avisoRango.className = "form-aviso-error";
+    avisoRango.hidden = true;
+
+    function revisarRango() {
+      const a = parseFloat(dmin.value);
+      const b = parseFloat(dmax.value);
+      const invertido = isFinite(a) && isFinite(b) && b < a;
+      avisoRango.hidden = !invertido;
+      if (invertido) {
+        avisoRango.textContent =
+          "El mínimo (" + a + ") es mayor que el máximo (" + b + "). Revisa: la calculadora no podrá usar esta pauta.";
+      }
+      dmin.classList.toggle("campo-invalido", invertido);
+      dmax.classList.toggle("campo-invalido", invertido);
+    }
+
+    dmin.addEventListener("input", () => {
+      editar("dosisMin", dmin.value === "" ? null : Number(dmin.value));
+      revisarRango();
+    });
     fila2.appendChild(campoFormulario("Dosis mín.", dmin));
 
-    const dmax = inputNumero(d.dosisMax, "Máx.");
-    dmax.addEventListener("input", () => editar("dosisMax", dmax.value === "" ? null : Number(dmax.value)));
+    dmax.addEventListener("input", () => {
+      editar("dosisMax", dmax.value === "" ? null : Number(dmax.value));
+      revisarRango();
+    });
     fila2.appendChild(campoFormulario("Dosis máx.", dmax));
+    revisarRango();
 
     const uni = inputTexto(d.unidad, "mg/kg, UI/kg");
     uni.addEventListener("input", () => editar("unidad", uni.value));
@@ -4363,6 +4597,7 @@ function renderFormularioDetail(root, item) {
 
     bloque.appendChild(fila1);
     bloque.appendChild(fila2);
+    bloque.appendChild(avisoRango);
     bloque.appendChild(fila3);
 
     if (!String(d.fuente || "").trim()) {
@@ -4631,12 +4866,41 @@ function renderFormularioDetail(root, item) {
   verifInput.type = "date";
   verifInput.value = paraInputFecha(far.verificadoEl);
   verifInput.addEventListener("change", () => {
-    const valor = verifInput.value ? new Date(verifInput.value) : null;
+    const valor = desdeInputFecha(verifInput.value);
     far.verificadoEl = valor;
     save("verificadoEl", valor);
     pintarEstadoVerif();
   });
   verifRow.appendChild(campoFormulario("Verificado el", verifInput));
+
+  /* Botón de un toque. Existe porque la alternativa honesta tiene que ser
+     tan cómoda como la deshonesta: si sellar la fecha cuesta abrir un
+     selector y buscar el día, la tentación es poner la fecha a todo de
+     golpe sin mirar nada — y ahí el campo deja de significar algo. */
+  const marcarHoy = document.createElement("button");
+  marcarHoy.type = "button";
+  marcarHoy.className = "btn-secondary";
+  marcarHoy.textContent = "Lo verifiqué hoy";
+  marcarHoy.style.alignSelf = "flex-end";
+  marcarHoy.addEventListener("click", async () => {
+    const ok = await askConfirm({
+      title: "¿Confirmas que lo verificaste?",
+      message:
+        "Esto deja constancia de que comparaste las dosis, vías y concentraciones de “" +
+        (far.nombreGenerico || "este fármaco") +
+        "” con la etiqueta del producto.\n\n" +
+        "No lo marques si no lo has hecho: es lo único que distingue un dato revisado de uno que nadie miró.",
+      confirmLabel: "Sí, lo verifiqué"
+    });
+    if (!ok) return;
+    const hoy = new Date();
+    far.verificadoEl = hoy;
+    verifInput.value = paraInputFecha(hoy);
+    save("verificadoEl", hoy);
+    pintarEstadoVerif();
+    showToast("Verificado hoy");
+  });
+  verifRow.appendChild(marcarHoy);
   verifCard.appendChild(verifRow);
 
   const estadoVerif = document.createElement("p");
@@ -4645,7 +4909,8 @@ function renderFormularioDetail(root, item) {
   function pintarEstadoVerif() {
     if (!far.verificadoEl) {
       estadoVerif.className = "form-aviso-error";
-      estadoVerif.textContent = "Sin fecha de verificación.";
+      estadoVerif.textContent =
+        "Sin verificar: nadie ha comparado estos datos con la etiqueta del producto todavía.";
       return;
     }
     if (verificacionVencida(far.verificadoEl)) {

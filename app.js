@@ -199,7 +199,7 @@ function matchesFormularioQuery(item, q) {
   return (
     incluyeNormalizado(f.nombreGenerico, q) ||
     incluyeNormalizado(f.familia, q) ||
-    f.dosis.some((d) => incluyeNormalizado(d.via, q) || incluyeNormalizado(d.indicacion, q)) ||
+    f.dosis.some((d) => viasDe(d.via).some((v) => incluyeNormalizado(v, q)) || incluyeNormalizado(d.indicacion, q)) ||
     especiesDe(f).some((e) => incluyeNormalizado(e, q))
   );
 }
@@ -1518,8 +1518,15 @@ function buildDoseCalculator(context) {
     pautas.forEach((d, i) => {
       const o = document.createElement("option");
       o.value = String(i);
+      const via = viaTexto(d.via);
       o.textContent =
-        (d.indicacion || "Pauta " + (i + 1)) + " — " + d.dosisMin + (d.dosisMax !== d.dosisMin ? "–" + d.dosisMax : "") + " " + d.unidad;
+        (d.indicacion || "Pauta " + (i + 1)) +
+        " — " +
+        d.dosisMin +
+        (d.dosisMax !== d.dosisMin ? "–" + d.dosisMax : "") +
+        " " +
+        d.unidad +
+        (via ? " (" + via + ")" : "");
       indicacionSelect.appendChild(o);
     });
   }
@@ -1535,8 +1542,14 @@ function buildDoseCalculator(context) {
     pres.forEach((p, i) => {
       const o = document.createElement("option");
       o.value = String(i);
+      const via = viaTexto(p.via);
       o.textContent =
-        (p.nombreComercialLocal || "Presentación " + (i + 1)) + " — " + p.concentracion + " " + (p.unidadConc || "");
+        (p.nombreComercialLocal || "Presentación " + (i + 1)) +
+        " — " +
+        p.concentracion +
+        " " +
+        (p.unidadConc || "") +
+        (via ? " · " + via : "");
       presSelect.appendChild(o);
     });
   }
@@ -1717,6 +1730,8 @@ function buildDoseCalculator(context) {
       result.appendChild(extra);
     }
 
+    const viasPauta = viaTexto(pauta.via);
+    if (viasPauta) addLine("Vía: " + viasPauta, "calc-line-suave");
     if (pauta.frecuenciaH) {
       addLine("Frecuencia: cada " + pauta.frecuenciaH + " h", "calc-line-suave");
     }
@@ -3384,6 +3399,66 @@ function renderMateriaDetail(root, entry) {
 
 const ESPECIES_FORMULARIO = ["canino", "felino", "bovino", "porcino", "equino", "ovino"];
 const VIAS_FORMULARIO = ["IV", "IM", "SC", "VO", "IU", "tópica"];
+
+/* Una misma pauta puede ir por varias vias: casi toda etiqueta dice cosas
+   como "IM o SC", o "IV lenta / IM". Antes solo cabia una y habia que
+   duplicar la dosis entera para reflejarlo, con el riesgo de que las dos
+   copias se desincronizaran al corregir una.
+
+   Ahora "via" es un array. Los documentos viejos la tienen como texto, asi
+   que TODA lectura pasa por viasDe(): acepta las dos formas y siempre
+   devuelve lista. No hace falta migrar nada. */
+function viasDe(via) {
+  if (Array.isArray(via)) return via.filter(Boolean);
+  const t = String(via == null ? "" : via).trim();
+  if (!t) return [];
+  // Un texto viejo puede traer ya varias escritas a mano ("IM o SC").
+  // Sin expresion regular a proposito: se reduce todo a un separador
+  // unico y se parte por el, que se lee mejor y basta para estos casos.
+  const unificado = t
+    .split(",").join("|")
+    .split("/").join("|")
+    .split(" o ").join("|")
+    .split(" y ").join("|");
+  return unificado
+    .split("|")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function viaTexto(via) {
+  const lista = viasDe(via);
+  if (!lista.length) return "";
+  if (lista.length === 1) return lista[0];
+  return lista.slice(0, -1).join(", ") + " o " + lista[lista.length - 1];
+}
+
+function buildViasCheckboxes(seleccionadas, onChange) {
+  const wrap = document.createElement("div");
+  wrap.className = "checkbox-group checkbox-group-vias";
+  const values = new Set(viasDe(seleccionadas));
+  VIAS_FORMULARIO.forEach((opt) => {
+    const label = document.createElement("label");
+    label.className = "checkbox-item";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = opt;
+    input.checked = values.has(opt);
+    input.addEventListener("change", () => {
+      if (input.checked) values.add(opt);
+      else values.delete(opt);
+      // Se conserva el orden de VIAS_FORMULARIO y no el de marcado, para
+      // que "IM o SC" no salga a veces como "SC o IM".
+      onChange(VIAS_FORMULARIO.filter((v) => values.has(v)));
+    });
+    const span = document.createElement("span");
+    span.textContent = opt;
+    label.appendChild(input);
+    label.appendChild(span);
+    wrap.appendChild(label);
+  });
+  return wrap;
+}
 const MESES_VIGENCIA_FORMULARIO = 24;
 
 // "c/12h" -> 12. El esquema viejo guardaba la frecuencia como texto libre.
@@ -3461,7 +3536,7 @@ function farmacoNormalizado(f) {
       dosisMin: Number(f.dosisValor),
       dosisMax: Number(f.dosisValor),
       unidad: f.dosisUnidad || "mg/kg",
-      via: f.via || "",
+      via: viasDe(f.via),
       frecuenciaH: horasDesdeTexto(f.frecuencia),
       duracionMaxDias: null,
       fuente: f.fuente || "",
@@ -3477,7 +3552,7 @@ function farmacoNormalizado(f) {
       {
         concentracion: Number(f.concentracionValor),
         unidadConc: f.concentracionUnidad || "mg/mL",
-        via: f.via || "",
+        via: viasDe(f.via),
         nombreComercialLocal: ""
       }
     ];
@@ -4139,9 +4214,8 @@ function renderFormularioDetail(root, item) {
       unidad.addEventListener("input", () => editar("unidadConc", unidad.value));
       campos.appendChild(campoFormulario("Unidad", unidad));
 
-      const via = selectDe(VIAS_FORMULARIO, p.via, "—");
-      via.addEventListener("change", () => editar("via", via.value));
-      campos.appendChild(campoFormulario("Vía", via));
+      const via = buildViasCheckboxes(p.via, (lista) => editar("via", lista));
+      campos.appendChild(campoFormulario("Vía(s)", via));
 
       const comercial = inputTexto(p.nombreComercialLocal, "Nombre comercial local");
       comercial.addEventListener("input", () => editar("nombreComercialLocal", comercial.value));
@@ -4166,7 +4240,7 @@ function renderFormularioDetail(root, item) {
   addPres.addEventListener("click", () => {
     guardarLista(
       "presentaciones",
-      far.presentaciones.concat({ concentracion: null, unidadConc: "mg/mL", via: "", nombreComercialLocal: "" })
+      far.presentaciones.concat({ concentracion: null, unidadConc: "mg/mL", via: [], nombreComercialLocal: "" })
     );
     pintarPresentaciones();
   });
@@ -4196,9 +4270,10 @@ function renderFormularioDetail(root, item) {
     ind.addEventListener("input", () => editar("indicacion", ind.value));
     fila1.appendChild(campoFormulario("Indicación", ind));
 
-    const via = selectDe(VIAS_FORMULARIO, d.via, "—");
-    via.addEventListener("change", () => editar("via", via.value));
-    fila1.appendChild(campoFormulario("Vía", via));
+    // Varias vias por pauta: la etiqueta dice "IM o SC" y antes obligaba a
+    // duplicar la dosis entera para poder reflejarlo.
+    const via = buildViasCheckboxes(d.via, (lista) => editar("via", lista));
+    fila1.appendChild(campoFormulario("Vía(s)", via));
 
     const fila2 = document.createElement("div");
     fila2.className = "field-row";
@@ -4312,8 +4387,12 @@ function renderFormularioDetail(root, item) {
   altaFila.appendChild(campoFormulario("Dosis máx.", altaMax));
   const altaUnidad = inputTexto("mg/kg", "mg/kg");
   altaFila.appendChild(campoFormulario("Unidad", altaUnidad));
-  const altaVia = selectDe(VIAS_FORMULARIO, "", "Vía…");
-  altaFila.appendChild(campoFormulario("Vía", altaVia));
+  let altaVias = [];
+  const altaVia = buildViasCheckboxes([], (lista) => {
+    altaVias = lista;
+    altaVia.classList.remove("campo-invalido");
+  });
+  altaFila.appendChild(campoFormulario("Vía(s)", altaVia));
   altaDosis.appendChild(altaFila);
 
   const altaFila2 = document.createElement("div");
@@ -4336,7 +4415,7 @@ function renderFormularioDetail(root, item) {
     if (!altaEspecie.value) faltan.push("especie");
     if (altaMin.value === "") faltan.push("dosis mínima");
     if (!altaUnidad.value.trim()) faltan.push("unidad");
-    if (!altaVia.value) faltan.push("vía");
+    if (!altaVias.length) faltan.push("vía");
     if (!altaFuente.value.trim()) faltan.push("fuente");
 
     altaFuente.classList.toggle("campo-invalido", !altaFuente.value.trim());
@@ -4356,7 +4435,7 @@ function renderFormularioDetail(root, item) {
         dosisMin: Number(altaMin.value),
         dosisMax: max,
         unidad: altaUnidad.value.trim(),
-        via: altaVia.value,
+        via: altaVias,
         frecuenciaH: null,
         duracionMaxDias: null,
         fuente: altaFuente.value.trim(),
@@ -4366,7 +4445,10 @@ function renderFormularioDetail(root, item) {
     altaEspecie.value = "";
     altaMin.value = "";
     altaMax.value = "";
-    altaVia.value = "";
+    altaVias = [];
+    altaVia.querySelectorAll("input").forEach((c) => {
+      c.checked = false;
+    });
     altaFuente.value = "";
     altaFuente.classList.remove("campo-invalido");
     pintarDosis();
@@ -5118,6 +5200,9 @@ function renderSidebarIdentity() {
    auth responde por PRIMERA VEZ se decide entre login y app. El login no
    aparece nunca sin haber confirmado antes que no hay sesion. */
 function mostrarPantalla(cual) {
+  // Le dice al vigilante de index.html que el modulo arranco bien, para que
+  // no ofrezca limpiar la cache cuando no hace falta.
+  window.__vetdiarioArrancado = true;
   els.bootGate.hidden = cual !== "cargando";
   els.authGate.hidden = cual !== "login";
   els.app.hidden = cual !== "app";

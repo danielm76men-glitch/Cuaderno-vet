@@ -1130,3 +1130,39 @@ button, input, select, textarea { font-family: inherit; }
   .visor-titulo { display: none; }
   .visor-nav { width: 38px; height: 38px; }
 }
+
+/* Rescate de arranque: solo aparece si la app no llegó a mostrarse. */
+.boot-rescate {
+  max-width: 300px; text-align: center; margin-top: 6px;
+  border-top: 1px solid var(--line); padding-top: 16px;
+}
+.boot-rescate p { font-size: 0.8rem; color: var(--muted); margin: 0 0 12px; }
+.boot-rescate button {
+  appearance: none; border: none; background: var(--teal); color: var(--paper);
+  font: inherit; font-size: 0.85rem; font-weight: 700; padding: 10px 16px;
+  border-radius: 8px; cursor: pointer;
+}
+.boot-rescate button:hover { background: var(--teal-ink); }
+.boot-rescate button:disabled { opacity: 0.6; cursor: not-allowed; }
+.boot-rescate-nota { font-size: 0.72rem !important; margin: 10px 0 0 !important; }
+
+/* Casillas de vía. Compactas y en fila: son seis opciones cortas y en el
+   formulario de dosis comparten espacio con otros campos. Sin esto heredan
+   el tamaño de las casillas de especie, que van a lo ancho de la ficha. */
+.checkbox-group-vias {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 6px 0 2px;
+}
+.checkbox-group-vias .checkbox-item {
+  font-size: 0.78rem;
+  gap: 4px;
+  white-space: nowrap;
+}
+.checkbox-group-vias.campo-invalido {
+  border: 1px solid var(--rust);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: var(--rust-soft);
+}

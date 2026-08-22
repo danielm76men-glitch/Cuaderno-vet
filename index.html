@@ -18,7 +18,65 @@
   <div class="boot-gate" id="bootGate">
     <img class="brand-mark brand-mark-lg" src="icon.svg" alt="" width="44" height="44" />
     <p id="bootMsg">Cargando…</p>
+    <div class="boot-rescate" id="bootRescate" hidden>
+      <p>Esto tarda más de lo normal. Suele ser una versión antigua guardada en el navegador.</p>
+      <button type="button" id="bootRescateBtn">Recargar limpiando la caché</button>
+      <p class="boot-rescate-nota">No se pierden tus datos ni la sesión.</p>
+    </div>
   </div>
+
+  <!-- Vigilante de arranque.
+
+       Va aquí como script normal y NO dentro de app.js a propósito: si
+       app.js no llega a cargarse o falla al interpretarse, nada de lo que
+       haya dentro se ejecuta y la pantalla se queda en "Cargando…" para
+       siempre, sin forma de salir. Este script sí corre pase lo que pase.
+
+       El caso típico es una actualización a medias: GitHub Pages sirve los
+       archivos con max-age=600, así que durante diez minutos el navegador
+       puede mezclar un index.html nuevo con un app.js viejo. El botón borra
+       el service worker y las cachés — pero NO IndexedDB, que es donde
+       viven la sesión y los datos sin conexión. -->
+  <script>
+    (function () {
+      var SEGUNDOS = 8;
+      setTimeout(function () {
+        if (window.__vetdiarioArrancado) return;
+        var caja = document.getElementById("bootRescate");
+        if (caja) caja.hidden = false;
+      }, SEGUNDOS * 1000);
+
+      var btn = document.getElementById("bootRescateBtn");
+      if (!btn) return;
+      btn.addEventListener("click", function () {
+        btn.disabled = true;
+        btn.textContent = "Limpiando…";
+        var tareas = [];
+        try {
+          if (navigator.serviceWorker) {
+            tareas.push(
+              navigator.serviceWorker.getRegistrations().then(function (regs) {
+                return Promise.all(regs.map(function (r) { return r.unregister(); }));
+              })
+            );
+          }
+          if (window.caches) {
+            tareas.push(
+              caches.keys().then(function (nombres) {
+                return Promise.all(nombres.map(function (n) { return caches.delete(n); }));
+              })
+            );
+          }
+        } catch (e) { /* si algo no está disponible, se recarga igual */ }
+
+        Promise.all(tareas)["catch"](function () {})["then"](function () {
+          // El parámetro obliga a pedir el HTML de nuevo en vez de tomarlo
+          // de la caché del navegador, que es lo que causó el problema.
+          location.replace(location.pathname + "?nuevo=" + Date.now());
+        });
+      });
+    })();
+  </script>
 
   <div class="auth-gate" id="authGate" hidden>
     <div class="auth-card">

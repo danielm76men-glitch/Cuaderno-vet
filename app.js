@@ -983,6 +983,11 @@ function apunteParaGuardar(editor) {
   Array.from(copia.querySelectorAll("img")).forEach(function (img) {
     if (img.getAttribute("data-foto")) img.removeAttribute("src");
     else img.remove(); // una imagen sin ficha no se puede recuperar luego
+    /* La marca de "esta seleccionada" es estado de la pantalla, no del
+       apunte: guardada, la imagen quedaria con el recuadro verde puesto
+       para siempre al volver a abrir. */
+    img.classList.remove("apunte-img-sel");
+    if (!img.getAttribute("class")) img.removeAttribute("class");
   });
   return copia.innerHTML;
 }
@@ -1008,6 +1013,24 @@ async function guardarImagenDeApunte(entryId, file) {
     logFoto("no se pudo guardar la imagen del apunte: " + (err && err.code ? err.code : err));
   });
   return { id: ref.id, datos: datos };
+}
+
+/* Una imagen recien insertada ocupaba el ancho entero del apunte: una
+   foto del movil llenaba la pantalla y habia que hacer scroll para
+   seguir leyendo. Entra al 60 % y desde ahi se ajusta. */
+const APUNTE_ANCHO_INICIAL = 60;
+const APUNTE_ANCHO_MIN = 15;
+const APUNTE_ANCHO_MAX = 100;
+const APUNTE_ANCHO_PASO = 10;
+
+/* Izquierda y derecha usan float para que el texto ENVUELVA la imagen,
+   que es lo que se espera al mover una foto a un lado. Centro no puede
+   ser float: se queda en bloque con margenes automaticos. */
+const APUNTE_ALINEACIONES = ["apunte-img-izq", "apunte-img-centro", "apunte-img-der"];
+
+function anchoDeImagen(img) {
+  const v = parseFloat(String(img.style.width || "").replace("%", ""));
+  return isFinite(v) && v > 0 ? v : APUNTE_ANCHO_MAX;
 }
 
 function buildApunteEditor(entry, statusText) {
@@ -1128,6 +1151,8 @@ function buildApunteEditor(entry, statusText) {
         img.src = guardada.datos;
         img.setAttribute("data-foto", guardada.id);
         img.alt = file.name || "Imagen del apunte";
+        img.style.width = APUNTE_ANCHO_INICIAL + "%";
+        img.className = "apunte-img-centro";
         const salto = document.createElement("br");
         insertarNodo(salto);
         insertarNodo(img);
@@ -1188,15 +1213,132 @@ function buildApunteEditor(entry, statusText) {
 
   editor.addEventListener("input", guardar);
 
-  // Ver una imagen a pantalla completa, igual que en las fotos del caso.
+  /* Barra flotante de la imagen seleccionada.
+
+     Va FUERA del contenteditable a proposito: dentro seria contenido del
+     apunte y se podria borrar con la tecla de retroceso, o acabaria
+     guardada en el HTML. Se coloca sobre la imagen calculando su
+     posicion respecto al editor. */
+  const barraImg = document.createElement("div");
+  barraImg.className = "apunte-img-barra";
+  barraImg.hidden = true;
+  let imgSel = null;
+
+  function ocultarBarra() {
+    if (imgSel) imgSel.classList.remove("apunte-img-sel");
+    imgSel = null;
+    barraImg.hidden = true;
+  }
+
+  function colocarBarra() {
+    if (!imgSel) return;
+    const caja = imgSel.getBoundingClientRect();
+    const ref = editor.getBoundingClientRect();
+    barraImg.style.left = Math.max(4, caja.left - ref.left) + "px";
+    // Encima de la imagen; si no cabe (imagen pegada al borde de
+    // arriba), se pone justo debajo.
+    const arriba = caja.top - ref.top + editor.scrollTop - 38;
+    barraImg.style.top = (arriba < 0 ? caja.bottom - ref.top + editor.scrollTop + 6 : arriba) + "px";
+  }
+
+  function seleccionarImagen(img) {
+    if (imgSel) imgSel.classList.remove("apunte-img-sel");
+    imgSel = img;
+    img.classList.add("apunte-img-sel");
+    barraImg.hidden = false;
+    colocarBarra();
+    pintarBarra();
+  }
+
+  function botonImg(etiqueta, titulo, accion) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "apunte-img-btn";
+    b.title = titulo;
+    b.setAttribute("aria-label", titulo);
+    b.textContent = etiqueta;
+    b.addEventListener("mousedown", function (e) { e.preventDefault(); });
+    b.addEventListener("click", function () {
+      if (!imgSel) return;
+      accion(imgSel);
+      colocarBarra();
+      pintarBarra();
+      guardar();
+    });
+    return b;
+  }
+
+  const etiquetaAncho = document.createElement("span");
+  etiquetaAncho.className = "apunte-img-ancho";
+
+  function pintarBarra() {
+    if (!imgSel) return;
+    etiquetaAncho.textContent = Math.round(anchoDeImagen(imgSel)) + " %";
+    APUNTE_ALINEACIONES.forEach(function (clase, i) {
+      botonesAlinear[i].classList.toggle("apunte-img-btn-activo", imgSel.classList.contains(clase));
+    });
+  }
+
+  function cambiarAncho(img, delta) {
+    const nuevo = Math.min(APUNTE_ANCHO_MAX, Math.max(APUNTE_ANCHO_MIN, anchoDeImagen(img) + delta));
+    img.style.width = nuevo + "%";
+  }
+
+  function alinear(img, clase) {
+    APUNTE_ALINEACIONES.forEach(function (c) { img.classList.remove(c); });
+    img.classList.add(clase);
+  }
+
+  barraImg.appendChild(botonImg("−", "Más pequeña", function (img) { cambiarAncho(img, -APUNTE_ANCHO_PASO); }));
+  barraImg.appendChild(etiquetaAncho);
+  barraImg.appendChild(botonImg("+", "Más grande", function (img) { cambiarAncho(img, APUNTE_ANCHO_PASO); }));
+  const sepImg = document.createElement("span");
+  sepImg.className = "apunte-img-sep";
+  barraImg.appendChild(sepImg);
+  const botonesAlinear = [
+    botonImg("⬅", "A la izquierda, con el texto al lado", function (img) { alinear(img, "apunte-img-izq"); }),
+    botonImg("⬍", "Centrada, sin texto al lado", function (img) { alinear(img, "apunte-img-centro"); }),
+    botonImg("➡", "A la derecha, con el texto al lado", function (img) { alinear(img, "apunte-img-der"); })
+  ];
+  botonesAlinear.forEach(function (b) { barraImg.appendChild(b); });
+  const sepImg2 = document.createElement("span");
+  sepImg2.className = "apunte-img-sep";
+  barraImg.appendChild(sepImg2);
+  const verBtn = document.createElement("button");
+  verBtn.type = "button";
+  verBtn.className = "apunte-img-btn";
+  verBtn.title = "Ver a pantalla completa";
+  verBtn.setAttribute("aria-label", "Ver a pantalla completa");
+  verBtn.textContent = "🔍";
+  verBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
+  verBtn.addEventListener("click", function () {
+    if (!imgSel || !imgSel.getAttribute("src")) return;
+    abrirVisorFoto([{ datos: imgSel.getAttribute("src"), nombre: imgSel.alt || "Imagen del apunte" }], 0);
+  });
+  barraImg.appendChild(verBtn);
+
+  /* Un clic en la imagen la SELECCIONA en vez de abrir el visor. Abrirlo
+     al primer toque impedia ajustarla: para cambiarle el tamano habria
+     que cerrar el visor antes de tocar nada. El visor sigue a un toque,
+     en la lupa. */
   editor.addEventListener("click", function (e) {
     const img = e.target && e.target.tagName === "IMG" ? e.target : null;
-    if (!img || !img.getAttribute("src")) return;
-    abrirVisorFoto([{ datos: img.getAttribute("src"), nombre: img.alt || "Imagen del apunte" }], 0);
+    if (img) seleccionarImagen(img);
+    else ocultarBarra();
+  });
+  editor.addEventListener("scroll", colocarBarra);
+  // Si la imagen se borra escribiendo, la barra se queda huerfana.
+  editor.addEventListener("input", function () {
+    if (imgSel && !editor.contains(imgSel)) ocultarBarra();
+    else colocarBarra();
   });
 
   wrap.appendChild(barra);
-  wrap.appendChild(editor);
+  const zonaEditor = document.createElement("div");
+  zonaEditor.className = "apunte-zona";
+  zonaEditor.appendChild(editor);
+  zonaEditor.appendChild(barraImg);
+  wrap.appendChild(zonaEditor);
   wrap.appendChild(fileInput);
   marcarVacio();
 
@@ -5881,23 +6023,38 @@ function renderFormularioDetail(root, item) {
   familiaRow.appendChild(campoFormulario("Familia", familiaInput));
   root.appendChild(familiaRow);
 
-  /* --- 1. Foto del producto --- */
-  /* Reutiliza la seccion de fotos de los casos tal cual: solo necesitaba
-     un id, y la coleccion "fotos" ya guarda uidEntrada = uid + id, sirva
-     ese id para un caso o para un farmaco. La etiqueta si cambia: aqui no
-     se guardan radiografias, se guarda la caja del producto. */
-  const fotoCard = document.createElement("div");
-  fotoCard.className = "card card-pad";
-  fotoCard.appendChild(buildPhotosSection(far, statusText, "Fotos del producto (caja, etiqueta, inserto)"));
-  root.appendChild(fotoCard);
+  /* --- 1. Presentaciones, con la foto del producto al lado ---
 
-  /* --- 2. Presentaciones --- */
-  /* Plegada de entrada: la mayoria de las veces se abre la ficha para
+     La foto va DENTRO de esta tarjeta y no en una suya: la foto del
+     frasco y lo que dice su etiqueta son el mismo dato mirado de dos
+     maneras, y separarlas obligaba a subir y bajar para cruzarlas.
+
+     La seccion de fotos se reutiliza tal cual de los casos clinicos:
+     solo necesitaba un id, y la coleccion "fotos" guarda
+     uidEntrada = uid + id, sirva ese id para un caso o para un farmaco.
+     Lo unico que cambia es la etiqueta, porque aqui no se guardan
+     radiografias sino la caja del producto.
+
+     Plegada de entrada: la mayoria de las veces se abre la ficha para
      mirar una dosis, no la concentracion del frasco. */
   const presPlegable = tarjetaPlegable("Presentaciones", { abierta: false });
   const presCard = presPlegable.card;
+
+  const presFila = document.createElement("div");
+  presFila.className = "pres-fila";
+
+  const fotoCol = document.createElement("div");
+  fotoCol.className = "pres-foto";
+  fotoCol.appendChild(buildPhotosSection(far, statusText, "Foto del producto"));
+  presFila.appendChild(fotoCol);
+
+  const presCol = document.createElement("div");
+  presCol.className = "pres-datos";
+  presFila.appendChild(presCol);
+  presPlegable.cuerpo.appendChild(presFila);
+
   const presLista = document.createElement("div");
-  presPlegable.cuerpo.appendChild(presLista);
+  presCol.appendChild(presLista);
 
   function pintarPresentaciones() {
     presLista.innerHTML = "";
@@ -5961,7 +6118,7 @@ function renderFormularioDetail(root, item) {
     );
     pintarPresentaciones();
   });
-  presPlegable.cuerpo.appendChild(addPres);
+  presCol.appendChild(addPres);
   root.appendChild(presCard);
 
   /* --- 3. Dosis agrupadas por especie --- */

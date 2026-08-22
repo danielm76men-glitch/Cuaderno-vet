@@ -1728,7 +1728,9 @@ button, input, select, textarea { font-family: inherit; }
    El editor hereda .field-body (el papel rayado) y solo añade lo que un
    contenteditable necesita y un <textarea> no. */
 .apunte-editor {
-  min-height: 50vh;
+  /* Un apunte de clase es largo. 50vh dejaba media pantalla de papel y la
+     otra media vacia debajo. */
+  min-height: 72vh;
   overflow-y: auto;
   resize: none;           /* un contenteditable crece solo con el contenido */
   padding-top: 8px;
@@ -1749,7 +1751,7 @@ button, input, select, textarea { font-family: inherit; }
 .apunte-editor img {
   max-width: 100%; height: auto; display: block;
   margin: 10px 0; border-radius: 8px; border: 1px solid var(--line);
-  cursor: zoom-in;
+  cursor: pointer;
 }
 /* Mientras llega su base64 desde la colección de fotos, la imagen no tiene
    src y el navegador la dibujaría como un icono roto de 0 px. */
@@ -1840,13 +1842,98 @@ button, input, select, textarea { font-family: inherit; }
    Sin tarjeta alrededor: es lo último de la ficha y el recuadro solo añadía
    un borde más. El rojo lo lleva el título y el borde izquierdo de cada
    línea, que es donde se mira. */
-.form-contra { margin-top: 22px; padding-left: 12px; border-left: 3px solid var(--rust); }
+.form-contra {
+  margin-top: 28px; padding: 4px 0 4px 16px;
+  /* La banda pasa de 3 a 5 px. Es lo ultimo de la ficha y lo unico que
+     puede impedir un calculo: si algo tiene que verse desde lejos al
+     bajar, es esto. */
+  border-left: 5px solid var(--rust);
+}
 .form-contra-titulo {
-  font-family: var(--serif); font-size: 1rem; font-weight: 700;
-  color: var(--rust-ink); margin-bottom: 10px;
+  font-family: var(--serif); font-size: 1.35rem; font-weight: 700;
+  color: var(--rust-ink); margin-bottom: 14px; letter-spacing: -0.01em;
 }
-.form-fila-contra input {
+/* Dos clases y no una: las reglas base de los campos del formulario van
+   con un elemento en el selector y con una sola clase ganaban ellas, que
+   es lo que dejaba estas lineas en letra menuda. */
+.form-fila.form-fila-contra { margin-bottom: 10px; }
+.form-fila.form-fila-contra input {
   border-color: var(--rust); color: var(--rust-ink); background: var(--rust-soft);
+  font-size: 0.98rem; font-weight: 600; line-height: 1.45;
+  padding: 9px 11px; border-radius: 7px; border-width: 1px;
 }
-.form-fila-contra input::placeholder { color: var(--rust-ink); opacity: 0.55; }
-.form-contra-nota { font-size: 0.72rem; color: var(--muted); margin: 10px 0 0; line-height: 1.4; }
+.form-fila.form-fila-contra input:focus-visible {
+  outline: 2px solid var(--rust); outline-offset: 1px; border-color: var(--rust);
+}
+.form-fila-contra input::placeholder { color: var(--rust-ink); opacity: 0.5; font-weight: 400; }
+.form-contra-nota { font-size: 0.75rem; color: var(--muted); margin: 12px 0 0; line-height: 1.45; }
+
+@media (max-width: 600px) {
+  .form-contra-titulo { font-size: 1.15rem; }
+  .form-fila.form-fila-contra input { font-size: 0.92rem; padding: 8px 9px; }
+}
+
+/* La foto del producto, a la izquierda de sus presentaciones y dentro de la
+   misma tarjeta. minmax(0, 1fr) en la columna de datos: sin eso, una fila
+   de presentación ancha empuja la rejilla y estrecha la foto hasta hacerla
+   inútil. */
+.pres-fila {
+  display: grid; grid-template-columns: 168px minmax(0, 1fr);
+  gap: 18px; align-items: start;
+}
+/* La rejilla de fotos aquí es una columna estrecha: sin esto intentaría
+   meter dos miniaturas de 76 px por fila y quedarían diminutas. */
+.pres-foto .photos-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+
+@media (max-width: 700px) {
+  .pres-fila { grid-template-columns: 1fr; gap: 14px; }
+  .pres-foto .photos-grid { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
+}
+
+/* ---------- Imagen del apunte: tamaño y colocación ----------
+   La zona es el marco de referencia de la barra flotante: sin position
+   relative aquí, la barra se posicionaría respecto a la página y quedaría
+   en cualquier sitio al hacer scroll. */
+.apunte-zona { position: relative; }
+
+/* Izquierda y derecha van con float para que el texto ENVUELVA la imagen,
+   que es lo que se espera al arrimarla a un lado. El centro no puede ser
+   float: se queda en bloque con márgenes automáticos. */
+.apunte-editor img.apunte-img-izq {
+  float: left; margin: 6px 14px 8px 0; display: inline;
+}
+.apunte-editor img.apunte-img-der {
+  float: right; margin: 6px 0 8px 14px; display: inline;
+}
+.apunte-editor img.apunte-img-centro {
+  float: none; display: block; margin-left: auto; margin-right: auto;
+}
+/* Sin esto, una imagen flotada se sale de su párrafo y se solapa con lo que
+   venga después. */
+.apunte-editor::after { content: ""; display: block; clear: both; }
+
+.apunte-editor img.apunte-img-sel {
+  outline: 2px solid var(--teal); outline-offset: 2px; border-color: var(--teal);
+}
+
+.apunte-img-barra {
+  position: absolute; z-index: 5;
+  display: flex; align-items: center; gap: 2px;
+  background: var(--paper-raised); border: 1px solid var(--line);
+  border-radius: 8px; padding: 3px 5px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
+}
+.apunte-img-btn {
+  appearance: none; border: none; background: transparent; color: var(--ink);
+  font: inherit; font-size: 0.82rem; line-height: 1;
+  padding: 5px 7px; border-radius: 5px; cursor: pointer;
+}
+.apunte-img-btn:hover { background: var(--teal-soft); color: var(--teal-ink); }
+.apunte-img-btn:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+.apunte-img-btn-activo { background: var(--teal); color: var(--paper-raised); }
+.apunte-img-btn-activo:hover { background: var(--teal); color: var(--paper-raised); }
+.apunte-img-ancho {
+  font-family: var(--mono); font-size: 0.7rem; color: var(--muted);
+  min-width: 34px; text-align: center;
+}
+.apunte-img-sep { width: 1px; height: 16px; background: var(--line); margin: 0 3px; }

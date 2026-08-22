@@ -2381,10 +2381,20 @@ function buildFluidCalculator(context) {
 
 /* ================= Constantes fisiológicas =================
 
-   Rangos de referencia del Merck Veterinary Manual, tablas "Normal Rectal
-   Temperature Ranges", "Resting Heart Rates", "Resting Respiratory Rates"
-   y "Parameters to Evaluate During Triage". Cuando Merck no da un valor
-   para la especie, se indica la otra fuente en la nota.
+   Rangos de referencia del Merck Veterinary Manual. Cuando Merck no da un
+   valor para la especie, se indica la otra fuente en la nota de la fila.
+
+     Temperatura  merckvetmanual.com/reference-values-and-conversion-tables/
+                  reference-guides/normal-rectal-temperature-ranges
+     Frec. card.  .../reference-guides/resting-heart-rates
+     Frec. resp.  .../special-subjects/reference-guides/resting-respiratory-rates
+     Triaje       .../multimedia/table/parameters-to-evaluate-during-triage
+     Caprino FR   pubs.ext.vt.edu/APSC/APSC-169/APSC-169.html
+
+   Estas direcciones NO se muestran en pantalla: sirven para volver a
+   comprobar una cifra que chirríe, no para leerlas en cada consulta.
+   Recuerda que un valor dentro del rango no descarta enfermedad y que uno
+   fuera puede ser solo el estrés de la consulta.
 
    Por que UNA sola fuente y no la mejor cifra de cada sitio: los rangos
    varian bastante entre autores (en porcino, Merck da 32-58 rpm y
@@ -2448,9 +2458,6 @@ const CONSTANTES_MUCOSAS = [
   { valor: "grisaceas", texto: "Grisáceas / porcelana" }
 ];
 
-const CONSTANTES_FUENTE =
-  "Merck Veterinary Manual — Normal Rectal Temperature Ranges, Resting Heart Rates, " +
-  "Resting Respiratory Rates y Parameters to Evaluate During Triage.";
 
 /* La especie del caso se guarda capitalizada ("Canino") y la tabla usa
    minusculas. Aves, Exotico y Otro no tienen rango: en vez de inventarlos
@@ -2616,13 +2623,6 @@ function buildConstantesSection(entry, save) {
   tabla.appendChild(filaMuc);
 
   wrap.appendChild(tabla);
-
-  const fuente = document.createElement("div");
-  fuente.className = "const-fuente";
-  fuente.textContent =
-    CONSTANTES_FUENTE +
-    " Un valor dentro del rango no descarta enfermedad, y uno fuera puede ser estrés de la consulta.";
-  wrap.appendChild(fuente);
 
   return wrap;
 }

@@ -1640,36 +1640,54 @@ button, input, select, textarea { font-family: inherit; }
 .section-tag.farmacos { color: var(--teal-ink); }
 
 /* ================= Constantes fisiológicas =================
-   Rejilla de cinco columnas: nombre · valor · unidad · referencia · marca.
-   Las columnas fijas hacen que los números queden alineados en vertical,
-   que es lo que permite recorrer la exploración de un vistazo. */
-.const-tabla { display: flex; flex-direction: column; gap: 2px; }
+   Un solo marco con las filas separadas por línea, en vez de cinco cajas
+   sueltas: se lee como la hoja de exploración que es.
+
+   La columna del nombre es FIJA y no 1fr. Con 1fr el nombre se comía todo
+   el ancho sobrante y empujaba los recuadros al otro extremo de la
+   tarjeta, con un vacío enorme en medio; para comparar cuatro cifras hay
+   que tenerlas juntas. Ahora el hueco sobrante se lo queda la referencia,
+   que es la que crece o encoge sin estorbar. */
+.const-tabla {
+  display: flex; flex-direction: column;
+  border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+}
 .const-fila {
   display: grid;
-  grid-template-columns: 1fr 84px 34px auto auto;
-  align-items: center; gap: 8px;
-  padding: 6px 8px; border-radius: 6px;
+  /* 110 px medidos, no elegidos a ojo: a 100 px "Frec. respiratoria" se
+     parte en dos lineas y la fila crece. 110 deja margen sin abrir hueco. */
+  grid-template-columns: 110px 74px 26px 1fr auto;
+  align-items: center; column-gap: 10px;
+  padding: 7px 10px 7px 8px;
   border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--line-soft);
 }
+.const-fila:last-child { border-bottom: none; }
 .const-nombre {
   font-size: 0.82rem; font-weight: 600; color: var(--ink);
   text-transform: none; letter-spacing: normal; margin: 0;
 }
 .const-input {
-  width: 100%; padding: 5px 7px; font: inherit; font-size: 0.86rem;
+  width: 100%; padding: 4px 6px; font: inherit; font-size: 0.84rem;
   font-family: var(--mono);
   border: 1px solid var(--line); border-radius: 5px;
   background: var(--paper-raised); color: var(--ink);
+  text-align: right;
 }
 .const-input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
-.const-input-ancho { grid-column: 2 / 4; font-family: inherit; }
+.const-input-ancho {
+  grid-column: 2 / 4; font-family: inherit; text-align: left; font-size: 0.8rem;
+}
 .const-unidad { font-size: 0.74rem; color: var(--muted); font-family: var(--mono); }
-.const-ref { font-size: 0.72rem; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
-.const-marca { font-size: 0.72rem; font-weight: 700; white-space: nowrap; min-width: 52px; text-align: right; }
+.const-ref {
+  font-size: 0.72rem; color: var(--muted); font-family: var(--mono);
+  white-space: nowrap; text-align: right;
+}
+.const-marca { font-size: 0.72rem; font-weight: 700; white-space: nowrap; min-width: 50px; text-align: right; }
 
-/* Fuera de rango: banda, fondo y texto. Tres señales, porque en una fila de
-   30 px un cambio de fondo solo no se ve (el mismo error que hubo con los
-   grupos del formulario). */
+/* Fuera de rango: banda, fondo y borde del campo. Tres señales, porque en
+   una fila de 30 px un cambio de fondo solo no se ve (el mismo error que
+   hubo con los grupos del formulario). */
 .const-fila[data-estado="alto"], .const-fila[data-estado="bajo"] {
   background: var(--rust-soft); border-left-color: var(--rust);
 }
@@ -1678,22 +1696,23 @@ button, input, select, textarea { font-family: inherit; }
 .const-fila[data-estado="alto"] .const-input,
 .const-fila[data-estado="bajo"] .const-input { border-color: var(--rust); }
 
-/* La nota de la especie ocupa la fila entera bajo su constante. */
+/* La nota de la especie cuelga bajo su constante, alineada con el nombre. */
 .const-nota {
   grid-column: 1 / -1; font-size: 0.7rem; color: var(--muted);
-  margin-top: 2px; line-height: 1.35;
+  margin-top: 4px; line-height: 1.35;
 }
 .const-aviso-especie {
   font-size: 0.78rem; color: var(--muted); margin: 0 0 10px; line-height: 1.4;
 }
-.const-fuente {
-  font-size: 0.7rem; color: var(--muted); margin-top: 12px;
-  border-top: 1px solid var(--line-soft); padding-top: 8px; line-height: 1.4;
-}
 
-/* En pantalla estrecha la referencia estorba más de lo que ayuda: se pasa
-   debajo del valor en vez de comprimir la columna del nombre. */
+/* En estrecho la referencia estorba más de lo que ayuda: se pasa debajo en
+   vez de comprimir el nombre. */
 @media (max-width: 600px) {
-  .const-fila { grid-template-columns: 1fr 76px 30px auto; }
-  .const-ref { grid-column: 1 / -1; text-align: left; }
+  .const-fila { grid-template-columns: 1fr 70px 24px auto; column-gap: 8px; }
+  .const-nombre { font-size: 0.78rem; }
+  /* 1/4 y no 1/-1: ocupando TODA la fila, la marca ("↑ alto") no cabía
+     detrás y se iba sola a una tercera línea, debajo del nombre. Dejando
+     libre la última pista se queda al lado y la fila baja de 72 a 57 px. */
+  .const-ref { grid-column: 1 / 4; text-align: left; margin-top: 3px; }
+  .const-input-ancho { grid-column: 2 / 4; }
 }

@@ -1284,3 +1284,190 @@ button, input, select, textarea { font-family: inherit; }
 .calc-mant-activa {
   color: var(--teal-ink); font-weight: 700; border-left-color: var(--teal);
 }
+
+
+/* =====================================================================
+   MOVIMIENTO
+   =====================================================================
+
+   Criterio: el movimiento aqui esta para explicar, no para lucirse. Esta
+   app se usa con un animal delante, a veces con una sola mano. Cada
+   animacion responde a una pregunta concreta del que mira:
+
+     "he pulsado?"        -> el boton se hunde
+     "donde estoy?"       -> la banda del menu crece en la pagina activa
+     "esto se abre?"      -> el triangulo gira en vez de cambiar de dibujo
+     "ha cambiado algo?"  -> la pagina nueva entra desde abajo
+
+   Nada dura mas de 280 ms. Por encima de eso se percibe como espera.
+
+   El bloque de prefers-reduced-motion de arriba (linea ~82) anula todo
+   esto de golpe con !important, asi que quien tenga el sistema puesto en
+   "reducir movimiento" no ve nada de aqui. No hace falta repetirlo. */
+
+:root {
+  /* Salida rapida y frenada larga: arranca de inmediato (se siente que
+     responde) y se posa despacio (no da tirones). */
+  --sale: cubic-bezier(0.22, 1, 0.36, 1);
+  --rapido: 0.13s;
+  --medio: 0.2s;
+}
+
+/* ---------- Entrada de pagina ----------
+   La clase .entra la pone render() SOLO cuando de verdad cambias de vista.
+   Con cada snapshot de Firestore render() se repite, y animar en cada uno
+   convertiria la sincronizacion en un parpadeo constante. */
+@keyframes entra-vista {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+.content-inner.entra { animation: entra-vista 0.22s var(--sale) both; }
+
+/* Las tarjetas del inicio entran escalonadas, 35 ms de diferencia. Es poco
+   a proposito: lo justo para que el ojo las lea como cuatro cosas y no
+   como un bloque, sin que la ultima llegue tarde. */
+.content-inner.entra .stat-grid > * { animation: entra-vista 0.26s var(--sale) both; }
+.content-inner.entra .stat-grid > *:nth-child(2) { animation-delay: 0.035s; }
+.content-inner.entra .stat-grid > *:nth-child(3) { animation-delay: 0.07s; }
+.content-inner.entra .stat-grid > *:nth-child(4) { animation-delay: 0.105s; }
+
+/* ---------- Aparicion de las pantallas grandes ----------
+   Arranque -> acceso -> app. Antes era un corte seco. */
+@keyframes aparecer { from { opacity: 0; } to { opacity: 1; } }
+.app:not([hidden]), .auth-gate:not([hidden]) { animation: aparecer 0.25s ease both; }
+
+/* El logo del arranque respira, pero el retraso de 1,5 s es la parte
+   importante: si la app carga rapido -- que es lo normal -- no llegas a
+   verlo. Solo aparece cuando la espera empieza a notarse, que es justo
+   cuando sirve para decir "sigo trabajando". Asi se respeta la idea
+   original de no poner un spinner que aparece y desaparece. */
+@keyframes respira {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.72; transform: scale(0.96); }
+}
+.boot-gate .brand-mark-boot { animation: respira 2.2s ease-in-out 1.5s infinite; }
+
+/* ---------- Menu lateral ----------
+   La banda de la izquierda crece de 0 a 18 px. La pagina activa ya se
+   distinguia por el relleno verde; lo que faltaba era ver el CAMBIO al
+   pulsar otra. */
+.nav-item {
+  position: relative;
+  transition: background var(--rapido) ease, color var(--rapido) ease,
+              transform var(--rapido) ease;
+}
+.nav-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 0;
+  border-radius: 0 3px 3px 0;
+  background: var(--teal);
+  transform: translateY(-50%);
+  transition: height var(--medio) var(--sale);
+}
+.nav-item:hover::before { height: 14px; }
+/* En la activa la banda va en el color del papel: sobre el fondo verde el
+   --teal seria invisible. */
+.nav-item[aria-current="true"]::before { height: 18px; background: var(--paper); }
+.nav-item:active { transform: translateX(1px); }
+.nav-item .ico { transition: transform var(--medio) var(--sale); }
+.nav-item:hover .ico { transform: scale(1.12); }
+
+/* ---------- Botones ----------
+   Hundirse al pulsar es la unica confirmacion tactil que hay en un movil:
+   no hay clic que oir ni raton que se resista. */
+.btn-primary, .btn-secondary, .icon-btn, .btn-delete, .visor-btn, .subtab {
+  transition: background var(--rapido) ease, border-color var(--rapido) ease,
+              color var(--rapido) ease, transform var(--rapido) ease,
+              box-shadow var(--rapido) ease;
+}
+.btn-primary:active, .btn-secondary:active, .icon-btn:active, .btn-delete:active {
+  transform: scale(0.97);
+}
+.btn-primary:hover { box-shadow: 0 2px 10px rgba(46, 102, 89, 0.28); }
+.btn-primary:focus-visible, .btn-secondary:focus-visible {
+  outline: 2px solid var(--teal); outline-offset: 2px;
+}
+
+/* ---------- Tarjetas ---------- */
+.stat-card {
+  /* Se suma la sombra a lo que ya transicionaba (borde y posicion). */
+  transition: border-color var(--rapido) ease, transform var(--medio) var(--sale),
+              box-shadow var(--medio) var(--sale);
+}
+.stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 4px 18px rgba(36, 41, 32, 0.1), var(--shadow);
+}
+.stat-card:active { transform: translateY(0) scale(0.99); }
+/* El numero es lo que se ha venido a mirar: crece un pelo mas que la caja. */
+.stat-card .n { transition: color var(--rapido) ease, transform var(--medio) var(--sale); }
+.stat-card:hover .n { color: var(--teal-ink); transform: scale(1.04); }
+
+.subject-card, .card {
+  transition: border-color var(--rapido) ease, transform var(--medio) var(--sale),
+              box-shadow var(--medio) var(--sale);
+}
+.subject-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 18px rgba(36, 41, 32, 0.1), var(--shadow);
+}
+.subject-card .ico { transition: transform var(--medio) var(--sale); }
+.subject-card:hover .ico { transform: scale(1.08) rotate(-4deg); }
+.subject-card .del { transition: color var(--rapido) ease; }
+
+/* ---------- Tablas ----------
+   Sin transicion el fondo saltaba de golpe al pasar por encima; con 130 ms
+   la fila se enciende y se apaga, que se lee como "esta es la que sigues". */
+.data-table tbody tr td { transition: background var(--rapido) ease; }
+
+/* El triangulo. Ahora es siempre el mismo caracter y lo que cambia es el
+   giro: el giro cuenta que la fila se esta abriendo; cambiar el dibujo
+   solo la enseña ya abierta. */
+.group-caret, .subgroup-caret {
+  display: inline-block;
+  transition: transform var(--medio) var(--sale), color var(--rapido) ease;
+}
+.group-caret.abierto, .subgroup-caret.abierto { transform: rotate(90deg); }
+.data-table tbody tr.group-row:hover .group-caret,
+.data-table tbody tr.subgroup-row:hover .subgroup-caret { color: var(--teal); }
+
+/* ---------- Campos ----------
+   La transicion del color del borde evita el parpadeo al saltar de campo
+   en campo con el tabulador. */
+.field-group input, .field-group select, .field-body,
+.meds-row input, .evol-text, .topbar-search input {
+  transition: border-color var(--rapido) ease, background var(--rapido) ease;
+}
+
+/* ---------- Visor de fotos ----------
+   La foto crece desde el 94 %: da la sensacion de que se acerca, no de que
+   una capa negra tapa la pantalla. */
+@keyframes entra-visor { from { opacity: 0; } to { opacity: 1; } }
+@keyframes crece-foto {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.visor-foto { animation: entra-visor 0.18s ease both; }
+/* Solo la primera aparicion: una vez dentro el zoom lo maneja el JS con su
+   propio transform, y una animacion encima pelearia con el. */
+.visor-foto .visor-img { animation: crece-foto 0.24s var(--sale) both; }
+.visor-nav { transition: background var(--rapido) ease, transform var(--rapido) ease; }
+.visor-nav:hover { transform: translateY(-50%) scale(1.1); }
+.visor-nav:active { transform: translateY(-50%) scale(0.95); }
+
+/* ---------- Aviso flotante ----------
+   Ya subia y bajaba; se le cambia la curva para que frene al llegar en vez
+   de pararse en seco. */
+.toast { transition: opacity var(--medio) ease, transform 0.28s var(--sale); }
+
+/* ---------- Pastillas de estado ---------- */
+.badge, .chip { transition: background var(--rapido) ease, color var(--rapido) ease; }
+
+/* Dos totales seguidos (mL/h y gotas/min) son la misma respuesta contada de
+   dos formas, así que van juntos. Con el margen suelto de .calc-total se
+   separaban 10 px y parecían dos conclusiones distintas. */
+.calc-result .calc-total + .calc-total { margin-top: -6px; }

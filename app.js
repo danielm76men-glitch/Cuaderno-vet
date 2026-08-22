@@ -2177,10 +2177,11 @@ function buildFluidCalculator(context) {
         "calc-total"
       );
       linea(
-        "Cristaloide isotónico tamponado. En bomba serían " +
+        "Cristaloide isotónico tamponado. Pasado en " + FLUIDOS_BOLO_MIN_MIN + " min son " +
           roundNice((boloMin / FLUIDOS_BOLO_MIN_MIN) * 60) + " – " +
-          roundNice((boloMax / FLUIDOS_BOLO_MIN_MIN) * 60) + " mL/h si lo pasas en " +
-          FLUIDOS_BOLO_MIN_MIN + " min.",
+          roundNice((boloMax / FLUIDOS_BOLO_MIN_MIN) * 60) + " mL/h (" +
+          roundNice(((boloMin / FLUIDOS_BOLO_MIN_MIN) * 60 * gtt) / 60) + " – " +
+          roundNice(((boloMax / FLUIDOS_BOLO_MIN_MIN) * 60 * gtt) / 60) + " gotas/min).",
         "calc-line-suave"
       );
       linea(
@@ -2253,19 +2254,15 @@ function buildFluidCalculator(context) {
         roundNice(porHoraMant) + " mL/h",
       "calc-line"
     );
+    const gotasMin = (mlPorHora * gtt) / 60;
     linea("= " + roundNice(mlPorHora) + " mL/h", "calc-total");
+    linea("= " + roundNice(gotasMin) + " gotas/min con equipo de " + gtt + " gotas/mL", "calc-total");
     linea(
-      "Son " + roundNice(mlPorHora / peso) + " mL/kg/h. Volumen de las primeras " +
+      (gotasMin > 0 ? "Una gota cada " + roundNice(60 / gotasMin) + " s. " : "") +
+        "Son " + roundNice(mlPorHora / peso) + " mL/kg/h. Volumen de las primeras " +
         (horasValidas ? roundNice(horas) : "24") + " h: " +
         roundNice(mlPorHora * (horasValidas ? horas : 24)) + " mL.",
       "calc-line-suave"
-    );
-
-    const gotasMin = (mlPorHora * gtt) / 60;
-    linea(
-      "Con " + gtt + " gotas/mL: " + roundNice(gotasMin) + " gotas/min" +
-        (gotasMin > 0 ? " (una gota cada " + roundNice(60 / gotasMin) + " s)" : ""),
-      "calc-line"
     );
 
     if (deficit > 0 && horasValidas) {
@@ -2607,6 +2604,15 @@ function setActiveNav() {
   updateNavCounts();
 }
 
+/* El triangulo de plegar/desplegar. Se gira por CSS en vez de cambiar
+   el caracter: el giro cuenta que la fila se esta abriendo, el cambio
+   de caracter solo aparece ya cambiado. */
+function ponerCaret(nodo, abierto) {
+  if (!nodo) return;
+  nodo.textContent = "\u25b8";
+  nodo.classList.toggle("abierto", !!abierto);
+}
+
 function goToPage(page) {
   state.page = page;
   state.activeId = null;
@@ -2696,6 +2702,12 @@ function isTypingInContent() {
    en cuanto el cursor sale del campo. */
 let renderPendiente = false;
 
+/* Que vista se dibujo la ultima vez. Sirve para animar la entrada solo
+   cuando cambias de pagina, de pestana o abres una ficha, y NO cuando
+   render() se repite por un snapshot de Firestore: eso ocurre muchas
+   veces seguidas y animarlo seria un parpadeo. */
+let ultimaVista = null;
+
 function renderDesdeSnapshot() {
   if (detailIsBeingEdited() || isTypingInContent()) {
     renderPendiente = true;
@@ -2727,8 +2739,13 @@ function render() {
   setActiveNav();
   els.content.innerHTML = "";
 
+  const vistaActual =
+    state.page + "/" + (state.studyTab || "") + "/" + (state.activeId || "");
+  const cambioDeVista = vistaActual !== ultimaVista;
+  ultimaVista = vistaActual;
+
   const inner = document.createElement("div");
-  inner.className = "content-inner";
+  inner.className = cambioDeVista ? "content-inner entra" : "content-inner";
   els.content.appendChild(inner);
 
   if (!state.ready) {
@@ -2961,7 +2978,7 @@ function buildPatientsTable(list, compact, grouped) {
       headTd.innerHTML =
         '<span class="group-caret"></span><span class="group-name"></span>' +
         '<span class="group-sep">·</span><span class="group-count"></span>';
-      headTd.querySelector(".group-caret").textContent = expandido ? "▾" : "▸";
+      ponerCaret(headTd.querySelector(".group-caret"), expandido);
       headTd.querySelector(".group-name").textContent = nombre;
       headTd.querySelector(".group-count").textContent =
         filas.length + (filas.length === 1 ? " paciente" : " pacientes");
@@ -2984,7 +3001,7 @@ function buildPatientsTable(list, compact, grouped) {
         if (nuevo) gruposExpandidos.add(nombre);
         else gruposExpandidos.delete(nombre);
         headTd.setAttribute("aria-expanded", nuevo ? "true" : "false");
-        headTd.querySelector(".group-caret").textContent = nuevo ? "▾" : "▸";
+        ponerCaret(headTd.querySelector(".group-caret"), nuevo);
         filasTr.forEach((tr) => {
           tr.hidden = !nuevo;
         });
@@ -4703,7 +4720,7 @@ function buildFormularioTable(list, withActions) {
     headTd.innerHTML =
       '<span class="group-caret"></span><span class="group-name"></span>' +
       '<span class="group-sep">·</span><span class="group-count"></span>';
-    headTd.querySelector(".group-caret").textContent = expandido ? "▾" : "▸";
+    ponerCaret(headTd.querySelector(".group-caret"), expandido);
     headTd.querySelector(".group-name").textContent = nombre;
     headTd.querySelector(".group-count").textContent =
       filas.length + (filas.length === 1 ? " fármaco" : " fármacos");
@@ -4744,7 +4761,7 @@ function buildFormularioTable(list, withActions) {
         subTd.innerHTML =
           '<span class="subgroup-caret"></span><span class="subgroup-name"></span>' +
           '<span class="subgroup-count"></span>';
-        subTd.querySelector(".subgroup-caret").textContent = subAbierto ? "▾" : "▸";
+        ponerCaret(subTd.querySelector(".subgroup-caret"), subAbierto);
         subTd.querySelector(".subgroup-name").textContent = sub;
         subTd.querySelector(".subgroup-count").textContent = deLaSub.length;
         subTr.appendChild(subTd);
@@ -4768,7 +4785,7 @@ function buildFormularioTable(list, withActions) {
         if (ahora) subclasesExpandidas.add(clave);
         else subclasesExpandidas.delete(clave);
         subTd.setAttribute("aria-expanded", ahora ? "true" : "false");
-        subTd.querySelector(".subgroup-caret").textContent = ahora ? "▾" : "▸";
+        ponerCaret(subTd.querySelector(".subgroup-caret"), ahora);
         filasSub.forEach((tr) => {
           tr.hidden = !ahora;
         });
@@ -4796,7 +4813,7 @@ function buildFormularioTable(list, withActions) {
       if (nuevoEstado) gruposFarmacoExpandidos.add(nombre);
       else gruposFarmacoExpandidos.delete(nombre);
       headTd.setAttribute("aria-expanded", nuevoEstado ? "true" : "false");
-      headTd.querySelector(".group-caret").textContent = nuevoEstado ? "▾" : "▸";
+      ponerCaret(headTd.querySelector(".group-caret"), nuevoEstado);
 
       controlados.forEach(({ subTr, subTd, filasSub }) => {
         if (subTr) subTr.hidden = !nuevoEstado;

@@ -1646,22 +1646,26 @@ function buildDoseCalculator(context) {
     // Se calcula sobre el punto medio del rango; los extremos se muestran
     // debajo para que se vea el margen con el que se esta trabajando.
     const dosisUsada = (dosisMin + dosisMax) / 2;
-    const totalDose = weight * dosisUsada;
-    const totalMin = weight * dosisMin;
-    const totalMax = weight * dosisMax;
+    const especieCalc = speciesSelect.value;
+    const tipoUnidad = tipoDeUnidad(unidad);
+    const totalDose = totalSegunUnidad(dosisUsada, unidad, weight, especieCalc);
+    const totalMin = totalSegunUnidad(dosisMin, unidad, weight, especieCalc);
+    const totalMax = totalSegunUnidad(dosisMax, unidad, weight, especieCalc);
 
-    const especieNota = speciesSelect.value ? " (" + speciesSelect.value + ")" : "";
-    addLine(
-      "Dosis" +
-        especieNota +
-        " = " +
-        weight +
-        " kg × " +
-        roundNice(dosisUsada) +
-        " " +
-        unidad +
-        (dosisMin !== dosisMax ? " (rango " + dosisMin + "–" + dosisMax + ")" : "")
-    );
+    const especieNota = especieCalc ? " (" + especieCalc + ")" : "";
+    const rangoNota = dosisMin !== dosisMax ? " (rango " + dosisMin + "–" + dosisMax + ")" : "";
+    if (tipoUnidad === "fija") {
+      // Sin "peso ×": esta pauta no depende del peso y decir lo contrario
+      // invitaria a recalcular a mano.
+      addLine("Dosis fija" + especieNota + " = " + roundNice(dosisUsada) + " " + unidad + rangoNota);
+      addLine("El peso no interviene: la etiqueta pauta por animal.", "calc-line-suave");
+    } else if (tipoUnidad === "superficie") {
+      const sc = superficieCorporal(weight, especieCalc);
+      addLine("Superficie corporal = " + roundNice(sc) + " m² (para " + weight + " kg)");
+      addLine("Dosis" + especieNota + " = " + roundNice(sc) + " m² × " + roundNice(dosisUsada) + " " + unidad + rangoNota);
+    } else {
+      addLine("Dosis" + especieNota + " = " + weight + " kg × " + roundNice(dosisUsada) + " " + unidad + rangoNota);
+    }
 
     const totalText = roundNice(totalDose) + " " + massUnit;
     addLine("= " + totalText, "calc-total");
@@ -1704,7 +1708,7 @@ function buildDoseCalculator(context) {
 
     /* Aviso de rango. El resultado NO se oculta: esconderlo empuja a
        recalcular a mano, que es peor que verlo con la advertencia al lado. */
-    const dosisEfectiva = totalDose / weight;
+    const dosisEfectiva = dosisUsada;
     if (dosisEfectiva < dosisMin || dosisEfectiva > dosisMax) {
       const aviso = document.createElement("div");
       aviso.className = "calc-aviso";
@@ -3408,6 +3412,36 @@ const VIAS_FORMULARIO = ["IV", "IM", "SC", "VO", "IU", "tópica"];
    Ahora "via" es un array. Los documentos viejos la tienen como texto, asi
    que TODA lectura pasa por viasDe(): acepta las dos formas y siempre
    devuelve lista. No hace falta migrar nada. */
+/* Como se multiplica una dosis depende de su unidad, y no todas van por
+   kilo. Si se tratan todas igual, una dosis fija de 62,5 mg en un gato de
+   4 kg sale como 250 mg: cuatro veces la dosis. Esto no es un detalle
+   cosmetico, es la diferencia entre una dosis correcta y una sobredosis.
+
+     mg/kg     -> se multiplica por el peso
+     mg/animal -> dosis FIJA, el peso no interviene
+     mg/m2     -> se multiplica por la superficie corporal */
+function tipoDeUnidad(unidad) {
+  const u = String(unidad || "").toLowerCase();
+  if (u.includes("/m2") || u.includes("/m²")) return "superficie";
+  if (u.includes("/animal") || u.includes("/cabeza")) return "fija";
+  return "peso";
+}
+
+/* Superficie corporal por la formula estandar: BSA(m2) = K * P(g)^(2/3) /
+   10000, con K = 10.1 en perro y 10.0 en gato. Para las demas especies se
+   usa 10.1, que es lo habitual a falta de constante propia. */
+function superficieCorporal(pesoKg, especie) {
+  const K = String(especie || "").toLowerCase() === "felino" ? 10.0 : 10.1;
+  return (K * Math.pow(pesoKg * 1000, 2 / 3)) / 10000;
+}
+
+function totalSegunUnidad(dosis, unidad, pesoKg, especie) {
+  const tipo = tipoDeUnidad(unidad);
+  if (tipo === "fija") return dosis;
+  if (tipo === "superficie") return dosis * superficieCorporal(pesoKg, especie);
+  return dosis * pesoKg;
+}
+
 function viasDe(via) {
   if (Array.isArray(via)) return via.filter(Boolean);
   const t = String(via == null ? "" : via).trim();

@@ -2184,6 +2184,13 @@ function buildFluidCalculator(context) {
           roundNice(((boloMax / FLUIDOS_BOLO_MIN_MIN) * 60 * gtt) / 60) + " gotas/min).",
         "calc-line-suave"
       );
+      const gotasBolo = ((boloMax / FLUIDOS_BOLO_MIN_MIN) * 60 * gtt) / 60;
+      if (gotasBolo > 100) {
+        linea(
+          "A ese ritmo no se cuentan gotas: llave abierta, jeringa o bolsa de presión.",
+          "calc-line-suave"
+        );
+      }
       linea(
         "Reevalúa la perfusión al terminar el bolo. Se puede repetir si sigue mal.",
         "calc-line-suave"

@@ -3990,10 +3990,10 @@ function subclaseDeFarmaco(farmaco) {
 // volveria a cerrar todos los grupos que hubieras abierto.
 const gruposFarmacoExpandidos = new Set();
 
-/* Las subclases se guardan al revés: se anota la que CIERRAS, no la que
-   abres. Así, al desplegar una categoría se ven sus fármacos de una vez en
-   lugar de obligar a un segundo clic por cada subclase. */
-const subclasesColapsadas = new Set();
+/* Todo nace cerrado, en los dos niveles: con 61 fármacos, abrir una
+   categoría y volcar sus nueve subclases con todos sus fármacos es la misma
+   pared de texto que había antes de agrupar. Se anota lo que ABRES. */
+const subclasesExpandidas = new Set();
 
 function buildFormularioTable(list, withActions) {
   const wrap = document.createElement("div");
@@ -4148,7 +4148,7 @@ function buildFormularioTable(list, withActions) {
 
     nombresSub.forEach((sub) => {
       const clave = nombre + "/" + sub;
-      const subAbierto = abrirTodo || !subclasesColapsadas.has(clave);
+      const subAbierto = abrirTodo || subclasesExpandidas.has(clave);
       const deLaSub = subgrupos.get(sub);
 
       // Con una sola subclase el encabezado sobra: repetiría lo que ya dice
@@ -4174,9 +4174,12 @@ function buildFormularioTable(list, withActions) {
         tbody.appendChild(subTr);
       }
 
+      // Sin encabezado propio (subclase única) no hay dónde pulsar, así que
+      // esas filas dependen solo de la categoría.
+      const visible = subTr ? expandido && subAbierto : expandido;
       const filasSub = deLaSub.map((crudo) => {
         const tr = filaDeFarmaco(crudo);
-        tr.hidden = !(expandido && subAbierto);
+        tr.hidden = !visible;
         tbody.appendChild(tr);
         return tr;
       });
@@ -4184,8 +4187,8 @@ function buildFormularioTable(list, withActions) {
       function alternarSub() {
         const abierto = subTd.getAttribute("aria-expanded") === "true";
         const ahora = !abierto;
-        if (ahora) subclasesColapsadas.delete(clave);
-        else subclasesColapsadas.add(clave);
+        if (ahora) subclasesExpandidas.add(clave);
+        else subclasesExpandidas.delete(clave);
         subTd.setAttribute("aria-expanded", ahora ? "true" : "false");
         subTd.querySelector(".subgroup-caret").textContent = ahora ? "▾" : "▸";
         filasSub.forEach((tr) => {

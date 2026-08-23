@@ -2123,13 +2123,24 @@ button, input, select, textarea { font-family: inherit; }
 /* Los apartados son más bajos que el cuadro único que sustituyen: son
    cinco cosas en la misma pantalla y uno solo no puede comerse el sitio
    de los demás. Crecen arrastrando la esquina. */
-.apartado .apartado-caja { min-height: 96px; resize: vertical; }
+.apartado .apartado-caja { min-height: 168px; resize: vertical; }
+/* En una pantalla alta caben más holgados; en el móvil, donde el teclado
+   se come media pantalla, no tiene sentido un cuadro tan alto. */
+@media (min-height: 900px) {
+  .apartado .apartado-caja { min-height: 200px; }
+}
+@media (max-width: 720px) {
+  .apartado .apartado-caja { min-height: 130px; }
+}
 .apartado-legado {
   margin: 0 0 12px; padding: 8px 10px;
   font-size: 0.78rem; line-height: 1.4; color: var(--muted);
   background: var(--paper-alt); border-left: 3px solid var(--line); border-radius: 6px;
 }
-.apartado-examenes { margin-bottom: 16px; }
+.apartado-examenes { margin-bottom: 14px; }
+/* Las fotos van justo debajo de los exámenes y se leen como parte del
+   mismo bloque: una línea fina las separa sin partirlas en dos tarjetas. */
+.apartado-fotos { margin-bottom: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
 
 /* El micrófono de cada apartado es más pequeño que el botón único de
    antes: hay cuatro en pantalla y no pueden pesar como cuatro botones. */
@@ -2181,34 +2192,64 @@ button, input, select, textarea { font-family: inherit; }
    hueco como lo llenaba la inicial. */
 .patient-avatar-icono { font-size: 2.1rem; line-height: 1; }
 
-/* ================= La imagen del apunte ocupa su propia linea =================
+/* ================= La foto del apunte, con el texto alrededor =================
    Estaba `display: inline-block`, o sea metida DENTRO del renglon: una foto
    de 150 px de alto convertia esa linea en un renglon de 150 px con las
-   palabras pegadas arriba y el resto del apunte descuadrado. Un apunte de
-   clase no se lee asi.
+   palabras pegadas arriba y el resto del apunte descuadrado.
 
-   Ahora es un bloque con su propia linea, como en un documento, y el lado
-   al que queda lo decide donde la sueltas (data-pos), no un boton
-   (invariante 17). */
+   Ahora se comporta como en un documento de Word, y el lado lo decide donde
+   la sueltas (data-pos), no un boton (invariante 17):
+
+     izq     la foto a la izquierda, el parrafo la rodea por la derecha
+     der     la foto a la derecha, el parrafo la rodea por la izquierda
+     centro  la foto sola en su linea, centrada, sin texto al lado
+
+   El ancho sigue en tanto por ciento y sigue siendo del apunte, porque la
+   pieza vive siempre al primer nivel; flotar no cambia eso. */
 .apunte-editor figure.apunte-fig,
 .apunte-editor > img {
   display: block;
-  margin: 12px 0;
   max-width: 100%;
 }
 .apunte-editor figure.apunte-fig[data-pos="izq"],
-.apunte-editor > img[data-pos="izq"] { margin-left: 0; margin-right: auto; }
-.apunte-editor figure.apunte-fig[data-pos="centro"],
-.apunte-editor > img[data-pos="centro"] { margin-left: auto; margin-right: auto; }
+.apunte-editor > img[data-pos="izq"] {
+  float: left; clear: left;
+  margin: 4px 18px 10px 0;
+}
 .apunte-editor figure.apunte-fig[data-pos="der"],
-.apunte-editor > img[data-pos="der"] { margin-left: auto; margin-right: 0; }
+.apunte-editor > img[data-pos="der"] {
+  float: right; clear: right;
+  margin: 4px 0 10px 18px;
+}
+.apunte-editor figure.apunte-fig[data-pos="centro"],
+.apunte-editor > img[data-pos="centro"] {
+  float: none; clear: both;
+  margin: 12px auto;
+}
+
+/* Con la foto flotando, el renglon que la rodea tiene que cortar por donde
+   toque o quedan huecos enormes entre palabras. Justificado y partiendo
+   palabras largas se lee como el documento de clase. */
+.apunte-editor { text-align: justify; hyphens: auto; }
+.apunte-editor figcaption.apunte-pie { text-align: center; }
+
+/* En el movil no hay sitio para dos columnas: 360 px de ancho menos una foto
+   al 45 % deja renglones de tres palabras. Debajo de 600 px la foto pasa a
+   ocupar su propia linea, se mire como se mire. */
+@media (max-width: 600px) {
+  .apunte-editor figure.apunte-fig,
+  .apunte-editor > img {
+    float: none !important; clear: both !important;
+    margin: 12px auto !important;
+  }
+  .apunte-editor { text-align: left; }
+}
 
 /* Las clases de flotado antiguas ya no se generan: al abrir el apunte se
-   traducen a data-pos. Se anulan aqui para que no peleen con el bloque en
-   un apunte viejo que todavia no se ha vuelto a guardar. */
+   traducen a data-pos, que hace lo mismo pero se decide arrastrando. */
 .apunte-editor img.apunte-img-izq,
 .apunte-editor img.apunte-img-der,
-.apunte-editor img.apunte-img-centro { float: none; }
+.apunte-editor img.apunte-img-centro { float: none; margin: 0; }
 
 /* La guia deja de ser un cursor vertical: entre bloques, la raya que dice
    donde va a caer la imagen es horizontal, y el punto de la punta dice

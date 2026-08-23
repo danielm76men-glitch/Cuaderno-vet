@@ -1205,7 +1205,7 @@ async function guardarImagenDeApunte(entryId, file) {
 /* Una imagen recien insertada ocupaba el ancho entero del apunte: una
    foto del movil llenaba la pantalla y habia que hacer scroll para
    seguir leyendo. Entra al 60 % y desde ahi se ajusta. */
-const APUNTE_ANCHO_INICIAL = 60;
+const APUNTE_ANCHO_INICIAL = 45;
 /* El minimo y el maximo los aplica el arrastre de las esquinas. Entre
    ellos el tamano es continuo: lo decide la mano, no una lista. */
 const APUNTE_ANCHO_MIN = 10;
@@ -1335,7 +1335,10 @@ function buildApunteEditor(entry, statusText) {
         const figura = crearFiguraDeImagen(img);
         figura.style.width = APUNTE_ANCHO_INICIAL + "%";
         figura.setAttribute("data-ancho", APUNTE_ANCHO_INICIAL);
-        figura.setAttribute("data-pos", "centro");
+        /* Entra a la izquierda con el texto rodeandola, que es como se ve
+           un apunte de clase en un documento. Arrastrandola al centro se
+           queda sola en su linea, y a la derecha se rodea por el otro lado. */
+        figura.setAttribute("data-pos", "izq");
         insertarPieza(figura);
         guardar();
       } catch (err) {
@@ -2283,15 +2286,20 @@ function buildExamenesSection(entry, statusText, cargarAdjuntos) {
       }
     }
 
+    /* Array.from ANTES de limpiar el campo: input.files es una lista viva
+       y value = "" la vacía en el sitio. Pasando la lista tal cual, lo que
+       llega a subirPaginas son cero archivos y no sube nada, sin error ni
+       aviso. El campo se limpia para poder volver a elegir la misma hoja:
+       sin eso, el segundo intento no dispara "change". */
     entradaCamara.addEventListener("change", function () {
-      const f = entradaCamara.files;
+      const archivos = Array.from(entradaCamara.files || []);
       entradaCamara.value = "";
-      subirPaginas(f, escCheck.checked); // la cámara respeta el interruptor
+      subirPaginas(archivos, escCheck.checked); // la cámara respeta el interruptor
     });
     entradaArchivo.addEventListener("change", function () {
-      const f = entradaArchivo.files;
+      const archivos = Array.from(entradaArchivo.files || []);
       entradaArchivo.value = "";
-      subirPaginas(f, escCheck.checked); // una foto reenviada está igual de gris
+      subirPaginas(archivos, escCheck.checked); // una foto reenviada está igual de gris
     });
 
     pintarPaginas();
@@ -2427,7 +2435,7 @@ function buildExamenesSection(entry, statusText, cargarAdjuntos) {
   return wrap;
 }
 
-function buildPhotosSection(entry, statusText, etiqueta) {
+function buildPhotosSection(entry, statusText, etiqueta, cargarAdjuntos) {
   const wrap = document.createElement("div");
   wrap.className = "photos";
 
@@ -2536,11 +2544,11 @@ function buildPhotosSection(entry, statusText, etiqueta) {
 
   renderGrid();
 
-  fotosDeEntrada(entry.id)
-    .then((lista) => {
+  (cargarAdjuntos || fotosDeEntrada(entry.id).then(repartirAdjuntos))
+    .then((repartido) => {
       cargando = false;
       // Puede haber llegado una foto nueva mientras cargaba: no se pisan.
-      const sueltas = repartirAdjuntos(lista).fotos;
+      const sueltas = repartido.fotos;
       const nuevas = fotos.filter((f) => !sueltas.some((l) => l.id === f.id));
       fotos = sueltas.concat(nuevas);
       renderGrid();
@@ -5683,11 +5691,6 @@ function renderPatientDetail(root, entry) {
   tutorCard.appendChild(tutorRow2);
   leftCol.appendChild(tutorCard);
 
-  const photosCard = document.createElement("div");
-  photosCard.className = "card card-pad";
-  photosCard.appendChild(buildPhotosSection(entry, statusText));
-  leftCol.appendChild(photosCard);
-
   const medsCard = document.createElement("div");
   medsCard.className = "card card-pad";
   medsCard.appendChild(buildMedsSection(entry, statusText));
@@ -5758,12 +5761,23 @@ function renderPatientDetail(root, entry) {
     /* Los exámenes van DESPUÉS del examen físico: es cuando se piden, y
        el diagnóstico de abajo se escribe mirándolos. */
     if (ap.clave === "examenFisico") {
+      const adjuntos = fotosDeEntrada(entry.id).then(repartirAdjuntos);
+
       const bloqueEx = document.createElement("div");
       bloqueEx.className = "apartado apartado-examenes";
-      bloqueEx.appendChild(
-        buildExamenesSection(entry, statusText, fotosDeEntrada(entry.id).then(repartirAdjuntos))
-      );
+      bloqueEx.appendChild(buildExamenesSection(entry, statusText, adjuntos));
       notesCard.appendChild(bloqueEx);
+
+      /* Las fotos, pegadas a los exámenes: son lo mismo —imágenes de
+         este paciente en esta consulta— y tenerlas a media pantalla de
+         distancia obligaba a subir y bajar para comparar la lesión con
+         la placa. Aquí se ven las dos cosas de una vez. */
+      const bloqueFotos = document.createElement("div");
+      bloqueFotos.className = "apartado apartado-fotos";
+      bloqueFotos.appendChild(
+        buildPhotosSection(entry, statusText, "Fotos (lesiones, radiografías, ecografías, paciente)", adjuntos)
+      );
+      notesCard.appendChild(bloqueFotos);
     }
   });
 

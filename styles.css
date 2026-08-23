@@ -584,6 +584,22 @@ button, input, select, textarea { font-family: inherit; }
 }
 .detail-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 
+/* La ficha del caso: una pila, no dos columnas. Arriba las tarjetas de
+   quién es el paciente, repartidas en la fila que quepa; debajo, todo a lo
+   ancho. auto-fit con minmax: en una pantalla ancha van las tres de lado,
+   en una tableta dos, y en el móvil una debajo de otra, sin media queries
+   que mantener. */
+.caso-pila { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.caso-cabecera {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(272px, 1fr));
+  gap: 18px; align-items: start; min-width: 0;
+}
+.caso-cuerpo { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+
+/* Los fármacos van dentro del tratamiento, separados del texto por la
+   misma línea fina que separa las fotos de los exámenes. */
+.apartado-meds { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+
 .field-title {
   width: 100%;
   font-family: var(--serif);
@@ -2075,6 +2091,12 @@ button, input, select, textarea { font-family: inherit; }
    debajo y se ve donde va a caer. */
 .apunte-editor img.apunte-img-moviendo { opacity: 0.45; cursor: grabbing; }
 
+/* Y ademas deja de responder al puntero, para no taparse a si misma el
+   sitio al que va: el navegador tiene que poder ver el texto de debajo
+   para decir donde cae. */
+.apunte-editor .apunte-pieza-moviendo,
+.apunte-editor .apunte-pieza-moviendo * { pointer-events: none; }
+
 .apunte-manija-ni { top: -8px; left: -8px; cursor: nwse-resize; }
 .apunte-manija-nd { top: -8px; right: -8px; cursor: nesw-resize; }
 .apunte-manija-si { bottom: -8px; left: -8px; cursor: nesw-resize; }
@@ -2123,15 +2145,25 @@ button, input, select, textarea { font-family: inherit; }
 /* Los apartados son más bajos que el cuadro único que sustituyen: son
    cinco cosas en la misma pantalla y uno solo no puede comerse el sitio
    de los demás. Crecen arrastrando la esquina. */
-.apartado .apartado-caja { min-height: 168px; resize: vertical; }
-/* En una pantalla alta caben más holgados; en el móvil, donde el teclado
-   se come media pantalla, no tiene sentido un cuadro tan alto. */
+/* El apartado usa el mismo editor que los apuntes de clase, pero ahi el
+   apunte ocupa 72vh porque es la pantalla entera; aqui son tres seguidos y
+   no pueden medir tres pantallas. Se fija una altura de trabajo y crece
+   arrastrando la esquina. */
+.apunte-apartado .apunte-editor {
+  min-height: 168px;
+  resize: vertical;
+  text-align: left;          /* justificado es para un apunte largo, no para una nota clinica */
+}
 @media (min-height: 900px) {
-  .apartado .apartado-caja { min-height: 200px; }
+  .apunte-apartado .apunte-editor { min-height: 200px; }
 }
 @media (max-width: 720px) {
-  .apartado .apartado-caja { min-height: 130px; }
+  .apunte-apartado .apunte-editor { min-height: 130px; }
 }
+/* La barra de formato, mas discreta: hay tres en la misma pantalla. */
+.apunte-apartado .apunte-barra { margin-bottom: 6px; }
+.apunte-apartado .apunte-btn { padding: 3px 8px; font-size: 0.76rem; }
+
 .apartado-legado {
   margin: 0 0 12px; padding: 8px 10px;
   font-size: 0.78rem; line-height: 1.4; color: var(--muted);
@@ -2227,10 +2259,11 @@ button, input, select, textarea { font-family: inherit; }
   margin: 12px auto;
 }
 
-/* Con la foto flotando, el renglon que la rodea tiene que cortar por donde
-   toque o quedan huecos enormes entre palabras. Justificado y partiendo
-   palabras largas se lee como el documento de clase. */
-.apunte-editor { text-align: justify; hyphens: auto; }
+/* Justificado como el documento de clase, pero SIN partir palabras: con
+   `hyphens: auto` salian cosas como "ne-cesidades" o "manifes-taron" a
+   mitad de renglon y se leia peor que los huecos que venia a evitar. Word
+   tampoco parte palabras, y de ahi viene la referencia. */
+.apunte-editor { text-align: justify; }
 .apunte-editor figcaption.apunte-pie { text-align: center; }
 
 /* En el movil no hay sitio para dos columnas: 360 px de ancho menos una foto

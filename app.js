@@ -487,9 +487,17 @@ function attachVoiceInput(button, targetEl) {
     }
     chunk = chunk.trim();
     if (!chunk) return;
-    const current = targetEl.value;
-    const needsSpace = current && !/\s$/.test(current);
-    targetEl.value = current + (needsSpace ? " " : "") + chunk;
+    /* Un contenteditable no tiene .value. Dictar en un apartado de un
+       caso escribia en el vacio: ni texto ni error. */
+    if (targetEl.isContentEditable) {
+      const actual = targetEl.innerText;
+      const separa = actual && !/\s$/.test(actual);
+      targetEl.appendChild(document.createTextNode((separa ? " " : "") + chunk));
+    } else {
+      const current = targetEl.value;
+      const needsSpace = current && !/\s$/.test(current);
+      targetEl.value = current + (needsSpace ? " " : "") + chunk;
+    }
     targetEl.dispatchEvent(new Event("input", { bubbles: true }));
   });
 
@@ -985,42 +993,75 @@ function abrirVisorFoto(lista, indiceInicial) {
    Anamnesis, que es donde casi siempre estaba. En cuanto se escribe algo
    en los apartados nuevos, "body" deja de leerse — pero no se borra, así
    que el texto original sigue ahí pase lo que pase. */
+/* Anamnesis y examen físico van juntos en un solo cuadro: en la consulta
+   se escriben seguidos, mirando al animal, y separarlos obligaba a saltar
+   de campo a media frase. Diagnóstico y Tratamiento sí siguen aparte:
+   esos se escriben en otro momento y se releen por separado.
+
+   Cada apartado guarda DOS campos: el HTML (con sus imágenes) y el mismo
+   texto en plano. El plano es lo que leen el buscador y el PDF; sin él,
+   buscar un caso por algo que escribiste dejaría de encontrarlo. */
 const CASO_APARTADOS = [
   {
     clave: "anamnesis",
-    etiqueta: "Anamnesis",
-    marcador: "Motivo de consulta, desde cuándo, antecedentes, alimentación, vacunas, desparasitación, qué cuenta el tutor…"
-  },
-  {
-    clave: "examenFisico",
-    etiqueta: "Examen físico",
-    marcador: "Actitud, condición corporal, mucosas, linfonodos, auscultación, palpación abdominal, hallazgos por sistema…"
+    claveHtml: "anamnesisHtml",
+    etiqueta: "Anamnesis y examen físico",
+    marcador: "Motivo de consulta, antecedentes, alimentación, vacunas… y los hallazgos del examen: actitud, mucosas, linfonodos, auscultación, palpación."
   },
   {
     clave: "diagnostico",
+    claveHtml: "diagnosticoHtml",
     etiqueta: "Diagnóstico",
     marcador: "Presuntivo, diferenciales, definitivo y en qué te basas…"
   },
   {
     clave: "tratamiento",
+    claveHtml: "tratamientoHtml",
     etiqueta: "Tratamiento",
     marcador: "Qué se aplicó en consulta, qué se envió a casa, indicaciones al tutor, cuándo controlar…"
   }
 ];
 
+/* examenFisico ya no se escribe, pero puede tener texto de antes: los
+   casos escritos entre que se separó y se volvió a juntar. Se sigue
+   leyendo, y se vacía en cuanto se toca la Anamnesis que lo absorbió. */
+const CASO_CAMPOS_LECTURA = ["anamnesis", "examenFisico", "diagnostico", "tratamiento"];
+
 function apartadosVacios(entry) {
-  return CASO_APARTADOS.every(function (a) {
-    return !String(entry[a.clave] || "").trim();
+  return CASO_CAMPOS_LECTURA.every(function (c) {
+    return !String(entry[c] || "").trim() && !String(entry[c + "Html"] || "").trim();
   });
 }
 
-/* Lo que se muestra en un apartado al abrir la ficha. Solo Anamnesis
-   hereda el texto antiguo, y solo mientras no se haya escrito nada nuevo. */
+// El examen físico de un caso escrito con los apartados separados.
+function legadoExamenFisico(entry) {
+  return String(entry.examenFisico || "").trim();
+}
+
+/* El texto plano de un apartado. La Anamnesis arrastra lo que quedó en el
+   examen físico separado y, si el caso es aún más viejo, el cuadro único. */
 function textoDeApartado(entry, clave) {
-  const propio = entry[clave];
-  if (propio != null && String(propio).length) return String(propio);
-  if (clave === "anamnesis" && apartadosVacios(entry)) return String(entry.body || "");
-  return "";
+  const propio = String(entry[clave] || "");
+  if (clave !== "anamnesis") return propio;
+  const partes = [];
+  if (propio.trim()) partes.push(propio);
+  else if (apartadosVacios(entry)) partes.push(String(entry.body || ""));
+  const fisico = legadoExamenFisico(entry);
+  if (fisico) partes.push(fisico);
+  return partes.filter(Boolean).join("\n\n");
+}
+
+/* Lo mismo pero en HTML, que es lo que se le da al editor. Solo la
+   Anamnesis tiene que pegar trozos; los otros dos leen su campo y ya. */
+function htmlDeApartado(entry, ap) {
+  if (ap.clave !== "anamnesis") return apunteComoHtml(entry, ap.claveHtml, ap.clave);
+  const partes = [];
+  const propio = apunteComoHtml(entry, ap.claveHtml, ap.clave);
+  if (propio.trim()) partes.push(propio);
+  else if (apartadosVacios(entry)) partes.push(textoPlanoComoHtml(entry.body));
+  const fisico = legadoExamenFisico(entry);
+  if (fisico) partes.push(textoPlanoComoHtml(fisico));
+  return partes.filter(Boolean).join("<br><br>");
 }
 
 /* El caso entero como texto plano. Lo usan el buscador y el PDF: si cada
@@ -1030,16 +1071,29 @@ function textoDelCaso(entry) {
   if (apartadosVacios(entry)) return String(entry.body || "");
   return CASO_APARTADOS
     .map(function (a) {
-      const t = String(entry[a.clave] || "").trim();
+      const t = textoDeApartado(entry, a.clave).trim();
       return t ? a.etiqueta + ": " + t : "";
     })
     .filter(Boolean)
     .join("\n");
 }
 
-function apunteComoHtml(entry) {
-  if (entry.bodyHtml && String(entry.bodyHtml).trim()) return limpiarHtmlApunte(entry.bodyHtml);
-  const plano = String(entry.body || "");
+/* Sirve para el apunte de una materia (bodyHtml/body) y para cada
+   apartado de un caso (anamnesisHtml/anamnesis...). El par de campos se
+   pasa por parametro; los valores por defecto son los de la materia,
+   que es quien lo usaba antes de que esto fuera general. */
+function apunteComoHtml(entry, campoHtml, campoPlano) {
+  const cHtml = campoHtml || "bodyHtml";
+  const cPlano = campoPlano || "body";
+  if (entry[cHtml] && String(entry[cHtml]).trim()) return limpiarHtmlApunte(entry[cHtml]);
+  return textoPlanoComoHtml(entry[cPlano]);
+}
+
+/* Texto plano a HTML, escapando lo que haga falta. textContent y luego
+   innerHTML: el navegador escapa por nosotros y no hay que mantener una
+   lista de caracteres. */
+function textoPlanoComoHtml(texto) {
+  const plano = String(texto == null ? "" : texto);
   if (!plano.trim()) return "";
   const div = document.createElement("div");
   div.textContent = plano;
@@ -1173,6 +1227,12 @@ function apunteParaGuardar(editor) {
     img.classList.remove("apunte-img-rota");
     if (!img.getAttribute("class")) img.removeAttribute("class");
   });
+  Array.from(copia.querySelectorAll(".apunte-pieza-moviendo")).forEach(function (p) {
+    /* Estado de pantalla otra vez: guardada, la foto quedaria sin responder
+       al puntero para siempre y no habria forma de volver a cogerla. */
+    p.classList.remove("apunte-pieza-moviendo");
+    if (!p.getAttribute("class")) p.removeAttribute("class");
+  });
   Array.from(copia.querySelectorAll("figcaption")).forEach(function (pie) {
     pie.removeAttribute("data-vacio");
   });
@@ -1211,9 +1271,16 @@ const APUNTE_ANCHO_INICIAL = 45;
 const APUNTE_ANCHO_MIN = 10;
 const APUNTE_ANCHO_MAX = 100;
 
-function buildApunteEditor(entry, statusText) {
+/* El mismo editor para el apunte de una materia y para los apartados de
+   un caso. Lo que cambia es el par de campos donde escribe y poco mas,
+   asi que va por opciones y no por copia: dos editores con imagenes
+   arrastrables serian dos sitios donde arreglar cada fallo. */
+function buildApunteEditor(entry, statusText, opciones) {
+  const opts = opciones || {};
+  const campoHtml = opts.campoHtml || "bodyHtml";
+  const campoPlano = opts.campoPlano || "body";
   const wrap = document.createElement("div");
-  wrap.className = "apunte";
+  wrap.className = "apunte" + (opts.clase ? " " + opts.clase : "");
 
   const barra = document.createElement("div");
   barra.className = "apunte-barra";
@@ -1223,9 +1290,11 @@ function buildApunteEditor(entry, statusText) {
   editor.contentEditable = "true";
   editor.setAttribute("role", "textbox");
   editor.setAttribute("aria-multiline", "true");
-  editor.setAttribute("aria-label", "Apuntes de clase");
-  editor.dataset.vacio = "Escribe tus apuntes de clase…";
-  editor.innerHTML = apunteComoHtml(entry);
+  editor.setAttribute("aria-label", opts.etiqueta || "Apuntes de clase");
+  editor.dataset.vacio = opts.marcador || "Escribe tus apuntes de clase…";
+  /* htmlInicial existe para los casos: su Anamnesis puede tener que
+     arrastrar texto de campos viejos, y esa decision no es del editor. */
+  editor.innerHTML = opts.htmlInicial != null ? limpiarHtmlApunte(opts.htmlInicial) : apunteComoHtml(entry, campoHtml, campoPlano);
   aplicarAnchosGuardados(editor);
   normalizarPiezasDelApunte(editor);
 
@@ -1249,7 +1318,12 @@ function buildApunteEditor(entry, statusText) {
     scheduleSave(
       "entries",
       entry.id,
-      { bodyHtml: apunteParaGuardar(editor), body: editor.innerText },
+      (function () {
+        const patch = {};
+        patch[campoHtml] = apunteParaGuardar(editor);
+        patch[campoPlano] = editor.innerText;
+        return patch;
+      })(),
       statusText
     );
     marcarVacio();
@@ -1529,12 +1603,42 @@ function buildApunteEditor(entry, statusText) {
     return r.getBoundingClientRect();
   }
 
-  /* { ref, antes }: junto a que bloque cae y de que lado. Se elige el
-     bloque mas cercano en vertical, no el que esta debajo del dedo: si
-     sueltas en el margen o en un hueco, la imagen tiene que ir a algun
-     sitio razonable igualmente. */
-  function puntoDeSoltar(y) {
+  /* El punto exacto del texto bajo el dedo. Los dos navegadores lo llaman
+     distinto y ninguno de los dos nombres esta en todos. */
+  function rangoEnPunto(x, y) {
+    if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
+    if (document.caretPositionFromPoint) {
+      const p = document.caretPositionFromPoint(x, y);
+      if (!p) return null;
+      const r = document.createRange();
+      r.setStart(p.offsetNode, p.offset);
+      r.collapse(true);
+      return r;
+    }
+    return null;
+  }
+
+  /* { ref, antes }: junto a que bloque cae la foto y de que lado.
+
+     Se pregunta primero QUE LETRA hay debajo del dedo y se usa el bloque de
+     esa letra. Comparar cajas no sirve cuando la foto flota: el parrafo que
+     la rodea es alto y su caja se solapa con la del parrafo de abajo, asi
+     que soltando sobre el tercero la foto se iba al segundo. La letra bajo
+     el dedo no es ambigua.
+
+     La comparacion de cajas se queda de reserva para cuando no hay texto
+     debajo: el margen, el hueco entre bloques, el final del apunte. */
+  function puntoDeSoltar(x, y, excluir) {
+    const rango = rangoEnPunto(x, y);
+    if (rango) {
+      const bloque = bloqueDeNivelSuperior(rango.startContainer);
+      if (bloque && bloque !== excluir) {
+        const c = cajaDeNodo(bloque);
+        if (c && (c.height || c.width)) return { ref: bloque, antes: y < c.top + c.height / 2 };
+      }
+    }
     const hijos = Array.from(editor.childNodes).filter(function (n) {
+      if (n === excluir) return false;
       return n.nodeType === 1 || (n.nodeType === 3 && n.textContent.trim());
     });
     let mejor = null;
@@ -1614,16 +1718,30 @@ function buildApunteEditor(entry, statusText) {
     const inicioX = e.clientX;
     const inicioY = e.clientY;
     let moviendo = false;
-    editor.setPointerCapture(e.pointerId);
+    /* Se mueve el envoltorio: con la figura suelta, el titulo se quedaria
+       donde estaba y la imagen se iria sola. */
+    const pieza = envoltorioDeImagen(img);
 
     function mover(ev) {
       if (!moviendo) {
         if (Math.abs(ev.clientX - inicioX) + Math.abs(ev.clientY - inicioY) < ARRASTRE_MINIMO) return;
         moviendo = true;
+        /* Mientras se arrastra, la pieza deja de responder al puntero. Si
+           no, se tapa a si misma: al preguntar que hay debajo del dedo el
+           navegador contesta "la propia foto" y no hay destino al que ir. */
+        pieza.classList.add("apunte-pieza-moviendo");
+        /* La captura se pide AQUI y no al pulsar. Con la captura activa el
+           navegador entrega el clic al elemento que captura, no a la
+           imagen, y el clic acababa deseleccionando la foto que se acababa
+           de seleccionar. Pidiendola solo cuando el arrastre empieza de
+           verdad, un clic normal no captura nada. */
+        if (editor.setPointerCapture) {
+          try { editor.setPointerCapture(ev.pointerId); } catch (err) { /* el puntero ya se solto */ }
+        }
         img.classList.add("apunte-img-moviendo");
         marco.hidden = true;
       }
-      pintarGuia(puntoDeSoltar(ev.clientY), ev.clientX);
+      pintarGuia(puntoDeSoltar(ev.clientX, ev.clientY, pieza), ev.clientX);
     }
 
     function soltar(ev) {
@@ -1632,11 +1750,9 @@ function buildApunteEditor(entry, statusText) {
       editor.removeEventListener("pointercancel", soltar);
       guia.hidden = true;
       img.classList.remove("apunte-img-moviendo");
+      pieza.classList.remove("apunte-pieza-moviendo");
       if (!moviendo) { colocarMarco(); return; } // era un clic: solo seleccionar
-      /* Se mueve el envoltorio: con la figura suelta, el titulo se
-         quedaria donde estaba y la imagen se iria sola. */
-      const pieza = envoltorioDeImagen(img);
-      colocarPieza(pieza, puntoDeSoltar(ev.clientY), posicionPorX(ev.clientX));
+      colocarPieza(pieza, puntoDeSoltar(ev.clientX, ev.clientY, pieza), posicionPorX(ev.clientX));
       guia.classList.remove("apunte-guia-bloque");
       marco.hidden = false;
       colocarMarco();
@@ -1674,15 +1790,33 @@ function buildApunteEditor(entry, statusText) {
 
   editor.addEventListener("input", guardar);
 
+  /* Cual es la imagen que se ha pulsado.
+
+     No vale mirar e.target. Si el gesto anterior fue un arrastre, el apunte
+     tenia capturado el puntero, y con la captura activa el navegador
+     entrega el clic al elemento que captura —el apunte entero— en vez de a
+     la imagen. Entonces esto veia "no es una imagen" y hacia ocultarMarco:
+     la foto se deseleccionaba sola en el mismo gesto que la seleccionaba.
+
+     Lo que hay debajo del dedo es lo que el usuario cree que ha pulsado, y
+     no se lo puede quitar nadie. El marco no estorba porque lleva
+     pointer-events: none, asi que elementFromPoint lo atraviesa. */
+  function imagenPulsada(e) {
+    const debajo = document.elementFromPoint(e.clientX, e.clientY);
+    if (debajo && debajo.tagName === "IMG" && editor.contains(debajo)) return debajo;
+    if (e.target && e.target.tagName === "IMG") return e.target;
+    return null;
+  }
+
   /* Un clic selecciona (y saca el marco con sus esquinas). Doble clic abre
      el visor a pantalla completa: al primer toque impedia ajustarla. */
   editor.addEventListener("click", function (e) {
-    const img = e.target && e.target.tagName === "IMG" ? e.target : null;
+    const img = imagenPulsada(e);
     if (img) seleccionarImagen(img);
     else ocultarMarco();
   });
   editor.addEventListener("dblclick", function (e) {
-    const img = e.target && e.target.tagName === "IMG" ? e.target : null;
+    const img = imagenPulsada(e);
     if (!img || !img.getAttribute("src")) return;
     abrirVisorFoto([{ datos: img.getAttribute("src"), nombre: img.alt || "Imagen del apunte" }], 0);
   });
@@ -5185,7 +5319,10 @@ function buildPrintableCase(entry, fotos) {
     }
   } else {
     CASO_APARTADOS.forEach(function (ap) {
-      const t = String(caso[ap.clave] || "").trim();
+      // textoDeApartado y no el campo pelado: la Anamnesis puede llevar
+      // pegado el examen fisico de un caso escrito con los apartados
+      // separados, y el PDF no puede imprimir menos de lo que se ve.
+      const t = textoDeApartado(caso, ap.clave).trim();
       if (!t) return;
       const bloque = bloqueImpreso(ap.etiqueta);
       const p = document.createElement("p");
@@ -5419,12 +5556,20 @@ function renderPatientDetail(root, entry) {
   titleGroup.appendChild(titleInput);
   root.appendChild(titleGroup);
 
-  const grid = document.createElement("div");
-  grid.className = "detail-grid";
+  /* La ficha ya no son dos columnas. Con la historia clínica a la
+     derecha y los datos del paciente a la izquierda, para escribir el
+     diagnóstico había que leer el peso a media pantalla de distancia y
+     la mitad de abajo de la columna corta quedaba en blanco.
 
-  /* --- columna izquierda: datos clínicos base --- */
-  const leftCol = document.createElement("div");
-  leftCol.className = "detail-col";
+     Ahora es una pila: arriba quién es el paciente, y de ahí para abajo
+     el orden de la consulta —constantes, historia, evoluciones—, cada
+     cosa a lo ancho de la pantalla. */
+  const grid = document.createElement("div");
+  grid.className = "caso-pila";
+
+  /* --- arriba: quién es el paciente y de quién es --- */
+  const cabecera = document.createElement("div");
+  cabecera.className = "caso-cabecera";
 
   const baseCard = document.createElement("div");
   baseCard.className = "card card-pad";
@@ -5543,7 +5688,7 @@ function renderPatientDetail(root, entry) {
   baseCard.appendChild(row1);
   baseCard.appendChild(row2);
   baseCard.appendChild(row3);
-  leftCol.appendChild(baseCard);
+  cabecera.appendChild(baseCard);
 
   /* --- Datos de hato: solo en especies de produccion ---
      Aparece y desaparece al cambiar la especie, sin recargar. Los campos
@@ -5631,7 +5776,7 @@ function renderPatientDetail(root, entry) {
     hatoCard.hidden = !esEspecieDeHato(especie);
   }
   actualizarHato(entry.especie);
-  leftCol.appendChild(hatoCard);
+  cabecera.appendChild(hatoCard);
 
   /* --- tutor: solo nombres, teléfono y correo. Sin cédula ni ningún
      otro identificador nacional — decisión explícita, no agregar sin
@@ -5689,16 +5834,12 @@ function renderPatientDetail(root, entry) {
   tutorCard.appendChild(tutorLabel);
   tutorCard.appendChild(tutorRow);
   tutorCard.appendChild(tutorRow2);
-  leftCol.appendChild(tutorCard);
+  cabecera.appendChild(tutorCard);
 
-  const medsCard = document.createElement("div");
-  medsCard.className = "card card-pad";
-  medsCard.appendChild(buildMedsSection(entry, statusText));
-  leftCol.appendChild(medsCard);
 
-  /* --- columna derecha: constantes + notas clínicas + evoluciones --- */
-  const rightCol = document.createElement("div");
-  rightCol.className = "detail-col";
+  /* --- de ahí para abajo: constantes, historia y evoluciones --- */
+  const pila = document.createElement("div");
+  pila.className = "caso-cuerpo";
 
   /* Las constantes van ARRIBA de las notas y no dentro: son lo primero
      que se toma en la consulta, y con la especie ya elegida en la
@@ -5707,7 +5848,7 @@ function renderPatientDetail(root, entry) {
   constCard.className = "card card-pad";
   constantesNodo = buildConstantesSection(entry, save);
   constCard.appendChild(constantesNodo);
-  rightCol.appendChild(constCard);
+  pila.appendChild(constCard);
 
   /* --- Historia clínica por apartados, con los exámenes en medio --- */
   const notesCard = document.createElement("div");
@@ -5748,19 +5889,52 @@ function renderPatientDetail(root, entry) {
     cabeza.appendChild(voiceBtn);
     bloque.appendChild(cabeza);
 
-    const caja = document.createElement("textarea");
-    caja.className = "field-body apartado-caja";
-    caja.placeholder = ap.marcador;
-    caja.value = textoDeApartado(entry, ap.clave);
-    caja.addEventListener("input", function () { save(ap.clave, caja.value); });
-    attachVoiceInput(voiceBtn, caja);
-    bloque.appendChild(caja);
+    /* El mismo editor de los apuntes de clase, con sus imágenes: una
+       lesión, la placa o la tira de orina se explican solas pegadas al
+       texto que las describe, y volver a buscarlas en la galería de fotos
+       para saber de cuál hablaba la nota es justo lo que no se hace. */
+    const editorNodo = buildApunteEditor(entry, statusText, {
+      campoHtml: ap.claveHtml,
+      campoPlano: ap.clave,
+      htmlInicial: htmlDeApartado(entry, ap),
+      marcador: ap.marcador,
+      etiqueta: ap.etiqueta,
+      clase: "apunte-apartado"
+    });
+    bloque.appendChild(editorNodo);
+    attachVoiceInput(voiceBtn, editorNodo.querySelector(".apunte-editor"));
+
+    /* El examen físico separado se absorbió en la Anamnesis al abrir la
+       ficha, pero NO se vacía hasta que Daniel escribe algo: escribir en
+       Firestore por el mero hecho de mirar un caso está prohibido. En
+       cuanto toca el cuadro, el guardado lleva ya el texto pegado, así que
+       vaciar el campo viejo no pierde nada — y si no se vaciara, se
+       volvería a pegar en cada apertura. */
+    if (ap.clave === "anamnesis" && legadoExamenFisico(entry)) {
+      const soltarLegado = function () {
+        editorNodo.removeEventListener("input", soltarLegado);
+        entry.examenFisico = "";
+        save("examenFisico", "");
+      };
+      editorNodo.addEventListener("input", soltarLegado);
+    }
+
+    /* Los fármacos SON el tratamiento: la dosis que se puso y la que se
+       mandó a casa. Estaban arriba, junto a los datos del paciente, tan
+       lejos del texto que los describe que había que escribir dos veces
+       lo mismo para que la ficha se entendiera. */
+    if (ap.clave === "tratamiento") {
+      const meds = document.createElement("div");
+      meds.className = "apartado-meds";
+      meds.appendChild(buildMedsSection(entry, statusText));
+      bloque.appendChild(meds);
+    }
 
     notesCard.appendChild(bloque);
 
-    /* Los exámenes van DESPUÉS del examen físico: es cuando se piden, y
-       el diagnóstico de abajo se escribe mirándolos. */
-    if (ap.clave === "examenFisico") {
+    /* Los exámenes van DESPUÉS de la anamnesis y el examen físico: es
+       cuando se piden, y el diagnóstico de abajo se escribe mirándolos. */
+    if (ap.clave === "anamnesis") {
       const adjuntos = fotosDeEntrada(entry.id).then(repartirAdjuntos);
 
       const bloqueEx = document.createElement("div");
@@ -5781,15 +5955,15 @@ function renderPatientDetail(root, entry) {
     }
   });
 
-  rightCol.appendChild(notesCard);
+  pila.appendChild(notesCard);
 
   const evolCard = document.createElement("div");
   evolCard.className = "card card-pad";
   evolCard.appendChild(buildEvolucionesSection(entry, statusText));
-  rightCol.appendChild(evolCard);
+  pila.appendChild(evolCard);
 
-  grid.appendChild(leftCol);
-  grid.appendChild(rightCol);
+  grid.appendChild(cabecera);
+  grid.appendChild(pila);
   root.appendChild(grid);
 
   const foot = document.createElement("div");

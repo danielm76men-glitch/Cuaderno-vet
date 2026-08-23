@@ -2180,3 +2180,44 @@ button, input, select, textarea { font-family: inherit; }
    1,5rem quedaba flotando en medio del circulo de 56 px. A 2,1rem llena el
    hueco como lo llenaba la inicial. */
 .patient-avatar-icono { font-size: 2.1rem; line-height: 1; }
+
+/* ================= La imagen del apunte ocupa su propia linea =================
+   Estaba `display: inline-block`, o sea metida DENTRO del renglon: una foto
+   de 150 px de alto convertia esa linea en un renglon de 150 px con las
+   palabras pegadas arriba y el resto del apunte descuadrado. Un apunte de
+   clase no se lee asi.
+
+   Ahora es un bloque con su propia linea, como en un documento, y el lado
+   al que queda lo decide donde la sueltas (data-pos), no un boton
+   (invariante 17). */
+.apunte-editor figure.apunte-fig,
+.apunte-editor > img {
+  display: block;
+  margin: 12px 0;
+  max-width: 100%;
+}
+.apunte-editor figure.apunte-fig[data-pos="izq"],
+.apunte-editor > img[data-pos="izq"] { margin-left: 0; margin-right: auto; }
+.apunte-editor figure.apunte-fig[data-pos="centro"],
+.apunte-editor > img[data-pos="centro"] { margin-left: auto; margin-right: auto; }
+.apunte-editor figure.apunte-fig[data-pos="der"],
+.apunte-editor > img[data-pos="der"] { margin-left: auto; margin-right: 0; }
+
+/* Las clases de flotado antiguas ya no se generan: al abrir el apunte se
+   traducen a data-pos. Se anulan aqui para que no peleen con el bloque en
+   un apunte viejo que todavia no se ha vuelto a guardar. */
+.apunte-editor img.apunte-img-izq,
+.apunte-editor img.apunte-img-der,
+.apunte-editor img.apunte-img-centro { float: none; }
+
+/* La guia deja de ser un cursor vertical: entre bloques, la raya que dice
+   donde va a caer la imagen es horizontal, y el punto de la punta dice
+   ademas a que lado quedara. */
+.apunte-guia.apunte-guia-bloque { width: auto; min-height: 0; }
+.apunte-guia.apunte-guia-bloque::after {
+  content: ""; position: absolute; top: -3px;
+  width: 9px; height: 9px; border-radius: 50%; background: var(--teal);
+}
+.apunte-guia.apunte-guia-bloque[data-pos="izq"]::after { left: 0; }
+.apunte-guia.apunte-guia-bloque[data-pos="centro"]::after { left: 50%; margin-left: -4px; }
+.apunte-guia.apunte-guia-bloque[data-pos="der"]::after { right: 0; }

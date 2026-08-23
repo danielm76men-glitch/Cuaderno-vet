@@ -1116,6 +1116,46 @@ function aplicarAnchosGuardados(editor) {
   });
 }
 
+/* Una imagen del apunte es un BLOQUE del apunte: vive al primer nivel,
+   nunca dentro de un parrafo, de una lista o del pie de otra imagen.
+
+   No es mania de orden, es lo que arregla "al moverla se vuelve grande".
+   El ancho se guarda en tanto por ciento y un tanto por ciento es siempre
+   del CONTENEDOR: medido, la misma imagen al 25 % ocupaba 30 px metida en
+   una lista estrecha y 219 px al soltarla en el texto de fuera, sin que
+   cambiara ni el estilo ni el ancho guardado. Con todas las piezas al
+   primer nivel el contenedor es siempre el apunte, y el 25 % vale siempre
+   lo mismo se mueva donde se mueva.
+
+   Se hace al ABRIR y no migrando nada (invariante 18): los apuntes viejos
+   se acomodan solos la primera vez que se editan. */
+const APUNTE_POS_ANTIGUAS = {
+  "apunte-img-izq": "izq",
+  "apunte-img-der": "der",
+  "apunte-img-centro": "centro"
+};
+
+function normalizarPiezasDelApunte(editor) {
+  Array.from(editor.querySelectorAll("img")).forEach(function (img) {
+    const pieza = envoltorioDeImagen(img);
+    /* Las clases de flotado de los apuntes antiguos hacen lo mismo que la
+       posicion nueva, asi que se traducen en vez de convivir con ella. */
+    Object.keys(APUNTE_POS_ANTIGUAS).forEach(function (clase) {
+      if (!pieza.classList.contains(clase)) return;
+      pieza.setAttribute("data-pos", APUNTE_POS_ANTIGUAS[clase]);
+      pieza.classList.remove(clase);
+    });
+    if (!pieza.getAttribute("data-pos")) pieza.setAttribute("data-pos", "izq");
+    if (pieza.parentNode === editor) return;
+    /* Sube hasta el hijo directo del apunte y se coloca justo detras: la
+       imagen sale del parrafo pero se queda donde estaba leyendo. */
+    let ancla = pieza;
+    while (ancla.parentNode && ancla.parentNode !== editor) ancla = ancla.parentNode;
+    if (ancla.parentNode !== editor) return;
+    editor.insertBefore(pieza, ancla.nextSibling);
+  });
+}
+
 function apunteParaGuardar(editor) {
   const copia = editor.cloneNode(true);
   Array.from(copia.querySelectorAll("img")).forEach(function (img) {
@@ -1124,7 +1164,13 @@ function apunteParaGuardar(editor) {
     /* La marca de "esta seleccionada" es estado de la pantalla, no del
        apunte: guardada, la imagen quedaria con el recuadro verde puesto
        para siempre al volver a abrir. */
+    /* Estas tres son estado de PANTALLA, no del apunte. Las dos ultimas
+       llevan width:100 % en la hoja: guardadas, la imagen volvia a abrirse
+       ocupando el apunte entero y ya no habia forma de recuperar su
+       tamano. */
     img.classList.remove("apunte-img-sel");
+    img.classList.remove("apunte-img-cargando");
+    img.classList.remove("apunte-img-rota");
     if (!img.getAttribute("class")) img.removeAttribute("class");
   });
   Array.from(copia.querySelectorAll("figcaption")).forEach(function (pie) {
@@ -1181,6 +1227,7 @@ function buildApunteEditor(entry, statusText) {
   editor.dataset.vacio = "Escribe tus apuntes de clase…";
   editor.innerHTML = apunteComoHtml(entry);
   aplicarAnchosGuardados(editor);
+  normalizarPiezasDelApunte(editor);
 
   const fileInput = document.createElement("input");
   fileInput.type = "file";
@@ -1288,9 +1335,8 @@ function buildApunteEditor(entry, statusText) {
         const figura = crearFiguraDeImagen(img);
         figura.style.width = APUNTE_ANCHO_INICIAL + "%";
         figura.setAttribute("data-ancho", APUNTE_ANCHO_INICIAL);
-        const salto = document.createElement("br");
-        insertarNodo(salto);
-        insertarNodo(figura);
+        figura.setAttribute("data-pos", "centro");
+        insertarPieza(figura);
         guardar();
       } catch (err) {
         alert(
@@ -1458,18 +1504,99 @@ function buildApunteEditor(entry, statusText) {
   }
   apagarArrastreNativo(editor);
 
-  /* Marca el punto del texto donde caeria la imagen. Sin esto se suelta a
-     ciegas, que es justo lo que se sentia como "no me deja ponerla donde
-     quiero". */
-  function pintarGuia(rango) {
-    if (!rango) { guia.hidden = true; return; }
-    const caja = rango.getBoundingClientRect();
+  /* --- Donde cae la imagen ---
+
+     Como la imagen es un bloque, no se coloca en un punto del texto sino
+     ENTRE dos lineas. La guia deja de ser un cursor vertical y pasa a ser
+     una raya horizontal en el hueco donde va a caer, con un punto que
+     ademas indica a que lado quedara. */
+
+  function bloqueDeNivelSuperior(nodo) {
+    let n = nodo;
+    while (n && n.parentNode && n.parentNode !== editor) n = n.parentNode;
+    return n && n.parentNode === editor ? n : null;
+  }
+
+  /* Un hijo del apunte puede ser texto suelto, y el texto no tiene caja
+     propia: hay que pedirsela a un rango. */
+  function cajaDeNodo(nodo) {
+    if (nodo.nodeType === 1) return nodo.getBoundingClientRect();
+    const r = document.createRange();
+    r.selectNodeContents(nodo);
+    return r.getBoundingClientRect();
+  }
+
+  /* { ref, antes }: junto a que bloque cae y de que lado. Se elige el
+     bloque mas cercano en vertical, no el que esta debajo del dedo: si
+     sueltas en el margen o en un hueco, la imagen tiene que ir a algun
+     sitio razonable igualmente. */
+  function puntoDeSoltar(y) {
+    const hijos = Array.from(editor.childNodes).filter(function (n) {
+      return n.nodeType === 1 || (n.nodeType === 3 && n.textContent.trim());
+    });
+    let mejor = null;
+    let mejorDist = Infinity;
+    hijos.forEach(function (n) {
+      const c = cajaDeNodo(n);
+      if (!c || (!c.height && !c.width)) return;
+      const dist = y < c.top ? c.top - y : y > c.bottom ? y - c.bottom : 0;
+      if (dist < mejorDist) {
+        mejorDist = dist;
+        mejor = { ref: n, antes: y < c.top + c.height / 2 };
+      }
+    });
+    return mejor;
+  }
+
+  /* Donde sueltas en horizontal decide el lado. Un bloque sin esto queda
+     siempre pegado a la izquierda, y entonces "la muevo donde quiero" solo
+     seria verdad hacia arriba y hacia abajo. */
+  function posicionPorX(x) {
     const ref = editor.getBoundingClientRect();
-    if (!caja || (!caja.height && !caja.width)) { guia.hidden = true; return; }
+    const rel = (x - ref.left) / (ref.width || 1);
+    return rel < 0.34 ? "izq" : rel < 0.67 ? "centro" : "der";
+  }
+
+  function colocarPieza(pieza, punto, pos) {
+    pieza.setAttribute("data-pos", pos);
+    if (!punto) { editor.appendChild(pieza); return; }
+    if (punto.ref === pieza || pieza.contains(punto.ref)) return;
+    editor.insertBefore(pieza, punto.antes ? punto.ref : punto.ref.nextSibling);
+  }
+
+  function pintarGuia(punto, x) {
+    if (!punto) { guia.hidden = true; return; }
+    const c = cajaDeNodo(punto.ref);
+    const ref = editor.getBoundingClientRect();
+    if (!c || (!c.height && !c.width)) { guia.hidden = true; return; }
     guia.hidden = false;
-    guia.style.left = caja.left - ref.left + "px";
-    guia.style.top = caja.top - ref.top + "px";
-    guia.style.height = (caja.height || 18) + "px";
+    guia.classList.add("apunte-guia-bloque");
+    guia.dataset.pos = posicionPorX(x);
+    guia.style.left = "0px";
+    guia.style.width = editor.clientWidth + "px";
+    guia.style.height = "3px";
+    guia.style.top = (punto.antes ? c.top : c.bottom) - ref.top + "px";
+  }
+
+  /* Una imagen entra debajo de la linea donde esta el cursor y deja una
+     linea vacia detras, para poder seguir escribiendo sin buscar sitio. */
+  function insertarPieza(pieza) {
+    const sel = window.getSelection();
+    const ancla = sel && sel.rangeCount && editor.contains(sel.anchorNode)
+      ? bloqueDeNivelSuperior(sel.anchorNode)
+      : null;
+    if (ancla) editor.insertBefore(pieza, ancla.nextSibling);
+    else editor.appendChild(pieza);
+    const linea = document.createElement("div");
+    linea.appendChild(document.createElement("br"));
+    editor.insertBefore(linea, pieza.nextSibling);
+    editor.focus();
+    const r = document.createRange();
+    r.setStart(linea, 0);
+    r.collapse(true);
+    const s = window.getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
   }
 
   const ARRASTRE_MINIMO = 4; // px antes de considerar que es un arrastre y no un clic
@@ -1493,7 +1620,7 @@ function buildApunteEditor(entry, statusText) {
         img.classList.add("apunte-img-moviendo");
         marco.hidden = true;
       }
-      pintarGuia(rangoEnPunto(ev.clientX, ev.clientY));
+      pintarGuia(puntoDeSoltar(ev.clientY), ev.clientX);
     }
 
     function soltar(ev) {
@@ -1503,20 +1630,11 @@ function buildApunteEditor(entry, statusText) {
       guia.hidden = true;
       img.classList.remove("apunte-img-moviendo");
       if (!moviendo) { colocarMarco(); return; } // era un clic: solo seleccionar
-      const destino = rangoEnPunto(ev.clientX, ev.clientY);
       /* Se mueve el envoltorio: con la figura suelta, el titulo se
-         quedaria donde estaba y la imagen se iria sola.
-         Y el destino puede caer DENTRO de lo que se esta moviendo;
-         insertar un nodo dentro de si mismo lanza. Se comprueba antes. */
+         quedaria donde estaba y la imagen se iria sola. */
       const pieza = envoltorioDeImagen(img);
-      if (destino && !pieza.contains(destino.startContainer) && destino.startContainer !== pieza) {
-        destino.insertNode(pieza);
-        destino.setStartAfter(pieza);
-        destino.collapse(true);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(destino);
-      }
+      colocarPieza(pieza, puntoDeSoltar(ev.clientY), posicionPorX(ev.clientX));
+      guia.classList.remove("apunte-guia-bloque");
       marco.hidden = false;
       colocarMarco();
       guardar();
@@ -1550,21 +1668,6 @@ function buildApunteEditor(entry, statusText) {
     editor.classList.remove("apunte-soltar");
     agregarImagenes(archivos);
   });
-
-  /* El punto exacto del texto bajo el cursor. Los dos navegadores lo
-     llaman distinto y ninguno de los dos nombres esta en todos. */
-  function rangoEnPunto(x, y) {
-    if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
-    if (document.caretPositionFromPoint) {
-      const p = document.caretPositionFromPoint(x, y);
-      if (!p) return null;
-      const r = document.createRange();
-      r.setStart(p.offsetNode, p.offset);
-      r.collapse(true);
-      return r;
-    }
-    return null;
-  }
 
   editor.addEventListener("input", guardar);
 

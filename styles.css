@@ -1667,12 +1667,13 @@ button, input, select, textarea { font-family: inherit; }
      columna vale lo mismo en todas.
 
      Y el alto fijo iguala las que llevan aclaracion con las que no; sin el,
-     la tabla iba a saltos. */
+     la tabla iba a saltos. 64 px esta medido: con el rango a 1,05rem, las
+     notas de tres lineas (equino, felino, caprino) llegan a 62. */
   grid-template-columns: 104px 70px 24px minmax(0, 1fr) 46px;
   /* 60 px: medido, no a ojo. Las notas mas largas (equino y caprino) se
      van a tres lineas y llegaban a 59; por debajo de eso, esas dos filas
      sobresalian y la tabla volvia a ir a saltos. */
-  min-height: 60px;
+  min-height: 64px;
   align-items: center; column-gap: 10px;
   padding: 7px 10px 7px 8px;
   border-left: 3px solid transparent;
@@ -1705,8 +1706,8 @@ button, input, select, textarea { font-family: inherit; }
 /* Los numeros del rango son lo que se compara con lo medido: van al mismo
    cuerpo que el valor tecleado, no en letra de pie de pagina. */
 .const-ref {
-  font-size: 0.86rem; font-weight: 600; color: var(--ink); font-family: var(--mono);
-  white-space: nowrap; text-align: right; letter-spacing: -0.01em;
+  font-size: 1.05rem; font-weight: 700; color: var(--ink); font-family: var(--mono);
+  white-space: nowrap; text-align: right; letter-spacing: -0.02em;
 }
 .const-marca { font-size: 0.7rem; font-weight: 700; white-space: nowrap; text-align: right; }
 
@@ -1734,7 +1735,10 @@ button, input, select, textarea { font-family: inherit; }
 /* En estrecho la referencia estorba más de lo que ayuda: se pasa debajo en
    vez de comprimir el nombre. */
 @media (max-width: 600px) {
-  .const-fila { grid-template-columns: 1fr 70px 24px auto; column-gap: 8px; }
+  /* En estrecho el rango baja a su propia linea, asi que la fila crece:
+     76 px medidos, para que las que llevan nota sigan igualando a las que
+     no. */
+  .const-fila { grid-template-columns: 1fr 70px 24px auto; column-gap: 8px; min-height: 76px; }
   .const-nombre { font-size: 0.78rem; }
   /* 1/4 y no 1/-1: ocupando TODA la fila, la marca ("↑ alto") no cabía
      detrás y se iba sola a una tercera línea, debajo del nombre. Dejando
@@ -1768,11 +1772,6 @@ button, input, select, textarea { font-family: inherit; }
   color: var(--muted); opacity: 0.7; pointer-events: none;
 }
 
-.apunte-editor img {
-  max-width: 100%; height: auto; display: block;
-  margin: 10px 0; border-radius: 8px; border: 1px solid var(--line);
-  cursor: pointer;
-}
 /* Mientras llega su base64 desde la colección de fotos, la imagen no tiene
    src y el navegador la dibujaría como un icono roto de 0 px. */
 .apunte-editor img.apunte-img-cargando,
@@ -1782,9 +1781,6 @@ button, input, select, textarea { font-family: inherit; }
   border-style: dashed;
 }
 .apunte-editor img.apunte-img-rota { border-color: var(--rust); }
-
-/* Al arrastrar una imagen encima, el borde avisa de que se puede soltar. */
-.apunte-editor.apunte-soltar { border-color: var(--teal); border-style: dashed; }
 
 .apunte-barra {
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
@@ -1910,53 +1906,54 @@ button, input, select, textarea { font-family: inherit; }
   .pres-foto .photos-grid { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
 }
 
-/* ---------- Imagen del apunte: tamaño y colocación ----------
-   La zona es el marco de referencia de la barra flotante: sin position
-   relative aquí, la barra se posicionaría respecto a la página y quedaría
-   en cualquier sitio al hacer scroll. */
+/* ---------- Imagen del apunte: se agarra y se mueve ----------
+   La zona es el marco de referencia del recuadro de seleccion: sin position
+   relative aqui, se posicionaria respecto a la pagina y se iria de sitio al
+   hacer scroll. */
 .apunte-zona { position: relative; }
 
-/* Izquierda y derecha van con float para que el texto ENVUELVA la imagen,
-   que es lo que se espera al arrimarla a un lado. El centro no puede ser
-   float: se queda en bloque con márgenes automáticos. */
-.apunte-editor img.apunte-img-izq {
-  float: left; margin: 6px 14px 8px 0; display: inline;
+/* En linea con el texto, como en un documento: donde la sueltes, ahi se
+   queda, y lo que escribas despues sigue a su lado. */
+.apunte-editor img {
+  display: inline-block; vertical-align: top;
+  max-width: 100%; height: auto;
+  margin: 6px 0; border-radius: 8px; border: 1px solid var(--line);
+  cursor: grab;
 }
-.apunte-editor img.apunte-img-der {
-  float: right; margin: 6px 0 8px 14px; display: inline;
-}
-.apunte-editor img.apunte-img-centro {
-  float: none; display: block; margin-left: auto; margin-right: auto;
-}
-/* Sin esto, una imagen flotada se sale de su párrafo y se solapa con lo que
-   venga después. */
+.apunte-editor img:active { cursor: grabbing; }
+.apunte-editor img.apunte-img-sel { border-color: var(--teal); }
+
+/* Clases de las notas antiguas: se mantienen para que un apunte guardado
+   antes siga viendose igual, aunque ya no se generen. */
+.apunte-editor img.apunte-img-izq { float: left; margin-right: 14px; }
+.apunte-editor img.apunte-img-der { float: right; margin-left: 14px; }
+.apunte-editor img.apunte-img-centro { display: block; margin-left: auto; margin-right: auto; }
 .apunte-editor::after { content: ""; display: block; clear: both; }
 
-.apunte-editor img.apunte-img-sel {
-  outline: 2px solid var(--teal); outline-offset: 2px; border-color: var(--teal);
+/* El recuadro con las cuatro esquinas. pointer-events: none en el marco y
+   auto en las manijas: el marco esta ENCIMA de la imagen, y si capturara
+   los clics no se podria ni seleccionar ni arrastrar la foto. */
+.apunte-marco {
+  position: absolute; pointer-events: none;
+  border: 1.5px solid var(--teal); border-radius: 8px;
+  z-index: 4;
 }
+.apunte-marco-activo { border-style: dashed; }
+.apunte-manija {
+  position: absolute; width: 14px; height: 14px;
+  background: var(--paper-raised); border: 2px solid var(--teal); border-radius: 3px;
+  pointer-events: auto;
+  /* touch-action: none para que el dedo redimensione en vez de desplazar
+     la pagina. Sin esto, en el movil la manija no sirve para nada. */
+  touch-action: none;
+}
+.apunte-manija-ni { top: -8px; left: -8px; cursor: nwse-resize; }
+.apunte-manija-nd { top: -8px; right: -8px; cursor: nesw-resize; }
+.apunte-manija-si { bottom: -8px; left: -8px; cursor: nesw-resize; }
+.apunte-manija-sd { bottom: -8px; right: -8px; cursor: nwse-resize; }
 
-.apunte-img-barra {
-  position: absolute; z-index: 5;
-  display: flex; align-items: center; gap: 2px;
-  background: var(--paper-raised); border: 1px solid var(--line);
-  border-radius: 8px; padding: 3px 5px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
-}
-.apunte-img-btn {
-  appearance: none; border: none; background: transparent; color: var(--ink);
-  font: inherit; font-size: 0.82rem; line-height: 1;
-  padding: 5px 7px; border-radius: 5px; cursor: pointer;
-}
-.apunte-img-btn:hover { background: var(--teal-soft); color: var(--teal-ink); }
-.apunte-img-btn:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
-.apunte-img-btn-activo { background: var(--teal); color: var(--paper-raised); }
-.apunte-img-btn-activo:hover { background: var(--teal); color: var(--paper-raised); }
-.apunte-img-ancho {
-  font-family: var(--mono); font-size: 0.7rem; color: var(--muted);
-  min-width: 34px; text-align: center;
-}
-.apunte-img-sep { width: 1px; height: 16px; background: var(--line); margin: 0 3px; }
+/* Al arrastrar un archivo de fuera, el borde avisa de que se puede soltar. */
+.apunte-editor.apunte-soltar { border-color: var(--teal); border-style: dashed; }
 
 /* =====================================================================
    CONTRASTE DE TEXTO SOBRE FONDOS DE COLOR
@@ -1994,4 +1991,7 @@ button, input, select, textarea { font-family: inherit; }
 
 /* El avatar con emoji necesita más cuerpo que una letra para llenar el
    mismo círculo. */
-.patient-avatar-icono { font-size: 1.5rem; line-height: 1; }
+/* El emoji ocupa menos que una letra dentro de su cuadro, asi que a
+   1,5rem quedaba flotando en medio del circulo de 56 px. A 2,1rem llena el
+   hueco como lo llenaba la inicial. */
+.patient-avatar-icono { font-size: 2.1rem; line-height: 1; }

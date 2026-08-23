@@ -1050,19 +1050,10 @@ async function guardarImagenDeApunte(entryId, file) {
    foto del movil llenaba la pantalla y habia que hacer scroll para
    seguir leyendo. Entra al 60 % y desde ahi se ajusta. */
 const APUNTE_ANCHO_INICIAL = 60;
-const APUNTE_ANCHO_MIN = 15;
+/* El minimo y el maximo los aplica el arrastre de las esquinas. Entre
+   ellos el tamano es continuo: lo decide la mano, no una lista. */
+const APUNTE_ANCHO_MIN = 10;
 const APUNTE_ANCHO_MAX = 100;
-const APUNTE_ANCHO_PASO = 10;
-
-/* Izquierda y derecha usan float para que el texto ENVUELVA la imagen,
-   que es lo que se espera al mover una foto a un lado. Centro no puede
-   ser float: se queda en bloque con margenes automaticos. */
-const APUNTE_ALINEACIONES = ["apunte-img-izq", "apunte-img-centro", "apunte-img-der"];
-
-function anchoDeImagen(img) {
-  const v = parseFloat(String(img.style.width || "").replace("%", ""));
-  return isFinite(v) && v > 0 ? v : APUNTE_ANCHO_MAX;
-}
 
 function buildApunteEditor(entry, statusText) {
   const wrap = document.createElement("div");
@@ -1183,7 +1174,6 @@ function buildApunteEditor(entry, statusText) {
         img.setAttribute("data-foto", guardada.id);
         img.alt = file.name || "Imagen del apunte";
         img.style.width = APUNTE_ANCHO_INICIAL + "%";
-        img.className = "apunte-img-centro";
         const salto = document.createElement("br");
         insertarNodo(salto);
         insertarNodo(img);
@@ -1227,148 +1217,206 @@ function buildApunteEditor(entry, statusText) {
     if (texto) document.execCommand("insertText", false, texto);
   });
 
-  // Arrastrar y soltar una imagen encima del apunte.
-  editor.addEventListener("dragover", function (e) {
-    if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) {
-      e.preventDefault();
-      editor.classList.add("apunte-soltar");
-    }
+  /* ---------- Manipular la imagen como en Word ----------
+
+     Sin botones: se agarra la imagen y se arrastra donde quieras, y se
+     agarra una esquina para cambiarle el tamano. La version anterior tenia
+     una barra de botones y estaba mal pensada — cambiar de tamano a saltos
+     de 10 % no es decidir el tamano, es elegir entre diez.
+
+     Todo el andamiaje (marco y esquinas) vive FUERA del contenteditable:
+     dentro seria contenido del apunte, se borraria con la tecla de
+     retroceso y acabaria guardado en el HTML.
+
+     El fallo de "la imagen se reinicia al moverla": arrastrar una imagen
+     dentro de un contenteditable es un drag-and-drop del navegador, y para
+     que un soltar sea valido hay que cancelar el dragover. El dragover de
+     aqui solo lo cancelaba cuando venian ARCHIVOS de fuera, asi que al
+     mover una imagen ya puesta el navegador daba el arrastre por invalido
+     y la devolvia a su sitio. Ahora se cancela siempre y el movimiento se
+     hace a mano, colocando la imagen en el punto exacto del cursor. */
+  const marco = document.createElement("div");
+  marco.className = "apunte-marco";
+  marco.hidden = true;
+  const ESQUINAS = ["ni", "nd", "si", "sd"];
+  const manijas = ESQUINAS.map(function (pos) {
+    const m = document.createElement("span");
+    m.className = "apunte-manija apunte-manija-" + pos;
+    m.dataset.esquina = pos;
+    marco.appendChild(m);
+    return m;
   });
-  editor.addEventListener("dragleave", function () { editor.classList.remove("apunte-soltar"); });
-  editor.addEventListener("drop", function (e) {
-    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
-    e.preventDefault();
-    editor.classList.remove("apunte-soltar");
-    agregarImagenes(e.dataTransfer.files);
-  });
 
-  editor.addEventListener("input", guardar);
-
-  /* Barra flotante de la imagen seleccionada.
-
-     Va FUERA del contenteditable a proposito: dentro seria contenido del
-     apunte y se podria borrar con la tecla de retroceso, o acabaria
-     guardada en el HTML. Se coloca sobre la imagen calculando su
-     posicion respecto al editor. */
-  const barraImg = document.createElement("div");
-  barraImg.className = "apunte-img-barra";
-  barraImg.hidden = true;
   let imgSel = null;
 
-  function ocultarBarra() {
-    if (imgSel) imgSel.classList.remove("apunte-img-sel");
-    imgSel = null;
-    barraImg.hidden = true;
+  function anchoUtilEditor() {
+    const cs = getComputedStyle(editor);
+    return editor.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
   }
 
-  function colocarBarra() {
-    if (!imgSel) return;
+  function colocarMarco() {
+    if (!imgSel || !editor.contains(imgSel)) { ocultarMarco(); return; }
     const caja = imgSel.getBoundingClientRect();
     const ref = editor.getBoundingClientRect();
-    barraImg.style.left = Math.max(4, caja.left - ref.left) + "px";
-    // Encima de la imagen; si no cabe (imagen pegada al borde de
-    // arriba), se pone justo debajo.
-    const arriba = caja.top - ref.top + editor.scrollTop - 38;
-    barraImg.style.top = (arriba < 0 ? caja.bottom - ref.top + editor.scrollTop + 6 : arriba) + "px";
+    marco.style.left = caja.left - ref.left + "px";
+    marco.style.top = caja.top - ref.top + "px";
+    marco.style.width = caja.width + "px";
+    marco.style.height = caja.height + "px";
+  }
+
+  function ocultarMarco() {
+    if (imgSel) imgSel.classList.remove("apunte-img-sel");
+    imgSel = null;
+    marco.hidden = true;
   }
 
   function seleccionarImagen(img) {
-    if (imgSel) imgSel.classList.remove("apunte-img-sel");
+    if (imgSel && imgSel !== img) imgSel.classList.remove("apunte-img-sel");
     imgSel = img;
     img.classList.add("apunte-img-sel");
-    barraImg.hidden = false;
-    colocarBarra();
-    pintarBarra();
+    marco.hidden = false;
+    colocarMarco();
   }
 
-  function botonImg(etiqueta, titulo, accion) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "apunte-img-btn";
-    b.title = titulo;
-    b.setAttribute("aria-label", titulo);
-    b.textContent = etiqueta;
-    b.addEventListener("mousedown", function (e) { e.preventDefault(); });
-    b.addEventListener("click", function () {
+  /* --- Cambiar el tamano arrastrando una esquina ---
+     Pointer Events y no mouse: el mismo codigo sirve con el dedo, y la
+     captura del puntero hace que el arrastre siga funcionando aunque se
+     salga de la manija. */
+  manijas.forEach(function (manija) {
+    manija.addEventListener("pointerdown", function (e) {
       if (!imgSel) return;
-      accion(imgSel);
-      colocarBarra();
-      pintarBarra();
-      guardar();
+      e.preventDefault();
+      e.stopPropagation();
+      manija.setPointerCapture(e.pointerId);
+
+      const esquina = manija.dataset.esquina;
+      const inicioX = e.clientX;
+      const anchoInicial = imgSel.getBoundingClientRect().width;
+      const util = anchoUtilEditor();
+      // Las esquinas de la izquierda crecen al arrastrar hacia fuera.
+      const signo = esquina === "ni" || esquina === "si" ? -1 : 1;
+      marco.classList.add("apunte-marco-activo");
+
+      function mover(ev) {
+        const nuevoPx = anchoInicial + (ev.clientX - inicioX) * signo;
+        const pct = Math.min(100, Math.max(10, (nuevoPx / util) * 100));
+        imgSel.style.width = Math.round(pct * 10) / 10 + "%";
+        colocarMarco();
+      }
+      function soltar() {
+        manija.removeEventListener("pointermove", mover);
+        manija.removeEventListener("pointerup", soltar);
+        manija.removeEventListener("pointercancel", soltar);
+        marco.classList.remove("apunte-marco-activo");
+        guardar();
+      }
+      manija.addEventListener("pointermove", mover);
+      manija.addEventListener("pointerup", soltar);
+      manija.addEventListener("pointercancel", soltar);
     });
-    return b;
-  }
-
-  const etiquetaAncho = document.createElement("span");
-  etiquetaAncho.className = "apunte-img-ancho";
-
-  function pintarBarra() {
-    if (!imgSel) return;
-    etiquetaAncho.textContent = Math.round(anchoDeImagen(imgSel)) + " %";
-    APUNTE_ALINEACIONES.forEach(function (clase, i) {
-      botonesAlinear[i].classList.toggle("apunte-img-btn-activo", imgSel.classList.contains(clase));
-    });
-  }
-
-  function cambiarAncho(img, delta) {
-    const nuevo = Math.min(APUNTE_ANCHO_MAX, Math.max(APUNTE_ANCHO_MIN, anchoDeImagen(img) + delta));
-    img.style.width = nuevo + "%";
-  }
-
-  function alinear(img, clase) {
-    APUNTE_ALINEACIONES.forEach(function (c) { img.classList.remove(c); });
-    img.classList.add(clase);
-  }
-
-  barraImg.appendChild(botonImg("−", "Más pequeña", function (img) { cambiarAncho(img, -APUNTE_ANCHO_PASO); }));
-  barraImg.appendChild(etiquetaAncho);
-  barraImg.appendChild(botonImg("+", "Más grande", function (img) { cambiarAncho(img, APUNTE_ANCHO_PASO); }));
-  const sepImg = document.createElement("span");
-  sepImg.className = "apunte-img-sep";
-  barraImg.appendChild(sepImg);
-  const botonesAlinear = [
-    botonImg("⬅", "A la izquierda, con el texto al lado", function (img) { alinear(img, "apunte-img-izq"); }),
-    botonImg("⬍", "Centrada, sin texto al lado", function (img) { alinear(img, "apunte-img-centro"); }),
-    botonImg("➡", "A la derecha, con el texto al lado", function (img) { alinear(img, "apunte-img-der"); })
-  ];
-  botonesAlinear.forEach(function (b) { barraImg.appendChild(b); });
-  const sepImg2 = document.createElement("span");
-  sepImg2.className = "apunte-img-sep";
-  barraImg.appendChild(sepImg2);
-  const verBtn = document.createElement("button");
-  verBtn.type = "button";
-  verBtn.className = "apunte-img-btn";
-  verBtn.title = "Ver a pantalla completa";
-  verBtn.setAttribute("aria-label", "Ver a pantalla completa");
-  verBtn.textContent = "🔍";
-  verBtn.addEventListener("mousedown", function (e) { e.preventDefault(); });
-  verBtn.addEventListener("click", function () {
-    if (!imgSel || !imgSel.getAttribute("src")) return;
-    abrirVisorFoto([{ datos: imgSel.getAttribute("src"), nombre: imgSel.alt || "Imagen del apunte" }], 0);
   });
-  barraImg.appendChild(verBtn);
 
-  /* Un clic en la imagen la SELECCIONA en vez de abrir el visor. Abrirlo
-     al primer toque impedia ajustarla: para cambiarle el tamano habria
-     que cerrar el visor antes de tocar nada. El visor sigue a un toque,
-     en la lupa. */
+  /* --- Moverla arrastrandola ---
+     El navegador ya marca las imagenes como arrastrables; lo que faltaba
+     era aceptar el soltar y colocarla donde apunta el cursor. */
+  let imgArrastrada = null;
+
+  editor.addEventListener("dragstart", function (e) {
+    const img = e.target && e.target.tagName === "IMG" ? e.target : null;
+    if (!img) return;
+    imgArrastrada = img;
+    marco.hidden = true;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      // Firefox exige que se escriba algo o cancela el arrastre.
+      try { e.dataTransfer.setData("text/plain", ""); } catch (err) { /* da igual */ }
+    }
+  });
+
+  editor.addEventListener("dragend", function () {
+    imgArrastrada = null;
+    editor.classList.remove("apunte-soltar");
+    if (imgSel) { marco.hidden = false; colocarMarco(); }
+  });
+
+  editor.addEventListener("dragover", function (e) {
+    const traeArchivos = e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+    if (!traeArchivos && !imgArrastrada) return;
+    // Sin esto el soltar no es valido y la imagen vuelve a su sitio.
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = imgArrastrada ? "move" : "copy";
+    if (traeArchivos) editor.classList.add("apunte-soltar");
+  });
+
+  editor.addEventListener("dragleave", function () { editor.classList.remove("apunte-soltar"); });
+
+  editor.addEventListener("drop", function (e) {
+    const archivos = e.dataTransfer && e.dataTransfer.files;
+    if (archivos && archivos.length) {
+      e.preventDefault();
+      editor.classList.remove("apunte-soltar");
+      agregarImagenes(archivos);
+      return;
+    }
+    if (!imgArrastrada) return;
+    e.preventDefault();
+    const destino = rangoEnPunto(e.clientX, e.clientY);
+    if (destino) {
+      destino.insertNode(imgArrastrada);
+      destino.setStartAfter(imgArrastrada);
+      destino.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(destino);
+    }
+    imgArrastrada = null;
+    seleccionarImagen(imgSel || e.target);
+    colocarMarco();
+    guardar();
+  });
+
+  /* El punto exacto del texto bajo el cursor. Los dos navegadores lo
+     llaman distinto y ninguno de los dos nombres esta en todos. */
+  function rangoEnPunto(x, y) {
+    if (document.caretRangeFromPoint) return document.caretRangeFromPoint(x, y);
+    if (document.caretPositionFromPoint) {
+      const p = document.caretPositionFromPoint(x, y);
+      if (!p) return null;
+      const r = document.createRange();
+      r.setStart(p.offsetNode, p.offset);
+      r.collapse(true);
+      return r;
+    }
+    return null;
+  }
+
+  editor.addEventListener("input", guardar);
+
+  /* Un clic selecciona (y saca el marco con sus esquinas). Doble clic abre
+     el visor a pantalla completa: al primer toque impedia ajustarla. */
   editor.addEventListener("click", function (e) {
     const img = e.target && e.target.tagName === "IMG" ? e.target : null;
     if (img) seleccionarImagen(img);
-    else ocultarBarra();
+    else ocultarMarco();
   });
-  editor.addEventListener("scroll", colocarBarra);
-  // Si la imagen se borra escribiendo, la barra se queda huerfana.
+  editor.addEventListener("dblclick", function (e) {
+    const img = e.target && e.target.tagName === "IMG" ? e.target : null;
+    if (!img || !img.getAttribute("src")) return;
+    abrirVisorFoto([{ datos: img.getAttribute("src"), nombre: img.alt || "Imagen del apunte" }], 0);
+  });
+  editor.addEventListener("scroll", colocarMarco);
+  window.addEventListener("resize", colocarMarco);
+  // Si la imagen se borra escribiendo, el marco se queda huerfano.
   editor.addEventListener("input", function () {
-    if (imgSel && !editor.contains(imgSel)) ocultarBarra();
-    else colocarBarra();
+    if (imgSel && !editor.contains(imgSel)) ocultarMarco();
+    else colocarMarco();
   });
 
   wrap.appendChild(barra);
   const zonaEditor = document.createElement("div");
   zonaEditor.className = "apunte-zona";
   zonaEditor.appendChild(editor);
-  zonaEditor.appendChild(barraImg);
+  zonaEditor.appendChild(marco);
   wrap.appendChild(zonaEditor);
   wrap.appendChild(fileInput);
   marcarVacio();

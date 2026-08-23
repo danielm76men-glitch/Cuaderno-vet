@@ -727,6 +727,123 @@ button, input, select, textarea { font-family: inherit; }
 }
 .photo-add:hover { border-color: var(--teal); color: var(--teal-ink); background: var(--teal-soft); }
 
+/* =====================================================================
+   EXÁMENES
+   ===================================================================== */
+
+/* Botón pequeño para acciones dentro de una tarjeta: añadir un examen,
+   añadir un valor. No es un botón principal ni secundario de la página. */
+.btn-mini {
+  appearance: none; border: 1px solid var(--line); background: var(--paper-raised);
+  color: var(--teal-ink); font: inherit; font-size: 0.78rem; font-weight: 600;
+  padding: 5px 12px; border-radius: 999px; cursor: pointer;
+}
+.btn-mini:hover { border-color: var(--teal); background: var(--teal-soft); }
+.btn-mini:disabled { opacity: 0.5; cursor: default; }
+
+.examen-lista { display: flex; flex-direction: column; gap: 14px; }
+.examenes-vacio { margin: 8px 0 0; font-size: 0.84rem; color: var(--muted); }
+
+.examen {
+  border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+  background: var(--paper-alt);
+}
+
+.examen-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.examen-top .examen-tipo {
+  font: inherit; font-size: 0.9rem; font-weight: 700; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+  background: var(--paper-raised); flex: 1 1 190px; min-width: 0;
+}
+.examen-top .examen-fecha, .examen-top .examen-lab {
+  font: inherit; font-size: 0.82rem;
+  border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
+  background: var(--paper-raised); color: var(--ink); min-width: 0;
+}
+.examen-top .examen-fecha { flex: 0 0 auto; }
+.examen-top .examen-lab { flex: 1 1 140px; }
+/* El interruptor del modo escaner. Etiqueta y casilla juntas y en
+   pequeno: es un ajuste del examen, no una decision principal. */
+.examen-escaner {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.74rem; color: var(--muted); cursor: pointer; white-space: nowrap;
+}
+.examen-escaner input { margin: 0; accent-color: var(--teal); }
+
+.examen-borrar {
+  appearance: none; border: none; background: transparent; color: var(--muted);
+  font: inherit; font-size: 0.78rem; cursor: pointer; padding: 6px 4px;
+}
+.examen-borrar:hover { color: var(--rust); }
+
+/* Las páginas en tira horizontal y no en rejilla: un examen tiene una o
+   dos hojas, y una rejilla dejaría un hueco enorme casi siempre. */
+.examen-paginas {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;
+}
+.examen-paginas .photo-tile, .examen-paginas .photo-add {
+  width: 84px; height: 84px; flex: 0 0 auto;
+}
+.examen-pagina { position: relative; }
+.examen-pagina-num {
+  position: absolute; left: 4px; bottom: 4px;
+  background: rgba(0, 0, 0, 0.6); color: #fff;
+  font-size: 0.68rem; font-weight: 700; line-height: 1;
+  padding: 3px 6px; border-radius: 999px;
+}
+.examen-add {
+  aspect-ratio: auto; flex-direction: column; gap: 2px; font-size: 1.05rem;
+}
+.examen-add small { font-size: 0.62rem; letter-spacing: 0.02em; }
+
+/* Una fila por valor. minmax(0,…) en todas las pistas flexibles: si no,
+   cada fila se reparte el ancho según su propio contenido y las columnas
+   dejan de cuadrar en vertical (mismo problema que las constantes). */
+.examen-valores { display: flex; flex-direction: column; gap: 6px; }
+.examen-valor {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 0.8fr) minmax(0, 0.7fr) 132px 62px 22px;
+  align-items: center; gap: 6px;
+}
+.examen-valor .examen-campo {
+  font: inherit; font-size: 0.84rem; min-width: 0;
+  border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px;
+  background: var(--paper-raised); color: var(--ink);
+}
+.examen-valor .examen-campo-nombre { font-weight: 600; }
+.examen-ref { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.examen-ref span { color: var(--muted); font-size: 0.8rem; }
+.examen-valor .examen-campo-lim {
+  text-align: center; padding: 6px 4px; font-size: 0.8rem; min-width: 0; flex: 1 1 0;
+}
+.examen-marca { font-size: 0.76rem; font-weight: 700; text-align: center; }
+.examen-marca[data-estado="alto"] { color: var(--rust); }
+.examen-marca[data-estado="bajo"] { color: var(--rust); }
+.examen-marca[data-estado="ok"] { color: var(--teal); }
+.examen-quitar {
+  appearance: none; border: none; background: transparent; color: var(--muted);
+  font-size: 1rem; line-height: 1; cursor: pointer; padding: 0;
+}
+.examen-quitar:hover { color: var(--rust); }
+.examen-sin-valores { margin: 0 0 4px; font-size: 0.8rem; color: var(--muted); }
+.examen-add-valor { align-self: flex-start; margin-top: 4px; }
+
+.examen-notas {
+  width: 100%; margin-top: 10px; font: inherit; font-size: 0.84rem;
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px;
+  background: var(--paper-raised); color: var(--ink); resize: vertical;
+}
+
+/* En estrecho la fila de valores no cabe en una línea: el nombre ocupa
+   todo el ancho y debajo van valor, unidad y rango. */
+@media (max-width: 720px) {
+  .examen-valor {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.72fr) 104px 44px 20px;
+    gap: 5px;
+  }
+  .examen-valor .examen-campo-nombre { grid-column: 1 / -1; }
+}
+
 .evols-list { display: flex; flex-direction: column; gap: 0; }
 .evol-item { position: relative; padding: 4px 0 18px 22px; border-left: 2px solid var(--line); margin-left: 4px; }
 .evol-item:last-child { border-left-color: transparent; padding-bottom: 0; }
@@ -1947,6 +2064,17 @@ button, input, select, textarea { font-family: inherit; }
      la pagina. Sin esto, en el movil la manija no sirve para nada. */
   touch-action: none;
 }
+/* La linea que marca donde va a caer la imagen al soltarla. Sin ella se
+   suelta a ciegas y nunca cae donde uno cree. */
+.apunte-guia {
+  position: absolute; width: 2px; min-height: 18px;
+  background: var(--teal); border-radius: 2px;
+  pointer-events: none; z-index: 5;
+}
+/* Mientras se arrastra, la imagen se ve a medias: asi se lee el texto de
+   debajo y se ve donde va a caer. */
+.apunte-editor img.apunte-img-moviendo { opacity: 0.45; cursor: grabbing; }
+
 .apunte-manija-ni { top: -8px; left: -8px; cursor: nwse-resize; }
 .apunte-manija-nd { top: -8px; right: -8px; cursor: nesw-resize; }
 .apunte-manija-si { bottom: -8px; left: -8px; cursor: nesw-resize; }

@@ -1009,6 +1009,18 @@ function limpiarHtmlApunte(html) {
 /* Lo que se guarda NO es lo que se ve: a las imágenes se les quita el src
    antes de escribir. Con el src puesto, cada guardado subiría medio mega
    de base64 dentro del apunte y Firestore lo rechazaría. */
+/* El ancho vive en data-ancho ademas de en el style. El style es lo
+   primero que se pierde cuando el HTML pasa por las manos de alguien
+   mas (el saneado, o el propio navegador al re-crear un nodo), y
+   perderlo significa que la imagen vuelve a salir enorme. Con el
+   atributo se puede reponer siempre. */
+function aplicarAnchosGuardados(editor) {
+  Array.from(editor.querySelectorAll("img[data-ancho]")).forEach(function (img) {
+    const v = parseFloat(img.getAttribute("data-ancho"));
+    if (isFinite(v) && v > 0) img.style.width = v + "%";
+  });
+}
+
 function apunteParaGuardar(editor) {
   const copia = editor.cloneNode(true);
   Array.from(copia.querySelectorAll("img")).forEach(function (img) {
@@ -1070,6 +1082,7 @@ function buildApunteEditor(entry, statusText) {
   editor.setAttribute("aria-label", "Apuntes de clase");
   editor.dataset.vacio = "Escribe tus apuntes de clase…";
   editor.innerHTML = apunteComoHtml(entry);
+  aplicarAnchosGuardados(editor);
 
   const fileInput = document.createElement("input");
   fileInput.type = "file";
@@ -1174,6 +1187,8 @@ function buildApunteEditor(entry, statusText) {
         img.setAttribute("data-foto", guardada.id);
         img.alt = file.name || "Imagen del apunte";
         img.style.width = APUNTE_ANCHO_INICIAL + "%";
+        img.setAttribute("data-ancho", APUNTE_ANCHO_INICIAL);
+        img.setAttribute("draggable", "false");
         const salto = document.createElement("br");
         insertarNodo(salto);
         insertarNodo(img);
@@ -1299,8 +1314,10 @@ function buildApunteEditor(entry, statusText) {
 
       function mover(ev) {
         const nuevoPx = anchoInicial + (ev.clientX - inicioX) * signo;
-        const pct = Math.min(100, Math.max(10, (nuevoPx / util) * 100));
-        imgSel.style.width = Math.round(pct * 10) / 10 + "%";
+        const pct = Math.min(APUNTE_ANCHO_MAX, Math.max(APUNTE_ANCHO_MIN, (nuevoPx / util) * 100));
+        const ancho = Math.round(pct * 10) / 10;
+        imgSel.style.width = ancho + "%";
+        imgSel.setAttribute("data-ancho", ancho);
         colocarMarco();
       }
       function soltar() {
@@ -1317,62 +1334,118 @@ function buildApunteEditor(entry, statusText) {
   });
 
   /* --- Moverla arrastrandola ---
-     El navegador ya marca las imagenes como arrastrables; lo que faltaba
-     era aceptar el soltar y colocarla donde apunta el cursor. */
-  let imgArrastrada = null;
 
-  editor.addEventListener("dragstart", function (e) {
+     La version anterior usaba el arrastre nativo del navegador (dragstart,
+     dragover, drop). Dentro de un contenteditable ese arrastre NO es solo
+     un arrastre: es una operacion de edicion de Chrome, que decide por su
+     cuenta si mueve el nodo, si lo vuelve a crear a partir de su HTML o si
+     deshace todo. De ahi los dos fallos que reporto Daniel: la imagen se
+     iba a donde ella queria, y volvia a salir grande porque el navegador
+     la reconstruia perdiendo el ancho.
+
+     Aqui el arrastre lo hacemos nosotros con Pointer Events, igual que el
+     de las esquinas: el nodo es SIEMPRE el mismo, se mueve una sola vez al
+     soltar y el navegador no participa. El arrastre nativo queda apagado
+     con draggable=false. */
+  const guia = document.createElement("span");
+  guia.className = "apunte-guia";
+  guia.hidden = true;
+
+  function apagarArrastreNativo(raiz) {
+    Array.from(raiz.querySelectorAll("img")).forEach(function (img) {
+      img.setAttribute("draggable", "false");
+    });
+  }
+  apagarArrastreNativo(editor);
+
+  /* Marca el punto del texto donde caeria la imagen. Sin esto se suelta a
+     ciegas, que es justo lo que se sentia como "no me deja ponerla donde
+     quiero". */
+  function pintarGuia(rango) {
+    if (!rango) { guia.hidden = true; return; }
+    const caja = rango.getBoundingClientRect();
+    const ref = editor.getBoundingClientRect();
+    if (!caja || (!caja.height && !caja.width)) { guia.hidden = true; return; }
+    guia.hidden = false;
+    guia.style.left = caja.left - ref.left + "px";
+    guia.style.top = caja.top - ref.top + "px";
+    guia.style.height = (caja.height || 18) + "px";
+  }
+
+  const ARRASTRE_MINIMO = 4; // px antes de considerar que es un arrastre y no un clic
+
+  editor.addEventListener("pointerdown", function (e) {
     const img = e.target && e.target.tagName === "IMG" ? e.target : null;
-    if (!img) return;
-    imgArrastrada = img;
-    marco.hidden = true;
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = "move";
-      // Firefox exige que se escriba algo o cancela el arrastre.
-      try { e.dataTransfer.setData("text/plain", ""); } catch (err) { /* da igual */ }
+    if (!img || e.button !== 0) return;
+    // Sin esto Chrome empieza su propia seleccion/arrastre de edicion.
+    e.preventDefault();
+    seleccionarImagen(img);
+
+    const inicioX = e.clientX;
+    const inicioY = e.clientY;
+    let moviendo = false;
+    editor.setPointerCapture(e.pointerId);
+
+    function mover(ev) {
+      if (!moviendo) {
+        if (Math.abs(ev.clientX - inicioX) + Math.abs(ev.clientY - inicioY) < ARRASTRE_MINIMO) return;
+        moviendo = true;
+        img.classList.add("apunte-img-moviendo");
+        marco.hidden = true;
+      }
+      pintarGuia(rangoEnPunto(ev.clientX, ev.clientY));
     }
+
+    function soltar(ev) {
+      editor.removeEventListener("pointermove", mover);
+      editor.removeEventListener("pointerup", soltar);
+      editor.removeEventListener("pointercancel", soltar);
+      guia.hidden = true;
+      img.classList.remove("apunte-img-moviendo");
+      if (!moviendo) { colocarMarco(); return; } // era un clic: solo seleccionar
+      const destino = rangoEnPunto(ev.clientX, ev.clientY);
+      /* El destino puede caer DENTRO de la propia imagen; insertar un nodo
+         dentro de si mismo lanza. Se comprueba antes. */
+      if (destino && !img.contains(destino.startContainer) && destino.startContainer !== img) {
+        destino.insertNode(img);
+        destino.setStartAfter(img);
+        destino.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(destino);
+      }
+      marco.hidden = false;
+      colocarMarco();
+      guardar();
+    }
+
+    editor.addEventListener("pointermove", mover);
+    editor.addEventListener("pointerup", soltar);
+    editor.addEventListener("pointercancel", soltar);
   });
 
-  editor.addEventListener("dragend", function () {
-    imgArrastrada = null;
-    editor.classList.remove("apunte-soltar");
-    if (imgSel) { marco.hidden = false; colocarMarco(); }
+  /* Del arrastre nativo solo queda lo que viene de FUERA: soltar archivos
+     de imagen encima del apunte. */
+  editor.addEventListener("dragstart", function (e) {
+    if (e.target && e.target.tagName === "IMG") e.preventDefault();
   });
 
   editor.addEventListener("dragover", function (e) {
     const traeArchivos = e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
-    if (!traeArchivos && !imgArrastrada) return;
-    // Sin esto el soltar no es valido y la imagen vuelve a su sitio.
+    if (!traeArchivos) return;
     e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = imgArrastrada ? "move" : "copy";
-    if (traeArchivos) editor.classList.add("apunte-soltar");
+    e.dataTransfer.dropEffect = "copy";
+    editor.classList.add("apunte-soltar");
   });
 
   editor.addEventListener("dragleave", function () { editor.classList.remove("apunte-soltar"); });
 
   editor.addEventListener("drop", function (e) {
     const archivos = e.dataTransfer && e.dataTransfer.files;
-    if (archivos && archivos.length) {
-      e.preventDefault();
-      editor.classList.remove("apunte-soltar");
-      agregarImagenes(archivos);
-      return;
-    }
-    if (!imgArrastrada) return;
+    if (!archivos || !archivos.length) return;
     e.preventDefault();
-    const destino = rangoEnPunto(e.clientX, e.clientY);
-    if (destino) {
-      destino.insertNode(imgArrastrada);
-      destino.setStartAfter(imgArrastrada);
-      destino.collapse(true);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(destino);
-    }
-    imgArrastrada = null;
-    seleccionarImagen(imgSel || e.target);
-    colocarMarco();
-    guardar();
+    editor.classList.remove("apunte-soltar");
+    agregarImagenes(archivos);
   });
 
   /* El punto exacto del texto bajo el cursor. Los dos navegadores lo
@@ -1417,6 +1490,7 @@ function buildApunteEditor(entry, statusText) {
   zonaEditor.className = "apunte-zona";
   zonaEditor.appendChild(editor);
   zonaEditor.appendChild(marco);
+  zonaEditor.appendChild(guia);
   wrap.appendChild(zonaEditor);
   wrap.appendChild(fileInput);
   marcarVacio();
@@ -1445,6 +1519,682 @@ function buildApunteEditor(entry, statusText) {
         });
       });
   }
+
+  return wrap;
+}
+
+/* =====================================================================
+   EXAMENES DE LABORATORIO Y GABINETE
+   =====================================================================
+
+   Un examen tiene DOS partes y se guardan por separado a proposito:
+
+   1. La hoja escaneada o fotografiada, que es la prueba y no se discute.
+   2. Los valores que importan, escritos a mano. Esos si se pueden leer,
+      comparar entre consultas y marcar como altos o bajos.
+
+   Por que todo vive en la coleccion "fotos" y no en una nueva: las reglas
+   de Firestore ya la cubren, la consulta por caso ya existe y no hace
+   falta ningun indice nuevo. "fotos" es en realidad "adjuntos de una
+   entrada"; el campo "clase" dice de que tipo es cada uno:
+
+     sin clase   foto suelta del caso (las de siempre)
+     "examen"    la ficha del examen: tipo, fecha, laboratorio, valores
+     "pagina"    una hoja de un examen, con examenId apuntando a su ficha
+
+   Con una coleccion aparte habria que publicar reglas nuevas, y hasta que
+   se publicaran la app daria permission-denied sin explicar por que. Asi
+   funciona en cuanto se sube el archivo. */
+
+const EXAMEN_TIPOS = [
+  "Hemograma",
+  "Química sanguínea",
+  "Urianálisis",
+  "Coproparasitario",
+  "Radiografía",
+  "Ecografía",
+  "Citología",
+  "Prueba rápida / serología",
+  "Otro"
+];
+
+/* Sugerencias de analitos con su unidad habitual. NO traen rango de
+   referencia, y es deliberado: el rango depende del equipo con el que se
+   corrio la muestra, y el laboratorio lo imprime en su propia hoja. Un
+   rango inventado aqui marcaria en rojo un resultado normal, o al reves.
+   Los dos campos de rango se rellenan copiando los de la hoja. */
+const EXAMEN_ANALITOS = {
+  "Hemograma": [
+    ["Hematocrito", "%"], ["Hemoglobina", "g/dL"], ["Eritrocitos", "10⁶/µL"],
+    ["Leucocitos", "/µL"], ["Neutrófilos", "/µL"], ["Linfocitos", "/µL"],
+    ["Monocitos", "/µL"], ["Eosinófilos", "/µL"], ["Plaquetas", "/µL"]
+  ],
+  "Química sanguínea": [
+    ["Creatinina", "mg/dL"], ["BUN", "mg/dL"], ["ALT", "U/L"], ["AST", "U/L"],
+    ["Fosfatasa alcalina", "U/L"], ["Glucosa", "mg/dL"], ["Proteínas totales", "g/dL"],
+    ["Albúmina", "g/dL"], ["Fósforo", "mg/dL"], ["Calcio", "mg/dL"]
+  ],
+  "Urianálisis": [
+    ["Densidad", ""], ["pH", ""], ["Proteína", "mg/dL"], ["Glucosa", "mg/dL"],
+    ["Relación proteína/creatinina", ""]
+  ],
+  "Coproparasitario": [["Huevos por gramo", "hpg"]],
+  "Prueba rápida / serología": [["Título", ""]]
+};
+
+/* El modo escaner arruina una radiografia: la pasa a blanco y negro
+   duro y se pierde justo lo que hay que ver. Estos tipos son imagen
+   medica, no papel, y entran sin tocar. El interruptor de la ficha
+   manda sobre esto: es solo el valor por defecto. */
+const EXAMEN_TIPOS_IMAGEN = ["Radiografía", "Ecografía", "Citología"];
+
+function escanearPorDefecto(tipo) {
+  return EXAMEN_TIPOS_IMAGEN.indexOf(tipo) < 0;
+}
+
+function analitosDeTipo(tipo) {
+  return EXAMEN_ANALITOS[tipo] || [];
+}
+
+/* Los adjuntos de un caso ya vienen todos en una consulta; aqui solo se
+   reparten. Filtrar en el cliente y no en la consulta evita tener que
+   crear un indice compuesto nuevo. */
+function repartirAdjuntos(lista) {
+  const examenes = [];
+  const paginas = {};
+  const fotos = [];
+  (lista || []).forEach(function (d) {
+    if (d.clase === "examen") examenes.push(d);
+    else if (d.clase === "pagina") {
+      const k = d.examenId || "";
+      (paginas[k] = paginas[k] || []).push(d);
+    } else if (!d.enApunte) fotos.push(d);
+  });
+  return { examenes: examenes, paginas: paginas, fotos: fotos };
+}
+
+/* --- Modo escaner ---
+   Una foto de una hoja impresa sale gris y con sombra, y al comprimirla
+   para que quepa, el texto pequeno se vuelve ilegible. Esto la pasa a
+   escala de grises y estira los niveles entre el percentil 5 y el 95: el
+   papel sale blanco y la letra negra. Percentiles y no minimo/maximo
+   porque un solo pixel oscuro —una sombra, el borde de la mesa— arruinaria
+   el estirado entero. */
+function procesarComoEscaneo(file) {
+  return new Promise(function (resolve) {
+    if (!file.type || file.type.indexOf("image/") !== 0) { resolve(file); return; }
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    let hecho = false;
+    function salir(res, motivo) {
+      if (hecho) return;
+      hecho = true;
+      clearTimeout(temporizador);
+      URL.revokeObjectURL(url);
+      logFoto("escaneo: " + motivo);
+      resolve(res);
+    }
+    const temporizador = setTimeout(function () { salir(file, "tardó demasiado, se usa la original"); }, 15000);
+    img.onerror = function () { salir(file, "no se pudo decodificar"); };
+    img.onload = function () {
+      try {
+        // Mas resolucion que una foto normal: la letra de un laboratorio
+        // a 1600 px se lee a duras penas.
+        const lado = 2000;
+        let w = img.naturalWidth || img.width;
+        let h = img.naturalHeight || img.height;
+        if (!w || !h) { salir(file, "sin dimensiones"); return; }
+        if (w > lado || h > lado) {
+          if (w >= h) { h = Math.round((h * lado) / w); w = lado; }
+          else { w = Math.round((w * lado) / h); h = lado; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { salir(file, "sin contexto de canvas"); return; }
+        ctx.drawImage(img, 0, 0, w, h);
+        const datos = ctx.getImageData(0, 0, w, h);
+        const px = datos.data;
+
+        /* Division por el fondo local.
+
+           El primer intento estiraba los niveles entre el percentil 5 y el
+           95 y no hacia practicamente nada: en una hoja escrita la tinta
+           es menos del 5 % de los pixeles, asi que los dos percentiles
+           caen DENTRO del papel y el estirado se anula solo. Medido: una
+           hoja de 105–200 salia 95–214, o sea igual.
+
+           Lo que si funciona es estimar cuanta luz le llega a cada zona
+           del papel y dividir por ella. La estimacion es la propia imagen
+           reducida a un pu~nado de pixeles y vuelta a estirar: a esa
+           escala la letra desaparece y solo queda la iluminacion, sombra
+           de la mano incluida. Cada pixel se compara entonces con SU
+           fondo, no con el de la hoja entera. */
+        const lienzoFondo = document.createElement("canvas");
+        const anchoFondo = Math.max(8, Math.round(w / 24));
+        lienzoFondo.width = anchoFondo;
+        lienzoFondo.height = Math.max(8, Math.round((h * anchoFondo) / w));
+        const ctxFondo = lienzoFondo.getContext("2d");
+        ctxFondo.imageSmoothingEnabled = true;
+        ctxFondo.drawImage(canvas, 0, 0, lienzoFondo.width, lienzoFondo.height);
+
+        const lienzoEstirado = document.createElement("canvas");
+        lienzoEstirado.width = w;
+        lienzoEstirado.height = h;
+        const ctxEstirado = lienzoEstirado.getContext("2d");
+        ctxEstirado.imageSmoothingEnabled = true;
+        ctxEstirado.drawImage(lienzoFondo, 0, 0, w, h);
+        const fondo = ctxEstirado.getImageData(0, 0, w, h).data;
+
+        /* El papel queda en 1 y la tinta por debajo. Todo lo que llegue a
+           SUELO_TINTA o menos se va a negro y de PISO_PAPEL para arriba a
+           blanco; en medio se reparte. Con el suelo mas alto la letra fina
+           se rompe, con el mas bajo la hoja sale gris. */
+        const SUELO_TINTA = 0.62;
+        const PISO_PAPEL = 0.94;
+        const rango = PISO_PAPEL - SUELO_TINTA;
+        for (let i = 0; i < px.length; i += 4) {
+          const g = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000;
+          const f = (fondo[i] * 299 + fondo[i + 1] * 587 + fondo[i + 2] * 114) / 1000;
+          const r = f > 8 ? g / f : 1;
+          let v = ((r - SUELO_TINTA) / rango) * 255;
+          v = v < 0 ? 0 : v > 255 ? 255 : v;
+          px[i] = px[i + 1] = px[i + 2] = v;
+        }
+        ctx.putImageData(datos, 0, 0);
+        canvas.toBlob(function (blob) {
+          if (!blob) { salir(file, "toBlob vacío, se usa la original"); return; }
+          salir(blob, "hoja lista, " + w + "×" + h + ", " + Math.round(blob.size / 1024) + " KB");
+        }, "image/jpeg", 0.9);
+      } catch (err) {
+        salir(file, "falló: " + (err && err.message));
+      }
+    };
+    img.src = url;
+  });
+}
+
+async function crearExamen(entryId) {
+  const base = {
+    clase: "examen",
+    uid: currentUid,
+    entryId: entryId,
+    uidEntrada: claveFotos(entryId),
+    tipo: EXAMEN_TIPOS[0],
+    fecha: todayISO(),
+    laboratorio: "",
+    notas: "",
+    valores: [],
+    orden: Date.now(),
+    createdAt: serverTimestamp()
+  };
+  const ref = await addDoc(collection(db, "fotos"), base);
+  return { ...base, id: ref.id, createdAt: null };
+}
+
+async function guardarPaginaDeExamen(entryId, examenId, file, comoEscaneo) {
+  const fuente = comoEscaneo ? await procesarComoEscaneo(file) : file;
+  const datos = await prepararFotoParaFirestore(fuente);
+  const nombre = file.name || "página.jpg";
+  const ref = await addDoc(collection(db, "fotos"), {
+    clase: "pagina",
+    examenId: examenId,
+    uid: currentUid,
+    entryId: entryId,
+    uidEntrada: claveFotos(entryId),
+    nombre: nombre,
+    datos: datos,
+    orden: Date.now(),
+    createdAt: serverTimestamp()
+  });
+  return { id: ref.id, clase: "pagina", examenId: examenId, nombre: nombre, datos: datos };
+}
+
+/* Alto o bajo respecto al rango que se copio de la hoja. Devuelve null si
+   falta el dato o el rango: sin rango no se opina. */
+function estadoDeValor(valor, min, max) {
+  const v = parseFloat(String(valor == null ? "" : valor).replace(",", "."));
+  if (!isFinite(v)) return null;
+  const lo = parseFloat(String(min == null ? "" : min).replace(",", "."));
+  const hi = parseFloat(String(max == null ? "" : max).replace(",", "."));
+  if (!isFinite(lo) && !isFinite(hi)) return null;
+  if (isFinite(hi) && v > hi) return "alto";
+  if (isFinite(lo) && v < lo) return "bajo";
+  return "ok";
+}
+
+/* La seccion entera. Recibe los adjuntos ya cargados por la seccion de
+   fotos para no repetir la consulta: es la misma. */
+function buildExamenesSection(entry, statusText, cargarAdjuntos) {
+  const wrap = document.createElement("div");
+  wrap.className = "examenes";
+
+  const head = document.createElement("div");
+  head.className = "subcard-head";
+  const titulo = document.createElement("span");
+  titulo.textContent = "Exámenes (laboratorio, imagen)";
+  head.appendChild(titulo);
+  const btnNuevo = document.createElement("button");
+  btnNuevo.type = "button";
+  btnNuevo.className = "btn-mini";
+  btnNuevo.textContent = "+ Examen";
+  head.appendChild(btnNuevo);
+  wrap.appendChild(head);
+
+  const lista = document.createElement("div");
+  lista.className = "examen-lista";
+  wrap.appendChild(lista);
+
+  const vacio = document.createElement("p");
+  vacio.className = "examenes-vacio";
+  vacio.textContent = "Cargando exámenes…";
+  wrap.appendChild(vacio);
+
+  let examenes = [];
+  let paginas = {};
+
+  function guardarCampo(examen, campo, valor) {
+    examen[campo] = valor;
+    scheduleSave("fotos", examen.id, { [campo]: valor }, statusText);
+  }
+
+  /* Una fila de valor. Se construye UNA vez y despues solo se muta el
+     objeto: si se redibujara la lista en cada tecla, el campo que estas
+     escribiendo dejaria de existir bajo el cursor. */
+  function filaDeValor(examen, valor, alBorrar) {
+    const fila = document.createElement("div");
+    fila.className = "examen-valor";
+
+    function campo(clase, marcador, clave, ancho) {
+      const i = document.createElement("input");
+      i.className = "examen-campo " + clase;
+      i.placeholder = marcador;
+      i.value = valor[clave] == null ? "" : valor[clave];
+      if (ancho) i.inputMode = ancho;
+      i.addEventListener("input", function () {
+        valor[clave] = i.value;
+        pintarEstado();
+        guardarCampo(examen, "valores", examen.valores);
+      });
+      return i;
+    }
+
+    const nombre = campo("examen-campo-nombre", "Analito", "nombre");
+    // Lista de sugerencias segun el tipo de examen, sin impedir escribir
+    // cualquier otra cosa.
+    const listaId = "analitos-" + examen.id;
+    nombre.setAttribute("list", listaId);
+    fila.appendChild(nombre);
+
+    fila.appendChild(campo("examen-campo-valor", "Valor", "valor", "decimal"));
+    fila.appendChild(campo("examen-campo-unidad", "Unidad", "unidad"));
+
+    const ref = document.createElement("div");
+    ref.className = "examen-ref";
+    const min = campo("examen-campo-lim", "mín", "min", "decimal");
+    const guionRef = document.createElement("span");
+    guionRef.textContent = "–";
+    const max = campo("examen-campo-lim", "máx", "max", "decimal");
+    ref.appendChild(min);
+    ref.appendChild(guionRef);
+    ref.appendChild(max);
+    fila.appendChild(ref);
+
+    const marca = document.createElement("span");
+    marca.className = "examen-marca";
+    fila.appendChild(marca);
+
+    function pintarEstado() {
+      const est = estadoDeValor(valor.valor, valor.min, valor.max);
+      marca.dataset.estado = est || "";
+      marca.textContent = est === "alto" ? "↑ alto" : est === "bajo" ? "↓ bajo" : est === "ok" ? "✓" : "";
+    }
+    pintarEstado();
+
+    // Al elegir un analito de la lista se rellena su unidad habitual.
+    nombre.addEventListener("change", function () {
+      if (valor.unidad) return;
+      const encontrado = analitosDeTipo(examen.tipo).find(function (a) { return a[0] === nombre.value; });
+      if (!encontrado || !encontrado[1]) return;
+      valor.unidad = encontrado[1];
+      fila.querySelector(".examen-campo-unidad").value = encontrado[1];
+      guardarCampo(examen, "valores", examen.valores);
+    });
+
+    const quitar = document.createElement("button");
+    quitar.type = "button";
+    quitar.className = "examen-quitar";
+    quitar.textContent = "×";
+    quitar.setAttribute("aria-label", "Quitar este valor");
+    quitar.addEventListener("click", function () { alBorrar(); });
+    fila.appendChild(quitar);
+
+    return fila;
+  }
+
+  function tarjetaDeExamen(examen) {
+    const card = document.createElement("div");
+    card.className = "examen";
+
+    /* --- cabecera: tipo, fecha, laboratorio --- */
+    const filaTop = document.createElement("div");
+    filaTop.className = "examen-top";
+
+    const tipoSel = document.createElement("select");
+    tipoSel.className = "examen-tipo";
+    EXAMEN_TIPOS.forEach(function (t) {
+      const o = document.createElement("option");
+      o.value = t;
+      o.textContent = t;
+      tipoSel.appendChild(o);
+    });
+    tipoSel.value = examen.tipo || EXAMEN_TIPOS[0];
+    filaTop.appendChild(tipoSel);
+
+    const fecha = document.createElement("input");
+    fecha.type = "date";
+    fecha.className = "examen-fecha";
+    fecha.value = examen.fecha || "";
+    fecha.addEventListener("input", function () { guardarCampo(examen, "fecha", fecha.value); });
+    filaTop.appendChild(fecha);
+
+    const lab = document.createElement("input");
+    lab.className = "examen-lab";
+    lab.placeholder = "Laboratorio";
+    lab.value = examen.laboratorio || "";
+    lab.addEventListener("input", function () { guardarCampo(examen, "laboratorio", lab.value); });
+    filaTop.appendChild(lab);
+
+    /* Se guarda como campo propio y no se deduce cada vez: si el tipo
+       cambia despues, lo que decidio Daniel para este examen manda. */
+    const escLabel = document.createElement("label");
+    escLabel.className = "examen-escaner";
+    const escCheck = document.createElement("input");
+    escCheck.type = "checkbox";
+    escCheck.checked = examen.escaner == null ? escanearPorDefecto(examen.tipo) : !!examen.escaner;
+    escCheck.addEventListener("change", function () {
+      guardarCampo(examen, "escaner", escCheck.checked);
+    });
+    escLabel.appendChild(escCheck);
+    const escTexto = document.createElement("span");
+    escTexto.textContent = "Modo escáner";
+    escLabel.title = "Realza el texto de una hoja impresa. Desactívalo para radiografías y ecografías.";
+    escLabel.appendChild(escTexto);
+    filaTop.appendChild(escLabel);
+
+    const borrar = document.createElement("button");
+    borrar.type = "button";
+    borrar.className = "examen-borrar";
+    borrar.textContent = "Eliminar";
+    filaTop.appendChild(borrar);
+    card.appendChild(filaTop);
+
+    /* --- paginas --- */
+    const tira = document.createElement("div");
+    tira.className = "examen-paginas";
+    card.appendChild(tira);
+
+    /* Dos entradas distintas y no una: con capture el movil abre la camara
+       directamente, que es lo que quieres con la hoja en la mano. Sin
+       capture abre la galeria o los archivos, que es lo que quieres cuando
+       el examen ya te llego por mensaje. */
+    const entradaCamara = document.createElement("input");
+    entradaCamara.type = "file";
+    entradaCamara.accept = "image/*";
+    entradaCamara.setAttribute("capture", "environment");
+    entradaCamara.style.display = "none";
+    card.appendChild(entradaCamara);
+
+    const entradaArchivo = document.createElement("input");
+    entradaArchivo.type = "file";
+    entradaArchivo.accept = "image/*";
+    entradaArchivo.multiple = true;
+    entradaArchivo.style.display = "none";
+    card.appendChild(entradaArchivo);
+
+    function pintarPaginas() {
+      tira.innerHTML = "";
+      const mias = (paginas[examen.id] || []).slice().sort(function (a, b) { return (a.orden || 0) - (b.orden || 0); });
+      mias.forEach(function (pag, i) {
+        const tile = document.createElement("div");
+        tile.className = "photo-tile examen-pagina";
+        const img = document.createElement("img");
+        img.src = pag.datos;
+        img.alt = pag.nombre || "Página del examen";
+        img.loading = "lazy";
+        if (!pag.subiendo) {
+          img.style.cursor = "zoom-in";
+          img.addEventListener("click", function () {
+            const verEstas = mias.filter(function (p) { return !p.subiendo; });
+            abrirVisorFoto(verEstas, verEstas.indexOf(pag));
+          });
+        }
+        tile.appendChild(img);
+
+        const num = document.createElement("span");
+        num.className = "examen-pagina-num";
+        num.textContent = i + 1;
+        tile.appendChild(num);
+
+        if (pag.subiendo) {
+          const spin = document.createElement("div");
+          spin.className = "photo-uploading";
+          spin.textContent = "Guardando…";
+          tile.appendChild(spin);
+        } else {
+          const quitar = document.createElement("button");
+          quitar.type = "button";
+          quitar.className = "photo-remove";
+          quitar.textContent = "×";
+          quitar.setAttribute("aria-label", "Eliminar esta página");
+          quitar.addEventListener("click", async function () {
+            const ok = await askConfirm({
+              title: "¿Eliminar esta página?",
+              message: "Se borra definitivamente y no se puede deshacer.",
+              confirmLabel: "Eliminar"
+            });
+            if (!ok) return;
+            paginas[examen.id] = (paginas[examen.id] || []).filter(function (p) { return p !== pag; });
+            pintarPaginas();
+            try { await deleteDoc(doc(db, "fotos", pag.id)); }
+            catch (err) { logFoto("no se pudo borrar la página: " + ((err && err.code) || err)); }
+          });
+          tile.appendChild(quitar);
+        }
+        tira.appendChild(tile);
+      });
+
+      const btnCam = document.createElement("button");
+      btnCam.type = "button";
+      btnCam.className = "photo-add examen-add";
+      btnCam.innerHTML = "<span>📷</span><small>Escanear</small>";
+      btnCam.title = "Fotografiar la hoja con la cámara";
+      btnCam.addEventListener("click", function () { entradaCamara.click(); });
+      tira.appendChild(btnCam);
+
+      const btnArch = document.createElement("button");
+      btnArch.type = "button";
+      btnArch.className = "photo-add examen-add";
+      btnArch.innerHTML = "<span>📎</span><small>Archivo</small>";
+      btnArch.title = "Subir una imagen que ya tienes";
+      btnArch.addEventListener("click", function () { entradaArchivo.click(); });
+      tira.appendChild(btnArch);
+    }
+
+    async function subirPaginas(archivos, comoEscaneo) {
+      for (const file of Array.from(archivos || [])) {
+        if (!file.type || file.type.indexOf("image/") !== 0) continue;
+        const provisional = {
+          id: "tmp-" + Date.now() + Math.random(),
+          examenId: examen.id,
+          nombre: file.name,
+          datos: URL.createObjectURL(file),
+          orden: Date.now(),
+          subiendo: true
+        };
+        paginas[examen.id] = (paginas[examen.id] || []).concat([provisional]);
+        pintarPaginas();
+        try {
+          const guardada = await guardarPaginaDeExamen(entry.id, examen.id, file, comoEscaneo);
+          URL.revokeObjectURL(provisional.datos);
+          paginas[examen.id] = paginas[examen.id].map(function (p) {
+            return p === provisional ? { ...guardada, orden: provisional.orden, _pending: !navigator.onLine } : p;
+          });
+        } catch (err) {
+          URL.revokeObjectURL(provisional.datos);
+          paginas[examen.id] = paginas[examen.id].filter(function (p) { return p !== provisional; });
+          logFoto("falló la página: " + ((err && err.code) || (err && err.message) || err));
+          alert(
+            err && err.message === "foto-demasiado-grande"
+              ? "Esa hoja es demasiado grande incluso comprimida. Prueba a fotografiarla más de cerca, o por partes."
+              : "No se pudo guardar la página. Inténtalo de nuevo."
+          );
+        }
+        pintarPaginas();
+      }
+    }
+
+    entradaCamara.addEventListener("change", function () {
+      const f = entradaCamara.files;
+      entradaCamara.value = "";
+      subirPaginas(f, escCheck.checked); // la cámara respeta el interruptor
+    });
+    entradaArchivo.addEventListener("change", function () {
+      const f = entradaArchivo.files;
+      entradaArchivo.value = "";
+      subirPaginas(f, escCheck.checked); // una foto reenviada está igual de gris
+    });
+
+    pintarPaginas();
+
+    /* --- valores --- */
+    const datalist = document.createElement("datalist");
+    datalist.id = "analitos-" + examen.id;
+    card.appendChild(datalist);
+
+    function pintarSugerencias() {
+      datalist.innerHTML = "";
+      analitosDeTipo(examen.tipo).forEach(function (a) {
+        const o = document.createElement("option");
+        o.value = a[0];
+        datalist.appendChild(o);
+      });
+    }
+    pintarSugerencias();
+
+    tipoSel.addEventListener("change", function () {
+      guardarCampo(examen, "tipo", tipoSel.value);
+      pintarSugerencias();
+      if (examen.escaner == null) {
+        escCheck.checked = escanearPorDefecto(tipoSel.value);
+      }
+    });
+
+    const valores = document.createElement("div");
+    valores.className = "examen-valores";
+    card.appendChild(valores);
+
+    function pintarValores() {
+      valores.innerHTML = "";
+      examen.valores = examen.valores || [];
+      if (!examen.valores.length) {
+        const nota = document.createElement("p");
+        nota.className = "examen-sin-valores";
+        nota.textContent = "Sin valores anotados. Copia de la hoja los que importen para el caso.";
+        valores.appendChild(nota);
+      }
+      examen.valores.forEach(function (v) {
+        valores.appendChild(filaDeValor(examen, v, function () {
+          examen.valores = examen.valores.filter(function (x) { return x !== v; });
+          guardarCampo(examen, "valores", examen.valores);
+          pintarValores();
+        }));
+      });
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "btn-mini examen-add-valor";
+      add.textContent = "+ Valor";
+      add.addEventListener("click", function () {
+        examen.valores = (examen.valores || []).concat([{ nombre: "", valor: "", unidad: "", min: "", max: "" }]);
+        guardarCampo(examen, "valores", examen.valores);
+        pintarValores();
+        const ultimo = valores.querySelectorAll(".examen-campo-nombre");
+        if (ultimo.length) ultimo[ultimo.length - 1].focus();
+      });
+      valores.appendChild(add);
+    }
+    pintarValores();
+
+    /* --- notas del examen --- */
+    const notas = document.createElement("textarea");
+    notas.className = "examen-notas";
+    notas.rows = 2;
+    notas.placeholder = "Interpretación, hallazgos, qué se decidió a partir de este examen…";
+    notas.value = examen.notas || "";
+    notas.addEventListener("input", function () { guardarCampo(examen, "notas", notas.value); });
+    card.appendChild(notas);
+
+    borrar.addEventListener("click", async function () {
+      const cuantas = (paginas[examen.id] || []).length;
+      const ok = await askConfirm({
+        title: "¿Eliminar este examen?",
+        message: cuantas
+          ? "Se borran también sus " + cuantas + " página(s). No se puede deshacer."
+          : "Se borra definitivamente y no se puede deshacer.",
+        confirmLabel: "Eliminar"
+      });
+      if (!ok) return;
+      const mias = (paginas[examen.id] || []).slice();
+      examenes = examenes.filter(function (e) { return e !== examen; });
+      delete paginas[examen.id];
+      pintarLista();
+      try {
+        await Promise.all(mias.filter(function (p) { return !p.subiendo; })
+          .map(function (p) { return deleteDoc(doc(db, "fotos", p.id)); }));
+        await deleteDoc(doc(db, "fotos", examen.id));
+      } catch (err) {
+        logFoto("no se pudo borrar el examen: " + ((err && err.code) || err));
+      }
+    });
+
+    return card;
+  }
+
+  function pintarLista() {
+    lista.innerHTML = "";
+    vacio.hidden = examenes.length > 0;
+    if (!examenes.length) vacio.textContent = "Aún no hay exámenes. Escanea la hoja del laboratorio o sube el archivo.";
+    examenes
+      .slice()
+      .sort(function (a, b) { return String(b.fecha || "").localeCompare(String(a.fecha || "")); })
+      .forEach(function (ex) { lista.appendChild(tarjetaDeExamen(ex)); });
+  }
+
+  btnNuevo.addEventListener("click", async function () {
+    btnNuevo.disabled = true;
+    try {
+      const nuevo = await crearExamen(entry.id);
+      examenes = examenes.concat([nuevo]);
+      pintarLista();
+    } catch (err) {
+      logFoto("no se pudo crear el examen: " + ((err && err.code) || err));
+      alert("No se pudo crear el examen. Inténtalo de nuevo.");
+    } finally {
+      btnNuevo.disabled = false;
+    }
+  });
+
+  cargarAdjuntos
+    .then(function (repartido) {
+      examenes = repartido.examenes;
+      paginas = repartido.paginas;
+      pintarLista();
+    })
+    .catch(function () {
+      vacio.textContent = "No se pudieron cargar los exámenes.";
+      vacio.hidden = false;
+    });
 
   return wrap;
 }
@@ -1562,8 +2312,9 @@ function buildPhotosSection(entry, statusText, etiqueta) {
     .then((lista) => {
       cargando = false;
       // Puede haber llegado una foto nueva mientras cargaba: no se pisan.
-      const nuevas = fotos.filter((f) => !lista.some((l) => l.id === f.id));
-      fotos = lista.concat(nuevas);
+      const sueltas = repartirAdjuntos(lista).fotos;
+      const nuevas = fotos.filter((f) => !sueltas.some((l) => l.id === f.id));
+      fotos = sueltas.concat(nuevas);
       renderGrid();
     })
     .catch((err) => {
@@ -4693,6 +5444,15 @@ function renderPatientDetail(root, entry) {
   photosCard.className = "card card-pad";
   photosCard.appendChild(buildPhotosSection(entry, statusText));
   leftCol.appendChild(photosCard);
+
+  /* Los examenes van pegados a las fotos: son lo mismo, imagenes del
+     caso, y separarlos por media pantalla obligaria a buscarlos. */
+  const examenesCard = document.createElement("div");
+  examenesCard.className = "card card-pad";
+  examenesCard.appendChild(
+    buildExamenesSection(entry, statusText, fotosDeEntrada(entry.id).then(repartirAdjuntos))
+  );
+  leftCol.appendChild(examenesCard);
 
   const medsCard = document.createElement("div");
   medsCard.className = "card card-pad";

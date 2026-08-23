@@ -177,7 +177,7 @@ function matchesQuery(entry, q) {
     incluyeNormalizado(entry.especie, q) ||
     incluyeNormalizado(entry.area, q) ||
     incluyeNormalizado(entry.tutorNombre, q) ||
-    incluyeNormalizado(entry.body, q)
+    incluyeNormalizado(textoDelCaso(entry), q)
   );
 }
 
@@ -974,6 +974,69 @@ function abrirVisorFoto(lista, indiceInicial) {
 /* Adaptador de lectura: los apuntes viejos solo tienen "body" en texto
    plano. En vez de migrarlos, se convierten al vuelo. Asi nada se rompe
    mientras existan los dos formatos. */
+/* ---------- La historia clínica, por apartados ----------
+
+   Antes era UN cuadro de texto con todo dentro. Un caso escrito así no se
+   puede releer: para saber qué se le encontró en el examen físico hay que
+   leerlo entero. Ahora son cuatro apartados, con los exámenes en medio,
+   que es el orden en que ocurre la consulta.
+
+   Los casos viejos NO se migran: su texto sigue en "body" y se muestra en
+   Anamnesis, que es donde casi siempre estaba. En cuanto se escribe algo
+   en los apartados nuevos, "body" deja de leerse — pero no se borra, así
+   que el texto original sigue ahí pase lo que pase. */
+const CASO_APARTADOS = [
+  {
+    clave: "anamnesis",
+    etiqueta: "Anamnesis",
+    marcador: "Motivo de consulta, desde cuándo, antecedentes, alimentación, vacunas, desparasitación, qué cuenta el tutor…"
+  },
+  {
+    clave: "examenFisico",
+    etiqueta: "Examen físico",
+    marcador: "Actitud, condición corporal, mucosas, linfonodos, auscultación, palpación abdominal, hallazgos por sistema…"
+  },
+  {
+    clave: "diagnostico",
+    etiqueta: "Diagnóstico",
+    marcador: "Presuntivo, diferenciales, definitivo y en qué te basas…"
+  },
+  {
+    clave: "tratamiento",
+    etiqueta: "Tratamiento",
+    marcador: "Qué se aplicó en consulta, qué se envió a casa, indicaciones al tutor, cuándo controlar…"
+  }
+];
+
+function apartadosVacios(entry) {
+  return CASO_APARTADOS.every(function (a) {
+    return !String(entry[a.clave] || "").trim();
+  });
+}
+
+/* Lo que se muestra en un apartado al abrir la ficha. Solo Anamnesis
+   hereda el texto antiguo, y solo mientras no se haya escrito nada nuevo. */
+function textoDeApartado(entry, clave) {
+  const propio = entry[clave];
+  if (propio != null && String(propio).length) return String(propio);
+  if (clave === "anamnesis" && apartadosVacios(entry)) return String(entry.body || "");
+  return "";
+}
+
+/* El caso entero como texto plano. Lo usan el buscador y el PDF: si cada
+   uno decidiera por su cuenta qué leer, uno encontraría casos que el otro
+   no imprime. */
+function textoDelCaso(entry) {
+  if (apartadosVacios(entry)) return String(entry.body || "");
+  return CASO_APARTADOS
+    .map(function (a) {
+      const t = String(entry[a.clave] || "").trim();
+      return t ? a.etiqueta + ": " + t : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
 function apunteComoHtml(entry) {
   if (entry.bodyHtml && String(entry.bodyHtml).trim()) return limpiarHtmlApunte(entry.bodyHtml);
   const plano = String(entry.body || "");
@@ -1014,10 +1077,42 @@ function limpiarHtmlApunte(html) {
    mas (el saneado, o el propio navegador al re-crear un nodo), y
    perderlo significa que la imagen vuelve a salir enorme. Con el
    atributo se puede reponer siempre. */
+/* Una imagen con titulo es un <figure> con la imagen y un
+   <figcaption> debajo, como en un documento. El figcaption es editable
+   solo porque esta dentro del contenteditable: no lleva atributo
+   propio, asi no hay nada que limpiar al guardar.
+
+   Todo lo que manipula la imagen —mover, cambiar de tamano— actua
+   sobre el ENVOLTORIO, no sobre el <img>: si moviera solo la imagen,
+   el titulo se quedaria atras. Las imagenes de los apuntes antiguos no
+   tienen figure y siguen funcionando: envoltorioDeImagen devuelve la
+   propia imagen y todo se comporta como antes. */
+function envoltorioDeImagen(img) {
+  const fig = img && img.closest ? img.closest("figure.apunte-fig") : null;
+  return fig || img;
+}
+
+function crearFiguraDeImagen(img) {
+  const fig = document.createElement("figure");
+  fig.className = "apunte-fig";
+  const pie = document.createElement("figcaption");
+  pie.className = "apunte-pie";
+  pie.setAttribute("data-vacio", "Escribe un título…");
+  fig.appendChild(img);
+  fig.appendChild(pie);
+  return fig;
+}
+
 function aplicarAnchosGuardados(editor) {
-  Array.from(editor.querySelectorAll("img[data-ancho]")).forEach(function (img) {
-    const v = parseFloat(img.getAttribute("data-ancho"));
-    if (isFinite(v) && v > 0) img.style.width = v + "%";
+  Array.from(editor.querySelectorAll("[data-ancho]")).forEach(function (el) {
+    const v = parseFloat(el.getAttribute("data-ancho"));
+    if (isFinite(v) && v > 0) el.style.width = v + "%";
+  });
+  /* El marcador del pie se repone al abrir: es de pantalla, no del
+     apunte, y guardarlo lo convertiria en el texto del titulo. */
+  Array.from(editor.querySelectorAll("figure.apunte-fig > figcaption")).forEach(function (pie) {
+    pie.classList.add("apunte-pie");
+    pie.setAttribute("data-vacio", "Escribe un título…");
   });
 }
 
@@ -1031,6 +1126,9 @@ function apunteParaGuardar(editor) {
        para siempre al volver a abrir. */
     img.classList.remove("apunte-img-sel");
     if (!img.getAttribute("class")) img.removeAttribute("class");
+  });
+  Array.from(copia.querySelectorAll("figcaption")).forEach(function (pie) {
+    pie.removeAttribute("data-vacio");
   });
   return copia.innerHTML;
 }
@@ -1186,12 +1284,13 @@ function buildApunteEditor(entry, statusText) {
         img.src = guardada.datos;
         img.setAttribute("data-foto", guardada.id);
         img.alt = file.name || "Imagen del apunte";
-        img.style.width = APUNTE_ANCHO_INICIAL + "%";
-        img.setAttribute("data-ancho", APUNTE_ANCHO_INICIAL);
         img.setAttribute("draggable", "false");
+        const figura = crearFiguraDeImagen(img);
+        figura.style.width = APUNTE_ANCHO_INICIAL + "%";
+        figura.setAttribute("data-ancho", APUNTE_ANCHO_INICIAL);
         const salto = document.createElement("br");
         insertarNodo(salto);
-        insertarNodo(img);
+        insertarNodo(figura);
         guardar();
       } catch (err) {
         alert(
@@ -1305,8 +1404,9 @@ function buildApunteEditor(entry, statusText) {
       manija.setPointerCapture(e.pointerId);
 
       const esquina = manija.dataset.esquina;
+      const objetivo = envoltorioDeImagen(imgSel);
       const inicioX = e.clientX;
-      const anchoInicial = imgSel.getBoundingClientRect().width;
+      const anchoInicial = objetivo.getBoundingClientRect().width;
       const util = anchoUtilEditor();
       // Las esquinas de la izquierda crecen al arrastrar hacia fuera.
       const signo = esquina === "ni" || esquina === "si" ? -1 : 1;
@@ -1316,8 +1416,8 @@ function buildApunteEditor(entry, statusText) {
         const nuevoPx = anchoInicial + (ev.clientX - inicioX) * signo;
         const pct = Math.min(APUNTE_ANCHO_MAX, Math.max(APUNTE_ANCHO_MIN, (nuevoPx / util) * 100));
         const ancho = Math.round(pct * 10) / 10;
-        imgSel.style.width = ancho + "%";
-        imgSel.setAttribute("data-ancho", ancho);
+        objetivo.style.width = ancho + "%";
+        objetivo.setAttribute("data-ancho", ancho);
         colocarMarco();
       }
       function soltar() {
@@ -1404,11 +1504,14 @@ function buildApunteEditor(entry, statusText) {
       img.classList.remove("apunte-img-moviendo");
       if (!moviendo) { colocarMarco(); return; } // era un clic: solo seleccionar
       const destino = rangoEnPunto(ev.clientX, ev.clientY);
-      /* El destino puede caer DENTRO de la propia imagen; insertar un nodo
-         dentro de si mismo lanza. Se comprueba antes. */
-      if (destino && !img.contains(destino.startContainer) && destino.startContainer !== img) {
-        destino.insertNode(img);
-        destino.setStartAfter(img);
+      /* Se mueve el envoltorio: con la figura suelta, el titulo se
+         quedaria donde estaba y la imagen se iria sola.
+         Y el destino puede caer DENTRO de lo que se esta moviendo;
+         insertar un nodo dentro de si mismo lanza. Se comprueba antes. */
+      const pieza = envoltorioDeImagen(img);
+      if (destino && !pieza.contains(destino.startContainer) && destino.startContainer !== pieza) {
+        destino.insertNode(pieza);
+        destino.setStartAfter(pieza);
         destino.collapse(true);
         const sel = window.getSelection();
         sel.removeAllRanges();
@@ -1715,6 +1818,20 @@ function procesarComoEscaneo(file) {
   });
 }
 
+function fechaDeSubida(pagina) {
+  /* createdAt lo pone el servidor y tarda en volver; orden es Date.now()
+     escrito en el momento. Mientras la escritura viaja, orden es lo
+     unico que hay, y sin el la hoja recien subida saldria sin fecha. */
+  const t = pagina && pagina.createdAt && typeof pagina.createdAt.toDate === "function"
+    ? pagina.createdAt.toDate()
+    : pagina && pagina.orden ? new Date(pagina.orden) : null;
+  if (!t || isNaN(t.getTime())) return "";
+  // Un "orden" que no era una marca de tiempo daria 1969: mejor sin fecha
+  // que con una que no significa nada.
+  if (t.getFullYear() < 2000) return "";
+  return t.toLocaleDateString("es-EC", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+
 async function crearExamen(entryId) {
   const base = {
     clase: "examen",
@@ -1957,6 +2074,8 @@ function buildExamenesSection(entry, statusText, cargarAdjuntos) {
       tira.innerHTML = "";
       const mias = (paginas[examen.id] || []).slice().sort(function (a, b) { return (a.orden || 0) - (b.orden || 0); });
       mias.forEach(function (pag, i) {
+        const caja = document.createElement("div");
+        caja.className = "examen-pagina-caja";
         const tile = document.createElement("div");
         tile.className = "photo-tile examen-pagina";
         const img = document.createElement("img");
@@ -2002,7 +2121,13 @@ function buildExamenesSection(entry, statusText, cargarAdjuntos) {
           });
           tile.appendChild(quitar);
         }
-        tira.appendChild(tile);
+        caja.appendChild(tile);
+        const cuando = document.createElement("span");
+        cuando.className = "examen-pagina-fecha";
+        cuando.textContent = pag.subiendo ? "subiendo…" : fechaDeSubida(pag);
+        cuando.title = "Fecha en que se subió esta hoja";
+        caja.appendChild(cuando);
+        tira.appendChild(caja);
       });
 
       const btnCam = document.createElement("button");
@@ -4936,13 +5061,28 @@ function buildPrintableCase(entry, fotos) {
     root.appendChild(sec);
   }
 
-  if (caso.body && caso.body.trim()) {
-    const notas = bloqueImpreso("Anamnesis, examen físico, diagnóstico, tratamiento");
-    const p = document.createElement("p");
-    p.className = "print-text";
-    p.textContent = caso.body;
-    notas.appendChild(p);
-    root.appendChild(notas);
+  /* Un bloque por apartado, y solo los que tienen algo escrito: una
+     ficha impresa con cuatro titulos vacios se lee peor que sin ellos. */
+  if (apartadosVacios(caso)) {
+    if (caso.body && caso.body.trim()) {
+      const notas = bloqueImpreso("Historia clínica");
+      const p = document.createElement("p");
+      p.className = "print-text";
+      p.textContent = caso.body;
+      notas.appendChild(p);
+      root.appendChild(notas);
+    }
+  } else {
+    CASO_APARTADOS.forEach(function (ap) {
+      const t = String(caso[ap.clave] || "").trim();
+      if (!t) return;
+      const bloque = bloqueImpreso(ap.etiqueta);
+      const p = document.createElement("p");
+      p.className = "print-text";
+      p.textContent = t;
+      bloque.appendChild(p);
+      root.appendChild(bloque);
+    });
   }
 
   const meds = (Array.isArray(caso.farmacos) ? caso.farmacos : []).filter((m) => m && m.nombre);
@@ -5445,15 +5585,6 @@ function renderPatientDetail(root, entry) {
   photosCard.appendChild(buildPhotosSection(entry, statusText));
   leftCol.appendChild(photosCard);
 
-  /* Los examenes van pegados a las fotos: son lo mismo, imagenes del
-     caso, y separarlos por media pantalla obligaria a buscarlos. */
-  const examenesCard = document.createElement("div");
-  examenesCard.className = "card card-pad";
-  examenesCard.appendChild(
-    buildExamenesSection(entry, statusText, fotosDeEntrada(entry.id).then(repartirAdjuntos))
-  );
-  leftCol.appendChild(examenesCard);
-
   const medsCard = document.createElement("div");
   medsCard.className = "card card-pad";
   medsCard.appendChild(buildMedsSection(entry, statusText));
@@ -5472,32 +5603,67 @@ function renderPatientDetail(root, entry) {
   constCard.appendChild(constantesNodo);
   rightCol.appendChild(constCard);
 
+  /* --- Historia clínica por apartados, con los exámenes en medio --- */
   const notesCard = document.createElement("div");
   notesCard.className = "card card-pad";
   const notesLabel = document.createElement("label");
   notesLabel.className = "checkbox-group-label";
   notesLabel.style.margin = "0 0 8px";
-  notesLabel.textContent = "Anamnesis, examen físico, diagnóstico, tratamiento";
-
-  const bodyToolbar = document.createElement("div");
-  bodyToolbar.className = "body-toolbar";
-  const voiceBtn = document.createElement("button");
-  voiceBtn.type = "button";
-  voiceBtn.className = "voice-btn";
-  voiceBtn.setAttribute("data-listening", "false");
-  voiceBtn.innerHTML = '<span class="rec-dot"></span><span class="label">🎤 Dictar por voz</span>';
-  bodyToolbar.appendChild(voiceBtn);
-
-  const body = document.createElement("textarea");
-  body.className = "field-body";
-  body.placeholder = "Anamnesis, examen físico, diagnóstico, tratamiento…";
-  body.value = entry.body || "";
-  body.addEventListener("input", () => save("body", body.value));
-  attachVoiceInput(voiceBtn, body);
-
+  notesLabel.textContent = "Historia clínica";
   notesCard.appendChild(notesLabel);
-  notesCard.appendChild(bodyToolbar);
-  notesCard.appendChild(body);
+
+  /* El aviso solo sale en los casos escritos con el cuadro único: no hay
+     que explicarle nada a quien nunca vio el formato viejo. */
+  if (apartadosVacios(entry) && String(entry.body || "").trim()) {
+    const aviso = document.createElement("p");
+    aviso.className = "apartado-legado";
+    aviso.textContent =
+      "Este caso se escribió antes de los apartados: todo su texto está en Anamnesis. Repártelo cuando quieras; nada se pierde.";
+    notesCard.appendChild(aviso);
+  }
+
+  CASO_APARTADOS.forEach(function (ap) {
+    const bloque = document.createElement("div");
+    bloque.className = "apartado";
+
+    const cabeza = document.createElement("div");
+    cabeza.className = "apartado-head";
+    const nombre = document.createElement("span");
+    nombre.textContent = ap.etiqueta;
+    cabeza.appendChild(nombre);
+
+    /* Un micrófono por apartado y no uno para todo: dictando en la
+       consulta no vas a ir cambiando de cuadro con la mano ocupada. */
+    const voiceBtn = document.createElement("button");
+    voiceBtn.type = "button";
+    voiceBtn.className = "voice-btn voice-btn-mini";
+    voiceBtn.setAttribute("data-listening", "false");
+    voiceBtn.innerHTML = '<span class="rec-dot"></span><span class="label">🎤 Dictar</span>';
+    cabeza.appendChild(voiceBtn);
+    bloque.appendChild(cabeza);
+
+    const caja = document.createElement("textarea");
+    caja.className = "field-body apartado-caja";
+    caja.placeholder = ap.marcador;
+    caja.value = textoDeApartado(entry, ap.clave);
+    caja.addEventListener("input", function () { save(ap.clave, caja.value); });
+    attachVoiceInput(voiceBtn, caja);
+    bloque.appendChild(caja);
+
+    notesCard.appendChild(bloque);
+
+    /* Los exámenes van DESPUÉS del examen físico: es cuando se piden, y
+       el diagnóstico de abajo se escribe mirándolos. */
+    if (ap.clave === "examenFisico") {
+      const bloqueEx = document.createElement("div");
+      bloqueEx.className = "apartado apartado-examenes";
+      bloqueEx.appendChild(
+        buildExamenesSection(entry, statusText, fotosDeEntrada(entry.id).then(repartirAdjuntos))
+      );
+      notesCard.appendChild(bloqueEx);
+    }
+  });
+
   rightCol.appendChild(notesCard);
 
   const evolCard = document.createElement("div");

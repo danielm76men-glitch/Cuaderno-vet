@@ -2083,6 +2083,63 @@ button, input, select, textarea { font-family: inherit; }
 /* Al arrastrar un archivo de fuera, el borde avisa de que se puede soltar. */
 .apunte-editor.apunte-soltar { border-color: var(--teal); border-style: dashed; }
 
+/* --- Imagen con título, como en un documento ---
+   La figura es inline-block para que siga conviviendo con el texto, y el
+   ancho lo lleva ELLA: si lo llevara la imagen, el porcentaje sería del
+   ancho de la figura y no del apunte, y al cambiar de tamaño se
+   realimentaría sola. */
+.apunte-editor figure.apunte-fig {
+  display: inline-block; vertical-align: top;
+  margin: 6px 0; max-width: 100%;
+}
+.apunte-editor figure.apunte-fig > img {
+  width: 100%; margin: 0; display: block;
+}
+.apunte-editor figcaption.apunte-pie {
+  font-size: 0.8rem; color: var(--muted); text-align: center;
+  padding: 4px 2px 2px; line-height: 1.35; min-height: 1.2em;
+  border-bottom: 1px dashed transparent;
+}
+.apunte-editor figcaption.apunte-pie:focus {
+  outline: none; border-bottom-color: var(--line);
+}
+/* El marcador solo mientras el pie esté vacío. :empty se rompe en cuanto
+   el navegador mete un <br>, así que también se cubre ese caso. */
+.apunte-editor figcaption.apunte-pie:empty::before {
+  content: attr(data-vacio); color: var(--muted); opacity: 0.55;
+}
+
+/* --- Historia clínica por apartados --- */
+.apartado { margin-bottom: 14px; }
+.apartado:last-child { margin-bottom: 0; }
+.apartado-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-bottom: 5px;
+}
+.apartado-head > span {
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--muted); font-weight: 700;
+}
+/* Los apartados son más bajos que el cuadro único que sustituyen: son
+   cinco cosas en la misma pantalla y uno solo no puede comerse el sitio
+   de los demás. Crecen arrastrando la esquina. */
+.apartado .apartado-caja { min-height: 96px; resize: vertical; }
+.apartado-legado {
+  margin: 0 0 12px; padding: 8px 10px;
+  font-size: 0.78rem; line-height: 1.4; color: var(--muted);
+  background: var(--paper-alt); border-left: 3px solid var(--line); border-radius: 6px;
+}
+.apartado-examenes { margin-bottom: 16px; }
+
+/* El micrófono de cada apartado es más pequeño que el botón único de
+   antes: hay cuatro en pantalla y no pueden pesar como cuatro botones. */
+.voice-btn-mini { padding: 3px 9px; font-size: 0.72rem; }
+
+/* La hoja del examen, con su fecha de subida debajo. */
+.examen-pagina-caja { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.examen-pagina-fecha { font-size: 0.62rem; color: var(--muted); line-height: 1; }
+
+
 /* =====================================================================
    CONTRASTE DE TEXTO SOBRE FONDOS DE COLOR
    =====================================================================

@@ -844,6 +844,20 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
   font-size: 1rem; line-height: 1; cursor: pointer; padding: 0;
 }
 .familia-borrar:hover { color: var(--rust); }
+
+/* El "+ Fármaco" de cada familia. Discreto hasta que pasas por encima de
+   la fila: si pesara como un botón normal, ocho de ellos competirían con
+   el nombre de la familia, que es lo que se lee. */
+.group-add {
+  appearance: none; border: 1px solid transparent; background: transparent;
+  color: var(--muted); font: inherit; font-size: 0.72rem; font-weight: 700;
+  padding: 2px 9px; border-radius: 999px; cursor: pointer;
+  margin-left: 12px; opacity: 0.55;
+}
+.group-row:hover .group-add, .group-add:focus-visible {
+  opacity: 1; border-color: var(--line); color: var(--teal-ink);
+}
+.group-add:hover { background: var(--teal-soft); border-color: var(--teal); }
 .field-row-familia .input-grupo {
   width: 100%; font: inherit; font-size: 0.9rem;
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px;

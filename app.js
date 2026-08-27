@@ -7400,6 +7400,26 @@ function buildFormularioTable(list, withActions) {
     headTd.querySelector(".group-name").textContent = nombre;
     headTd.querySelector(".group-count").textContent =
       filas.length === 0 ? "vacía" : filas.length + (filas.length === 1 ? " fármaco" : " fármacos");
+
+    /* Anadir un farmaco DIRECTAMENTE en esta familia. Solo en la lista
+       que se puede editar: la de consulta del overlay no crea nada.
+
+       stopPropagation obligatorio: el encabezado entero es el boton que
+       pliega el grupo, y sin esto cada alta plegaria la familia justo
+       al abrir la ficha del farmaco nuevo. */
+    if (withActions) {
+      const addAqui = document.createElement("button");
+      addAqui.type = "button";
+      addAqui.className = "group-add";
+      addAqui.textContent = "+ Fármaco";
+      addAqui.title = "Agregar un fármaco dentro de “" + nombre + "”";
+      addAqui.addEventListener("click", (e) => {
+        e.stopPropagation();
+        createFormularioEntry(nombre);
+      });
+      headTd.appendChild(addAqui);
+    }
+
     headTr.appendChild(headTd);
     tbody.appendChild(headTr);
 
@@ -7519,12 +7539,20 @@ function buildFormularioTable(list, withActions) {
   return wrap;
 }
 
-async function createFormularioEntry() {
+/* Con un grupo, el farmaco nace ya dentro de esa familia. Sin el, se
+   clasifica solo por lo que escribas en Familia, como siempre.
+
+   Hacia falta: crear una familia propia y despues no encontrar como
+   meter nada dentro dejaba la familia vacia para siempre. El unico
+   camino era crear el farmaco arriba, abrir su ficha y cambiar
+   "Aparece en" — tres pasos y ninguno a la vista. */
+async function createFormularioEntry(grupo) {
   try {
     const ref = await addDoc(collection(db, "formulario"), {
       uid: currentUid,
       nombreGenerico: "",
       familia: "",
+      grupo: grupo || "",
       presentaciones: [],
       dosis: [],
       retiro: [],
@@ -7710,6 +7738,7 @@ function renderFormularioTab(root) {
   addBtn.type = "button";
   addBtn.className = "btn-primary";
   addBtn.textContent = "+ Agregar fármaco";
+  // Sin argumento a proposito: desde arriba se crea sin familia fija.
   addBtn.addEventListener("click", () => createFormularioEntry());
   const famBtn = document.createElement("button");
   famBtn.type = "button";

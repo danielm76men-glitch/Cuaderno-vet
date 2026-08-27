@@ -16,6 +16,11 @@
   --amber-soft: #f2e8d3;
   --amber-ink: #84620c;
   --velo-contador: rgba(0, 0, 0, 0.18);
+  /* Le dice al sistema de que color es esta pagina. Sin esto, los controles
+     que dibuja el navegador —el menu de un desplegable, el calendario de
+     una fecha, las barras de desplazamiento— salen en tema claro aunque el
+     cuaderno este en oscuro. */
+  color-scheme: light;
   --shadow: 0 1px 2px rgba(36, 41, 32, 0.06), 0 6px 20px rgba(36, 41, 32, 0.06);
   --fila-grupo: #bcd4c6;
   --fila-subgrupo: #e2dcc9;
@@ -46,6 +51,7 @@
     --amber-soft: #362c17;
     --amber-ink: #dcb24b;
     --velo-contador: rgba(255, 255, 255, 0.16);
+    color-scheme: dark;
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
     --fila-grupo: #37342b;
     --fila-subgrupo: #26241f;
@@ -59,6 +65,7 @@
   --rust: #e38a5c; --rust-ink: #eeab84; --rust-soft: #3a281d;
   --amber: #dcb24b; --amber-soft: #362c17; --amber-ink: #dcb24b;
   --velo-contador: rgba(255, 255, 255, 0.16);
+  color-scheme: dark;
   --fila-grupo: #37342b; --fila-subgrupo: #26241f;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
 }
@@ -70,6 +77,7 @@
   --rust: #b14f2c; --rust-ink: #8a3d22; --rust-soft: #f3e2d7;
   --amber: #a1780f; --amber-soft: #f2e8d3; --amber-ink: #84620c;
   --velo-contador: rgba(0, 0, 0, 0.18);
+  color-scheme: light;
   --fila-grupo: #bcd4c6; --fila-subgrupo: #e2dcc9;
   --shadow: 0 1px 2px rgba(36, 41, 32, 0.06), 0 6px 20px rgba(36, 41, 32, 0.06);
 }
@@ -578,6 +586,23 @@ button, input, select, textarea { font-family: inherit; }
 .patient-head-info .sub { font-size: 0.82rem; color: var(--muted); }
 .patient-head-actions { display: flex; gap: 8px; margin-left: auto; }
 
+/* La fecha de ingreso, en la cabecera. flex: none para que no crezca hasta
+   los 140 px que pide .field-group ni empuje a los botones fuera de la
+   fila; el rotulo en una sola linea porque "FECHA DE INGRESO" partido en
+   dos deja la cabecera descuadrada. */
+.patient-head .patient-head-fecha {
+  flex: none;
+  min-width: 0;
+  margin-left: auto;
+}
+.patient-head .patient-head-fecha + .patient-head-actions { margin-left: 14px; }
+.patient-head .patient-head-fecha label { white-space: nowrap; }
+.patient-head .patient-head-fecha input { width: 9.5em; }
+@media (max-width: 600px) {
+  .patient-head .patient-head-fecha { margin-left: 0; }
+  .patient-head .patient-head-fecha + .patient-head-actions { margin-left: auto; }
+}
+
 .detail-grid { display: grid; grid-template-columns: 320px 1fr; gap: 18px; align-items: start; }
 @media (max-width: 900px) {
   .detail-grid { grid-template-columns: 1fr; }
@@ -626,6 +651,17 @@ button, input, select, textarea { font-family: inherit; }
   padding: 4px 2px;
 }
 .field-group input:focus-visible, .field-group select:focus-visible { outline: none; border-bottom-color: var(--teal); }
+
+/* El menu abierto de un desplegable lo dibuja el sistema. El select lleva
+   fondo transparente —correcto, para que se apoye en el papel— pero eso
+   dejaba tambien sin fondo a cada opcion, y el navegador elegia el suyo:
+   en oscuro salia texto gris sobre gris y no se leia ninguna especie.
+   Dandoselo explicito no depende de lo que decida cada navegador. */
+select option, select optgroup {
+  background-color: var(--paper-raised);
+  color: var(--ink);
+}
+select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
 .field-static { font-size: 0.86rem; color: var(--ink); padding: 4px 2px; min-height: 1.3em; }
 
 .checkbox-group-label { display: block; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 700; margin: 4px 0 6px; }
@@ -760,6 +796,41 @@ button, input, select, textarea { font-family: inherit; }
    ese bloque, así que se ve como botón y no como enlace. */
 .btn-mini-calc { border-color: var(--teal); color: var(--teal-ink); font-weight: 700; }
 .btn-mini-calc:hover { background: var(--teal-soft); }
+
+/* ---------- Familias de fármacos ---------- */
+.card-head-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+.overlay-familias { max-width: 640px; }
+.familias-lista { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 8px; }
+.familias-fijas, .familias-vacio {
+  margin: 0; font-size: 0.8rem; color: var(--muted); line-height: 1.45;
+}
+.familia-fila {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto 22px;
+  align-items: center; gap: 8px;
+}
+.familia-fila .familia-campo {
+  font: inherit; font-size: 0.88rem; min-width: 0;
+  border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px;
+  background: var(--paper-raised); color: var(--ink);
+}
+.familia-fila .familia-campo-nombre { font-weight: 700; }
+.familia-cuenta { font-size: 0.74rem; color: var(--muted); white-space: nowrap; }
+.familia-borrar {
+  appearance: none; border: none; background: transparent; color: var(--muted);
+  font-size: 1rem; line-height: 1; cursor: pointer; padding: 0;
+}
+.familia-borrar:hover { color: var(--rust); }
+.field-row-familia .input-grupo {
+  width: 100%; font: inherit; font-size: 0.9rem;
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 9px;
+  background: var(--paper-raised); color: var(--ink);
+}
+
+@media (max-width: 600px) {
+  .familia-fila { grid-template-columns: minmax(0, 1fr) auto 22px; }
+  .familia-fila .familia-campo-claves { grid-column: 1 / -1; }
+}
 
 .examen-lista { display: flex; flex-direction: column; gap: 14px; }
 .examenes-vacio { margin: 8px 0 0; font-size: 0.84rem; color: var(--muted); }

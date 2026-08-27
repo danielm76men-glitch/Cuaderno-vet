@@ -5851,7 +5851,15 @@ function renderPatientDetail(root, entry) {
     refreshSub();
   });
 
-  row2.appendChild(dateGroup);
+  /* La fecha de ingreso sube a la cabecera, con el nombre del paciente:
+     es de las primeras cosas que se miran y ahi se ve sin bajar. El nodo
+     ya esta creado, solo cambia de sitio.
+
+     insertBefore y no appendChild: los botones tienen que quedar los
+     ultimos, pegados al borde derecho. */
+  dateGroup.className = "field-group patient-head-fecha";
+  head.insertBefore(dateGroup, actions);
+
   row2.appendChild(sexoGroup);
   row2.appendChild(esterGroup);
 
@@ -6684,6 +6692,9 @@ function farmacoNormalizado(f) {
     uid: f.uid,
     nombreGenerico: f.nombreGenerico || f.nombre || "",
     familia: f.familia || "",
+    /* En que familia de la lista aparece, si se forzo a mano. Sin esto,
+       normalizar el farmaco borraba la eleccion y volvia a deducirse. */
+    grupo: f.grupo || "",
     presentaciones: Array.isArray(f.presentaciones) ? f.presentaciones : [],
     dosis: [],
     retiro: Array.isArray(f.retiro) ? f.retiro : [],
@@ -7082,9 +7093,84 @@ const GRUPOS_FARMACO = [
 
 const SIN_GRUPO = "Otros";
 
+/* ---------- Familias propias ----------
+
+   Las ocho categorías de arriba están escritas en el código porque salen
+   de cómo se estudia la farmacología, no de este cuaderno. Pero son las de
+   perro y gato de clínica: en producción, o en una rotación concreta, hace
+   falta agrupar de otra manera y eso no se puede prever aquí.
+
+   Las familias que añade Daniel viven en un documento de "entries" con
+   section "gruposFarmaco", igual que el perfil: las cubren las reglas ya
+   publicadas, llegan por la suscripción que ya existe y no aparecen entre
+   los casos ni las materias, que se arman por section.
+
+   Un fármaco cae en una familia propia de dos maneras: porque se le
+   asignó a mano (campo "grupo"), o porque su familia escrita contiene
+   alguna de las palabras clave de esa familia. Lo asignado a mano manda:
+   si no, cambiar una palabra clave movería fármacos sin avisar. */
+
+function gruposDocId() {
+  return "grupos_" + currentUid;
+}
+
+function gruposPropiosCrudos() {
+  const doc_ = state.entries.find(function (e) { return e.section === "gruposFarmaco"; });
+  const lista = doc_ && Array.isArray(doc_.grupos) ? doc_.grupos : [];
+  return lista.filter(Boolean);
+}
+
+/* Para clasificar: solo las que ya tienen nombre. Una familia sin nombre
+   no puede recibir farmacos — su clave vacia coincidiria con todos. */
+function gruposPropios() {
+  return gruposPropiosCrudos().filter(function (g) { return String(g.nombre || "").trim(); });
+}
+
+function guardarGruposPropios(grupos) {
+  scheduleSave(
+    "entries",
+    gruposDocId(),
+    { grupos: grupos, section: "gruposFarmaco" },
+    null,
+    { createIfMissing: true }
+  );
+}
+
+/* El orden de la lista: primero las categorías de siempre, después las
+   propias, y "Otros" cerrando. "Otros" al final no es estético — es el
+   cajón de lo que no se pudo clasificar, y arriba estorbaría cada vez. */
+function nombresDeGrupos() {
+  const base = GRUPOS_FARMACO.map(function (g) { return g[0]; });
+  const sinOtros = base.filter(function (n) { return n !== SIN_GRUPO; });
+  const propios = gruposPropios().map(function (g) { return g.nombre; });
+  return sinOtros.concat(propios).concat([SIN_GRUPO]);
+}
+
+function clavesDeGrupoPropio(grupo) {
+  const escritas = String(grupo.claves || "")
+    .split(",")
+    .map(function (c) { return c.trim(); })
+    .filter(Boolean);
+  // El nombre vale como palabra clave: si creas "Antifúngicos" y un fármaco
+  // dice familia "antifúngico azol", cae solo donde tiene que caer.
+  return escritas.concat([grupo.nombre]);
+}
+
 function grupoDeFarmaco(farmaco) {
+  /* Asignado a mano en la ficha: manda sobre todo lo demas. Se comprueba
+     que la familia siga existiendo; si se borro, el farmaco vuelve a
+     clasificarse solo en vez de quedarse en un grupo fantasma. */
+  const puesto = String((farmaco && farmaco.grupo) || "").trim();
+  if (puesto && nombresDeGrupos().indexOf(puesto) >= 0) return puesto;
+
   const f = normalizarBusqueda(farmaco && farmaco.familia);
   if (!f) return SIN_GRUPO;
+
+  // Las propias primero: son las que Daniel escribio para ESTE trabajo,
+  // y si chocan con una de las de fabrica debe ganar la suya.
+  for (const g of gruposPropios()) {
+    if (clavesDeGrupoPropio(g).some((c) => c && f.includes(normalizarBusqueda(c)))) return g.nombre;
+  }
   for (const [nombre, claves] of GRUPOS_FARMACO) {
     if (claves.some((c) => f.includes(normalizarBusqueda(c)))) return nombre;
   }
@@ -7275,9 +7361,17 @@ function buildFormularioTable(list, withActions) {
     grupos.get(g).push(crudo);
   });
 
-  // Se respeta el orden de GRUPOS_FARMACO (antibióticos primero, "Otros"
-  // al final) en vez del alfabético: agrupa por afinidad de uso.
-  const ordenGrupos = GRUPOS_FARMACO.map((g) => g[0]);
+  // Se respeta el orden de la lista de familias (las de siempre primero,
+  // las propias después y "Otros" al final) en vez del alfabético:
+  // agrupa por afinidad de uso.
+  const ordenGrupos = nombresDeGrupos();
+  /* Una familia propia recién creada sale aunque esté vacía. Si no
+     apareciera hasta tener fármacos dentro, crearla parecería no haber
+     hecho nada. Las de fábrica vacías sí se callan: son ocho y estarían
+     casi siempre de más. */
+  gruposPropios().forEach((g) => {
+    if (g.nombre && !grupos.has(g.nombre)) grupos.set(g.nombre, []);
+  });
   const nombres = Array.from(grupos.keys()).sort(
     (a, b) => ordenGrupos.indexOf(a) - ordenGrupos.indexOf(b)
   );
@@ -7301,7 +7395,7 @@ function buildFormularioTable(list, withActions) {
     ponerCaret(headTd.querySelector(".group-caret"), expandido);
     headTd.querySelector(".group-name").textContent = nombre;
     headTd.querySelector(".group-count").textContent =
-      filas.length + (filas.length === 1 ? " fármaco" : " fármacos");
+      filas.length === 0 ? "vacía" : filas.length + (filas.length === 1 ? " fármaco" : " fármacos");
     headTr.appendChild(headTd);
     tbody.appendChild(headTr);
 
@@ -7445,6 +7539,160 @@ async function createFormularioEntry() {
   }
 }
 
+/* La ventana de familias. Se abre desde el Formulario y no desde
+   Configuración: se cambia mirando la lista que se quiere reordenar. */
+let overlayFamilias = null;
+
+function cerrarOverlayFamilias() {
+  if (!overlayFamilias) return;
+  overlayFamilias.remove();
+  overlayFamilias = null;
+}
+
+function abrirOverlayFamilias() {
+  cerrarOverlayFamilias();
+
+  const backdrop = document.createElement("div");
+  backdrop.className = "overlay-backdrop";
+  backdrop.addEventListener("click", function (e) {
+    if (e.target === backdrop) cerrarOverlayFamilias();
+  });
+
+  const card = document.createElement("div");
+  card.className = "overlay-card overlay-familias";
+
+  const head = document.createElement("div");
+  head.className = "overlay-head";
+  const h2 = document.createElement("h2");
+  h2.textContent = "Familias de fármacos";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "overlay-close";
+  closeBtn.textContent = "×";
+  closeBtn.setAttribute("aria-label", "Cerrar");
+  closeBtn.addEventListener("click", cerrarOverlayFamilias);
+  head.appendChild(h2);
+  head.appendChild(closeBtn);
+  card.appendChild(head);
+
+  const nota = document.createElement("p");
+  nota.className = "overlay-note";
+  nota.textContent =
+    "Las ocho familias de siempre no se pueden borrar. Las que añadas aquí se suman a la lista, y un fármaco cae en la tuya si su familia contiene alguna de las palabras clave — o si se la asignas a mano en su ficha.";
+  card.appendChild(nota);
+
+  const lista = document.createElement("div");
+  lista.className = "familias-lista";
+  card.appendChild(lista);
+
+  let propiosLocal = gruposPropiosCrudos().map(function (g) { return { ...g }; });
+
+  function guardarLocal() {
+    guardarGruposPropios(propiosLocal);
+  }
+
+  function pintar() {
+    lista.innerHTML = "";
+
+    const fijas = document.createElement("p");
+    fijas.className = "familias-fijas";
+    fijas.textContent =
+      "De siempre: " + GRUPOS_FARMACO.map(function (g) { return g[0]; }).join(" · ");
+    lista.appendChild(fijas);
+
+    const propios = propiosLocal;
+    if (!propios.length) {
+      const vacio = document.createElement("p");
+      vacio.className = "familias-vacio";
+      vacio.textContent = "Todavía no has añadido ninguna familia tuya.";
+      lista.appendChild(vacio);
+    }
+
+    propios.forEach(function (g, i) {
+      const fila = document.createElement("div");
+      fila.className = "familia-fila";
+
+      const nombre = document.createElement("input");
+      nombre.className = "familia-campo familia-campo-nombre";
+      nombre.value = g.nombre || "";
+      nombre.placeholder = "Nombre de la familia";
+      nombre.addEventListener("input", function () {
+        propiosLocal[i].nombre = nombre.value;
+        guardarLocal();
+      });
+      fila.appendChild(nombre);
+
+      const claves = document.createElement("input");
+      claves.className = "familia-campo familia-campo-claves";
+      claves.value = g.claves || "";
+      claves.placeholder = "Palabras clave, separadas por comas";
+      claves.addEventListener("input", function () {
+        propiosLocal[i].claves = claves.value;
+        guardarLocal();
+      });
+      fila.appendChild(claves);
+
+      const cuenta = document.createElement("span");
+      cuenta.className = "familia-cuenta";
+      const n = String(g.nombre || "").trim()
+        ? state.formulario.filter(function (f) {
+            return grupoDeFarmaco(farmacoNormalizado(f)) === g.nombre;
+          }).length
+        : 0;
+      cuenta.textContent = n + (n === 1 ? " fármaco" : " fármacos");
+      fila.appendChild(cuenta);
+
+      const borrar = document.createElement("button");
+      borrar.type = "button";
+      borrar.className = "familia-borrar";
+      borrar.textContent = "×";
+      borrar.setAttribute("aria-label", "Eliminar esta familia");
+      borrar.addEventListener("click", async function () {
+        const ok = await askConfirm({
+          title: "¿Eliminar la familia “" + (g.nombre || "sin nombre") + "”?",
+          message: n
+            ? "Sus " + n + " fármaco(s) vuelven a clasificarse solos. No se borra ningún fármaco."
+            : "No tiene fármacos dentro.",
+          confirmLabel: "Eliminar"
+        });
+        if (!ok) return;
+        propiosLocal = propiosLocal.filter(function (_, j) { return j !== i; });
+        guardarLocal();
+        pintar();
+      });
+      fila.appendChild(borrar);
+
+      lista.appendChild(fila);
+    });
+
+    const add = document.createElement("button");
+    add.type = "button";
+    add.className = "btn-mini";
+    add.textContent = "+ Nueva familia";
+    add.addEventListener("click", function () {
+      propiosLocal = propiosLocal.concat([{ nombre: "", claves: "" }]);
+      guardarLocal();
+      pintar();
+      const campos = lista.querySelectorAll(".familia-campo-nombre");
+      if (campos.length) campos[campos.length - 1].focus();
+    });
+    lista.appendChild(add);
+  }
+  pintar();
+
+  /* Al cerrar se redibuja: la lista de fármacos de detrás tiene que salir
+     ya con las familias nuevas. Mientras la ventana está abierta NO se
+     redibuja, o el campo que estás escribiendo dejaría de existir. */
+  backdrop.addEventListener("click", function (e) {
+    if (e.target === backdrop) render();
+  });
+  closeBtn.addEventListener("click", function () { render(); });
+
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
+  overlayFamilias = backdrop;
+}
+
 /* ---------- Pestaña Formulario ---------- */
 
 function renderFormularioTab(root) {
@@ -7459,8 +7707,18 @@ function renderFormularioTab(root) {
   addBtn.className = "btn-primary";
   addBtn.textContent = "+ Agregar fármaco";
   addBtn.addEventListener("click", () => createFormularioEntry());
+  const famBtn = document.createElement("button");
+  famBtn.type = "button";
+  famBtn.className = "btn-secondary";
+  famBtn.textContent = "🗂 Familias";
+  famBtn.title = "Añadir o quitar familias de fármacos";
+  famBtn.addEventListener("click", () => abrirOverlayFamilias());
+  const cabActions = document.createElement("div");
+  cabActions.className = "card-head-actions";
+  cabActions.appendChild(famBtn);
+  cabActions.appendChild(addBtn);
   cardHead.appendChild(cardTitle);
-  cardHead.appendChild(addBtn);
+  cardHead.appendChild(cabActions);
   card.appendChild(cardHead);
 
   const filterRow = document.createElement("div");
@@ -7690,6 +7948,28 @@ function renderFormularioDetail(root, item) {
   familiaInput.className += " input-familia";
   familiaInput.addEventListener("input", () => save("familia", familiaInput.value));
   familiaRow.appendChild(campoFormulario("Familia", familiaInput));
+
+  /* La familia escrita es fina ("Betalactámico — aminopenicilina") y sirve
+     para leerla; esto otro es en qué grupo de la lista aparece. Por
+     defecto se deduce, y aquí se puede forzar cuando la deducción no
+     acierta o cuando quieres meterlo en una familia tuya. */
+  const grupoSelect = document.createElement("select");
+  grupoSelect.className = "input-grupo";
+  const autoOpt = document.createElement("option");
+  autoOpt.value = "";
+  autoOpt.textContent = "Automático (" + grupoDeFarmaco({ familia: far.familia }) + ")";
+  grupoSelect.appendChild(autoOpt);
+  nombresDeGrupos().forEach(function (n) {
+    const o = document.createElement("option");
+    o.value = n;
+    o.textContent = n;
+    grupoSelect.appendChild(o);
+  });
+  grupoSelect.value = far.grupo || "";
+  grupoSelect.addEventListener("change", function () {
+    save("grupo", grupoSelect.value);
+  });
+  familiaRow.appendChild(campoFormulario("Aparece en", grupoSelect));
   root.appendChild(familiaRow);
 
   /* --- 1. Presentaciones, con la foto del producto al lado ---

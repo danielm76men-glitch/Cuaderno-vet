@@ -5647,10 +5647,9 @@ function renderPatientDetail(root, entry) {
     save("meta", nameInput.value);
   });
   const tag = document.createElement("span");
-  tag.className = "section-tag casos";
+  tag.className = "section-tag casos section-tag-cabecera";
   tag.textContent = "Caso clínico";
   nameRow.appendChild(nameInput);
-  nameRow.appendChild(tag);
 
   const sub = document.createElement("div");
   sub.className = "sub";
@@ -5674,6 +5673,7 @@ function renderPatientDetail(root, entry) {
     [entry.especie, entry.raza, sexoResumido(entry.sexo, entry.esterilizado), entry.peso]
       .filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
 
+  info.appendChild(tag);
   info.appendChild(nameRow);
   info.appendChild(sub);
 
@@ -5777,7 +5777,9 @@ function renderPatientDetail(root, entry) {
   speciesGroup.appendChild(speciesLabel);
   speciesGroup.appendChild(speciesSelect);
 
-  row1.appendChild(areaGroup);
+  /* El área ya no va aquí: sube a la cabecera, al lado de la fecha de
+     ingreso. Las dos contestan lo mismo —de qué consulta es esta ficha—
+     y separadas obligaban a bajar para ver media respuesta. */
   row1.appendChild(speciesGroup);
 
   const row2 = document.createElement("div");
@@ -5858,6 +5860,8 @@ function renderPatientDetail(root, entry) {
      insertBefore y no appendChild: los botones tienen que quedar los
      ultimos, pegados al borde derecho. */
   dateGroup.className = "field-group patient-head-fecha";
+  areaGroup.className = "field-group patient-head-area";
+  head.insertBefore(areaGroup, actions);
   head.insertBefore(dateGroup, actions);
 
   row2.appendChild(sexoGroup);

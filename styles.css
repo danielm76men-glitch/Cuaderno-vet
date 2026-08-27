@@ -593,9 +593,32 @@ button, input, select, textarea { font-family: inherit; }
 .patient-head .patient-head-fecha {
   flex: none;
   min-width: 0;
+}
+/* El área sube junto a la fecha. margin-left:auto va en el ÁREA, que es
+   ahora la primera de las dos: si se lo quedara la fecha, el área quedaría
+   pegada al nombre y las dos dejarían de leerse como un par. */
+.patient-head .patient-head-area {
+  flex: none;
+  min-width: 0;
   margin-left: auto;
 }
+.patient-head .patient-head-area + .patient-head-fecha { margin-left: 14px; }
+/* Las dos cosas que se preguntan de un vistazo, en cuerpo de lectura y no
+   de pie de página. */
+.patient-head .patient-head-area label,
+.patient-head .patient-head-fecha label { font-size: 0.72rem; white-space: nowrap; }
+.patient-head .patient-head-area select {
+  font-size: 1rem; font-weight: 600; padding: 7px 9px; min-width: 11em;
+}
+.patient-head .patient-head-fecha input { font-size: 1rem; }
+/* La etiqueta encima del nombre: más cuerpo y separada de él. */
+
+@media (max-width: 600px) {
+  .patient-head .patient-head-area { margin-left: 0; }
+  .patient-head .patient-head-area + .patient-head-fecha { margin-left: 0; }
+}
 .patient-head .patient-head-fecha + .patient-head-actions { margin-left: 14px; }
+.patient-head .patient-head-area + .patient-head-actions { margin-left: 14px; }
 .patient-head .patient-head-fecha label { white-space: nowrap; }
 .patient-head .patient-head-fecha input { width: 9.5em; }
 @media (max-width: 600px) {
@@ -1867,6 +1890,15 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
    ahora se lee. */
 .section-tag.casos { color: var(--amber-ink); }
 .section-tag.farmacos { color: var(--teal-ink); }
+
+/* La etiqueta encima del nombre del paciente. Va DESPUES de la .section-tag
+   de mas abajo, que es la que manda: escrita junto al resto de la cabecera
+   perdia por orden y se quedaba en 11,84 px medidos. */
+.section-tag-cabecera {
+  font-size: 0.92rem;
+  padding: 5px 14px;
+  margin-bottom: 7px;
+}
 
 /* ================= Constantes fisiológicas =================
    Un solo marco con las filas separadas por línea, en vez de cinco cajas

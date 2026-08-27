@@ -850,6 +850,12 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
    el nombre de la familia, que es lo que se lee. */
 /* La columna del "+ Fármaco": lo justo para el boton y ni un pixel mas,
    para no robarle sitio a los nombres. */
+/* La tercera entrada del examen se distingue de las otras dos: las otras
+   suben papel, esta sube imagen medica y no la retoca. El borde continuo
+   frente al de puntos dice "esta es distinta" sin necesidad de leerla. */
+.examen-add-imagen { border-style: solid; border-color: var(--teal); color: var(--teal-ink); }
+.examen-add-imagen:hover { background: var(--teal-soft); }
+
 .data-table th.col-add { width: 1%; }
 .data-table td.group-add-cell {
   text-align: right;

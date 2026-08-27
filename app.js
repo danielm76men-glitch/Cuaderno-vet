@@ -639,6 +639,23 @@ function fotosDeEntrada(entryId) {
   );
 }
 
+/* Borrar una entrada borraba SOLO su documento: las fotos del caso, las
+   imagenes de los apuntes, los examenes y sus paginas se quedaban en la
+   coleccion "fotos" para siempre. Y el dialogo prometia "con sus farmacos,
+   fotos y evoluciones", asi que la app afirmaba un borrado que no ocurria —
+   con radiografias de pacientes de terceros de por medio.
+
+   Todo lo que cuelga de una entrada comparte el mismo uidEntrada (examenes
+   y apuntes incluidos: los cuatro sitios que escriben usan claveFotos con
+   el id de la entrada padre), asi que una sola consulta las alcanza todas. */
+async function borrarFotosDeEntrada(entryId) {
+  const fotos = await fotosDeEntrada(entryId);
+  for (const f of fotos) {
+    await deleteDoc(doc(db, "fotos", f.id));
+  }
+  return fotos.length;
+}
+
 async function guardarFoto(entryId, file) {
   const datos = await prepararFotoParaFirestore(file);
   const ref = await addDoc(collection(db, "fotos"), {
@@ -1127,20 +1144,31 @@ function textoPlanoComoHtml(texto) {
    pueden escribir dos correos, un innerHTML sin filtrar es una puerta que
    no hace falta dejar abierta: fuera scripts, marcos y cualquier atributo
    que ejecute algo. */
-const APUNTE_ETIQUETAS_FUERA = ["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "FORM"];
+/* En MINUSCULAS y con querySelectorAll, no getElementsByTagName("SCRIPT").
+   Dentro de un <svg> las etiquetas viven en otro espacio de nombres y la
+   comparacion pasa a ser sensible a mayusculas, asi que "SCRIPT" no
+   encontraba el <script> de <svg><script>: se colaba entero. Medido.
+
+   BASE es nueva en la lista. Un <base> reescribe TODAS las rutas relativas
+   de la pagina; en la prueba, "app.js" pasaba de resolverse contra
+   localhost a resolverse contra otro dominio. */
+const APUNTE_ETIQUETAS_FUERA = ["script", "style", "iframe", "object", "embed", "link", "meta", "form", "base"];
+
+/* Atributos que pueden llevar una URL ejecutable. El filtro solo miraba
+   "href" y "src", y en SVG el atributo se llama xlink:href — un
+   <a xlink:href="javascript:..."> sobrevivia y ejecutaba al pulsarlo. */
+const APUNTE_ATRIBUTOS_URL = ["href", "src", "xlink:href", "formaction", "action", "data", "poster"];
 
 function limpiarHtmlApunte(html) {
   const caja = document.createElement("div");
   caja.innerHTML = String(html);
-  APUNTE_ETIQUETAS_FUERA.forEach(function (tag) {
-    Array.from(caja.getElementsByTagName(tag)).forEach(function (n) { n.remove(); });
-  });
+  Array.from(caja.querySelectorAll(APUNTE_ETIQUETAS_FUERA.join(","))).forEach(function (n) { n.remove(); });
   Array.from(caja.querySelectorAll("*")).forEach(function (n) {
     Array.from(n.attributes).forEach(function (a) {
       const nombre = a.name.toLowerCase();
       const valor = String(a.value || "").replace(/\s/g, "").toLowerCase();
       if (nombre.indexOf("on") === 0) n.removeAttribute(a.name);
-      else if ((nombre === "href" || nombre === "src") && valor.indexOf("javascript:") === 0) n.removeAttribute(a.name);
+      else if (APUNTE_ATRIBUTOS_URL.indexOf(nombre) > -1 && valor.indexOf("javascript:") === 0) n.removeAttribute(a.name);
     });
   });
   return caja.innerHTML;
@@ -1793,22 +1821,48 @@ function buildApunteEditor(entry, statusText, opciones) {
     if (e.target && e.target.tagName === "IMG") e.preventDefault();
   });
 
+  /* De fuera no solo vienen archivos: arrastrar texto con formato desde
+     otra pagina traia HTML y el navegador lo insertaba tal cual, porque
+     aqui solo se interceptaba el arrastre cuando traia "Files". El pegado
+     lleva tiempo haciendo lo correcto (coge solo el texto plano); no puede
+     haber dos puertas al mismo apunte con reglas distintas.
+
+     Cancelar el dragover para todo es seguro: el arrastre INTERNO de
+     imagenes no usa el arrastre del navegador — las imagenes llevan
+     draggable=false y el dragstart se cancela, se mueven con Pointer
+     Events. Aqui no se pisa nada de eso. */
   editor.addEventListener("dragover", function (e) {
-    const traeArchivos = e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
-    if (!traeArchivos) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-    editor.classList.add("apunte-soltar");
+    const traeArchivos = e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    if (traeArchivos) editor.classList.add("apunte-soltar");
   });
 
   editor.addEventListener("dragleave", function () { editor.classList.remove("apunte-soltar"); });
 
   editor.addEventListener("drop", function (e) {
-    const archivos = e.dataTransfer && e.dataTransfer.files;
-    if (!archivos || !archivos.length) return;
     e.preventDefault();
     editor.classList.remove("apunte-soltar");
-    agregarImagenes(archivos);
+
+    const archivos = e.dataTransfer && e.dataTransfer.files;
+    if (archivos && archivos.length) {
+      agregarImagenes(archivos);
+      return;
+    }
+
+    // Mismo criterio que el pegado: entra el texto, se descarta el HTML.
+    const texto = e.dataTransfer && e.dataTransfer.getData("text/plain");
+    if (!texto) return;
+
+    // El texto se coloca donde se solto, no al final del apunte.
+    const punto = rangoEnPunto(e.clientX, e.clientY);
+    editor.focus();
+    if (punto) {
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(punto);
+    }
+    document.execCommand("insertText", false, texto);
   });
 
   editor.addEventListener("input", guardar);
@@ -2453,6 +2507,15 @@ function buildExamenesSection(entry, statusText, cargarAdjuntos) {
     entradaArchivo.style.display = "none";
     card.appendChild(entradaArchivo);
 
+    /* Entrada aparte para las imagenes medicas: entran SIN retocar, pase lo
+       que pase con el interruptor de modo escaner. */
+    const entradaImagen = document.createElement("input");
+    entradaImagen.type = "file";
+    entradaImagen.accept = "image/*";
+    entradaImagen.multiple = true;
+    entradaImagen.style.display = "none";
+    card.appendChild(entradaImagen);
+
     function pintarPaginas() {
       tira.innerHTML = "";
       const mias = (paginas[examen.id] || []).slice().sort(function (a, b) { return (a.orden || 0) - (b.orden || 0); });
@@ -2528,6 +2591,17 @@ function buildExamenesSection(entry, statusText, cargarAdjuntos) {
       btnArch.title = "Subir una imagen que ya tienes";
       btnArch.addEventListener("click", function () { entradaArchivo.click(); });
       tira.appendChild(btnArch);
+
+      /* Una radiografia o una ecografia es un examen y hay que poder
+         interpretarla: entra sin retocar y se queda dentro de la tarjeta,
+         junto a los valores y la fecha, no suelta en las fotos del caso. */
+      const btnImg = document.createElement("button");
+      btnImg.type = "button";
+      btnImg.className = "photo-add examen-add examen-add-imagen";
+      btnImg.innerHTML = "<span>🩻</span><small>Imagen</small>";
+      btnImg.title = "Radiografía, ecografía o citología: entra sin retocar, sin modo escáner";
+      btnImg.addEventListener("click", function () { entradaImagen.click(); });
+      tira.appendChild(btnImg);
     }
 
     async function subirPaginas(archivos, comoEscaneo) {
@@ -2577,6 +2651,13 @@ function buildExamenesSection(entry, statusText, cargarAdjuntos) {
       const archivos = Array.from(entradaArchivo.files || []);
       entradaArchivo.value = "";
       subirPaginas(archivos, escCheck.checked); // una foto reenviada está igual de gris
+    });
+    entradaImagen.addEventListener("change", function () {
+      const archivos = Array.from(entradaImagen.files || []);
+      entradaImagen.value = "";
+      /* false fijo, no escCheck.checked: es la razon de ser de este boton.
+         Si mirara el interruptor volveria a depender de acordarse. */
+      subirPaginas(archivos, false);
     });
 
     pintarPaginas();
@@ -6216,6 +6297,10 @@ function renderPatientDetail(root, entry) {
     state.activeId = null;
     render();
     try {
+      // Las fotos PRIMERO. Si fallara a mitad, la entrada sigue ahi y se
+      // puede reintentar; al reves quedarian fotos huerfanas invisibles,
+      // sin ninguna ficha desde la que volver a alcanzarlas.
+      await borrarFotosDeEntrada(entry.id);
       await deleteDoc(doc(db, "entries", entry.id));
     } catch (err) {
       alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
@@ -6513,6 +6598,10 @@ function renderMateriaDetail(root, entry) {
     state.activeId = null;
     render();
     try {
+      // Las fotos PRIMERO. Si fallara a mitad, la entrada sigue ahi y se
+      // puede reintentar; al reves quedarian fotos huerfanas invisibles,
+      // sin ninguna ficha desde la que volver a alcanzarlas.
+      await borrarFotosDeEntrada(entry.id);
       await deleteDoc(doc(db, "entries", entry.id));
     } catch (err) {
       alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
@@ -9048,26 +9137,23 @@ async function completeSignInIfNeeded() {
   }
 }
 
-/* ---------- Migración única: adoptar entradas viejas sin uid ----------
-   Solo encuentra algo la primera vez que alguien inicia sesión, mientras
-   las reglas de Firestore todavía sean abiertas. IMPORTANTE: aplica las
-   reglas nuevas (restrictivas) DESPUÉS de que esto corra al menos una
-   vez, si no la entrada vieja queda huérfana e ilegible para siempre. */
+/* ---------- Migración única: adoptar entradas viejas sin uid (RETIRADA) ----
+   Aqui vivia adoptOrphanEntries(), que pedia la coleccion "entries" ENTERA
+   sin filtrar por uid para encontrar documentos de antes de que existiera
+   ese campo.
 
-async function adoptOrphanEntries() {
-  try {
-    const snap = await getDocs(collection(db, "entries"));
-    const orphans = snap.docs.filter((d) => !d.data().uid);
-    for (const d of orphans) {
-      await updateDoc(doc(db, "entries", d.id), { uid: currentUid });
-    }
-    if (orphans.length) {
-      console.info("Migradas " + orphans.length + " entrada(s) vieja(s) a tu cuenta.");
-    }
-  } catch (err) {
-    console.warn("No se pudieron migrar entradas antiguas sin uid:", err);
-  }
-}
+   Con las reglas publicadas no podia funcionar. Firestore no filtra una
+   consulta de lista: exige que la consulta MISMA demuestre que solo puede
+   devolver documentos permitidos. Al no llevar where("uid", "==", ...), la
+   rechazaba entera con permission-denied. El error caia en un catch que
+   solo escribia un aviso, asi que fallaba en silencio en cada inicio de
+   sesion desde que las reglas se endurecieron.
+
+   Y no tiene arreglo desde el codigo: una entrada sin uid es ilegible por
+   definicion bajo estas reglas. Si algun dia aparece una, hay que
+   recuperarla desde la consola de Firebase, no desde aqui.
+
+   Se retira para no dejar una peticion rechazada en cada arranque. */
 
 /* ---------- Firestore: sincronización en tiempo real ---------- */
 
@@ -9107,7 +9193,7 @@ function subscribeEntries() {
 
 // "formulario" es una colección propia (no una "section" dentro de
 // "entries"), así que tiene su propia suscripción en tiempo real. No
-// necesita pasar por adoptOrphanEntries: es una colección nueva, nunca
+// necesitaba la migración de entradas sin uid: es una colección nueva, nunca
 // tuvo documentos huérfanos de una versión anterior de la app.
 let unsubscribeFormulario = null;
 
@@ -9240,7 +9326,7 @@ onAuthStateChanged(auth, (user) => {
     }
     setConn("offline", "Conectando…");
     render();
-    adoptOrphanEntries().then(subscribeEntries);
+    subscribeEntries();
     subscribeFormulario();
     // Rescata las fotos que quedaron atrapadas en la cola vieja cuando las
     // subidas iban a Storage. Se ejecuta una vez y despues no encuentra nada.

@@ -5908,7 +5908,10 @@ function renderPatientDetail(root, entry) {
   pesoGroup.appendChild(pesoLabel);
   pesoGroup.appendChild(pesoInput);
 
-  row3.appendChild(razaGroup);
+  /* La raza sube con la especie: son la misma pregunta —que animal es—
+     y separadas obligaban a saltar de la primera fila a la tercera para
+     leer "canino boxer". Abajo quedan las dos medidas, edad y peso. */
+  row1.appendChild(razaGroup);
   row3.appendChild(edadGroup);
   row3.appendChild(pesoGroup);
 
@@ -6170,16 +6173,19 @@ function renderPatientDetail(root, entry) {
       bloqueEx.appendChild(examenesNodo);
       notesCard.appendChild(bloqueEx);
 
-      /* Las fotos, pegadas a los exámenes: son lo mismo —imágenes de
-         este paciente en esta consulta— y tenerlas a media pantalla de
-         distancia obligaba a subir y bajar para comparar la lesión con
-         la placa. Aquí se ven las dos cosas de una vez. */
-      const bloqueFotos = document.createElement("div");
-      bloqueFotos.className = "apartado apartado-fotos";
-      bloqueFotos.appendChild(
-        buildPhotosSection(entry, statusText, "Fotos (lesiones, radiografías, ecografías, paciente)", adjuntos)
+      /* Las fotos van DENTRO de los exámenes, no al lado. Eran dos
+         bloques con su rótulo y su línea de separación, y leídos así
+         parecían dos cosas distintas cuando son la misma: imágenes de
+         este paciente en esta consulta. Las que no pertenecen a una
+         hoja concreta cuelgan al final de la sección. */
+      const fotosNodo = buildPhotosSection(
+        entry,
+        statusText,
+        "Otras imágenes (lesiones, radiografías, ecografías, paciente)",
+        adjuntos
       );
-      notesCard.appendChild(bloqueFotos);
+      fotosNodo.classList.add("examenes-fotos");
+      examenesNodo.appendChild(fotosNodo);
     }
   });
 
@@ -6929,6 +6935,41 @@ function inputTexto(valor, placeholder) {
   return input;
 }
 
+/* Una contraindicacion no cabe en una linea. En un <input> el texto se
+   sale por el lado y solo se ve el trozo donde esta el cursor: en el
+   movil, con 340 px de ancho, "no administrar junto a otro AINE ni
+   corticoide" se lee a cachos. Aqui el campo CRECE hacia abajo hasta
+   ensenarlo entero — el sitio de abajo sobra, la advertencia a medias
+   no.
+
+   El alto se fija a mano porque un textarea no se ajusta solo: se pone
+   a 0 primero para que scrollHeight mida el contenido y no el alto que
+   ya tenia, que solo sabria crecer y nunca encoger. */
+function areaQueCrece(valor, placeholder) {
+  const area = document.createElement("textarea");
+  area.rows = 1;
+  area.placeholder = placeholder || "";
+  area.value = valor == null ? "" : valor;
+  function ajustar() {
+    area.style.height = "0px";
+    /* scrollHeight NO incluye el borde, pero con box-sizing: border-box la
+       altura SI lo cuenta: poniendo solo scrollHeight el campo queda dos
+       pixeles corto y la ultima linea sigue cortada por abajo. Medido:
+       clientHeight se quedaba por debajo de scrollHeight incluso despues
+       de ajustar. */
+    const bordes = area.offsetHeight - area.clientHeight;
+    area.style.height = area.scrollHeight + bordes + "px";
+  }
+  area.addEventListener("input", ajustar);
+  /* Tambien al entrar: si la ventana cambio de ancho (girar el movil),
+     el alto calculado antes se queda corto o sobra. */
+  area.addEventListener("focus", ajustar);
+  /* Al construirla todavia no esta en el documento y scrollHeight vale 0.
+     El ajuste real va cuando ya tiene ancho y letra. */
+  area.ajustarAlto = ajustar;
+  return area;
+}
+
 function inputNumero(valor, placeholder) {
   const input = document.createElement("input");
   input.type = "number";
@@ -7259,7 +7300,16 @@ function buildFormularioTable(list, withActions) {
   const cols = withActions
     ? ["Fármaco", "Familia", "Dosis", "Especies", "Acción"]
     : ["Fármaco", "Familia", "Especies"];
-  table.innerHTML = "<thead><tr>" + cols.map((c) => "<th>" + c + "</th>").join("") + "</tr></thead>";
+  /* Una columna mas, sin titulo, para el "+ Fármaco" de cada familia. Va
+     sin texto a proposito: el boton ya dice lo que hace y un rotulo encima
+     de una columna que solo tiene contenido en las cabeceras de familia
+     seria un titulo para casi nada. El aria-label queda para quien navegue
+     con lector de pantalla. */
+  const colsTotal = cols.length + (withActions ? 1 : 0);
+  table.innerHTML =
+    "<thead><tr>" + cols.map((c) => "<th>" + c + "</th>").join("") +
+    (withActions ? '<th class="col-add" aria-label="Agregar fármaco"></th>' : "") +
+    "</tr></thead>";
   const tbody = document.createElement("tbody");
 
   const especie = especieActiva();
@@ -7349,6 +7399,10 @@ function buildFormularioTable(list, withActions) {
       actTd.appendChild(editBtn);
       actTd.appendChild(delBtn);
       tr.appendChild(actTd);
+
+      // La columna del "+ Fármaco" solo tiene contenido en las cabeceras
+      // de familia, pero la celda tiene que existir o la fila se descuadra.
+      tr.appendChild(document.createElement("td"));
     }
 
     return tr;
@@ -7407,7 +7461,13 @@ function buildFormularioTable(list, withActions) {
        stopPropagation obligatorio: el encabezado entero es el boton que
        pliega el grupo, y sin esto cada alta plegaria la familia justo
        al abrir la ficha del farmaco nuevo. */
+    headTr.appendChild(headTd);
+
     if (withActions) {
+      /* En su propia celda y no dentro del titulo: pegado al nombre, su
+         sitio cambiaba con lo largo que fuera la familia. */
+      const addTd = document.createElement("td");
+      addTd.className = "group-add-cell";
       const addAqui = document.createElement("button");
       addAqui.type = "button";
       addAqui.className = "group-add";
@@ -7417,10 +7477,9 @@ function buildFormularioTable(list, withActions) {
         e.stopPropagation();
         createFormularioEntry(nombre);
       });
-      headTd.appendChild(addAqui);
+      addTd.appendChild(addAqui);
+      headTr.appendChild(addTd);
     }
-
-    headTr.appendChild(headTd);
     tbody.appendChild(headTr);
 
     /* Segundo nivel: subclases dentro de la categoría. Cada una tiene su
@@ -7450,7 +7509,7 @@ function buildFormularioTable(list, withActions) {
         subTr = document.createElement("tr");
         subTr.className = "subgroup-row";
         subTd = document.createElement("td");
-        subTd.colSpan = cols.length;
+        subTd.colSpan = colsTotal;
         subTd.setAttribute("role", "button");
         subTd.tabIndex = 0;
         subTd.setAttribute("aria-expanded", subAbierto ? "true" : "false");
@@ -8521,13 +8580,21 @@ function renderFormularioDetail(root, item) {
     contras.forEach((texto, i) => {
       const fila = document.createElement("div");
       fila.className = "form-fila form-fila-contra";
-      const input = inputTexto(texto, "Ej. Insuficiencia renal · Felinos: no usar");
+      const input = areaQueCrece(texto, "Ej. Insuficiencia renal · Felinos: no usar");
       input.addEventListener("input", () => {
         const copia = contras.slice();
         copia[i] = input.value;
         guardarContras(copia);
       });
       fila.appendChild(input);
+      /* El alto se fija cuando la fila ya esta en el documento y con su
+         ancho definitivo; antes, scrollHeight da el de una sola linea.
+
+         setTimeout y NO requestAnimationFrame: rAF no se ejecuta en una
+         pestana que no se esta pintando, y ahi el campo se quedaba de una
+         linea con el texto cortado. Medido: sin esto, un aviso de tres
+         lineas se quedaba en 37 px de 80. */
+      setTimeout(() => input.ajustarAlto(), 0);
       fila.appendChild(
         botonQuitar("Quitar contraindicación", () => {
           guardarContras(contras.filter((_, j) => j !== i));

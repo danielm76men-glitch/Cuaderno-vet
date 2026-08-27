@@ -848,11 +848,25 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
 /* El "+ Fármaco" de cada familia. Discreto hasta que pasas por encima de
    la fila: si pesara como un botón normal, ocho de ellos competirían con
    el nombre de la familia, que es lo que se lee. */
+/* La columna del "+ Fármaco": lo justo para el boton y ni un pixel mas,
+   para no robarle sitio a los nombres. */
+.data-table th.col-add { width: 1%; }
+.data-table td.group-add-cell {
+  text-align: right;
+  white-space: nowrap;
+  /* La banda verde de acento es de la primera celda de la fila; repetida
+     aqui partiria el encabezado de familia en dos trozos. */
+  border-left: none;
+}
+
 .group-add {
   appearance: none; border: 1px solid transparent; background: transparent;
-  color: var(--muted); font: inherit; font-size: 0.72rem; font-weight: 700;
+  color: var(--teal-ink); font: inherit; font-size: 0.72rem; font-weight: 700;
   padding: 2px 9px; border-radius: 999px; cursor: pointer;
-  margin-left: 12px; opacity: 0.55;
+  /* Sin margen a la izquierda: ya no va pegado a un nombre, va en su
+     columna. Y sin atenuar: en columna propia, medio borrado se lee como
+     desactivado. */
+  opacity: 1;
 }
 .group-row:hover .group-add, .group-add:focus-visible {
   opacity: 1; border-color: var(--line); color: var(--teal-ink);
@@ -1450,8 +1464,8 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
 /* Nivel 1 — categoría. Fondo verdoso y una banda de acento a la izquierda. */
 .data-table tbody tr.group-row td {
   background: var(--fila-grupo);
-  border-left: 3px solid var(--teal);
 }
+.data-table tbody tr.group-row td:first-child { border-left: 3px solid var(--teal); }
 .data-table tbody tr.group-row:hover td { background: var(--fila-grupo); filter: brightness(1.08); }
 .data-table tbody tr.group-row .group-name { color: var(--teal-ink); }
 
@@ -2147,20 +2161,31 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
    con un elemento en el selector y con una sola clase ganaban ellas, que
    es lo que dejaba estas lineas en letra menuda. */
 .form-fila.form-fila-contra { margin-bottom: 10px; }
-.form-fila.form-fila-contra input {
+/* El campo es un textarea que crece: hay que apagar el tirador y la barra
+   de desplazamiento, porque el alto lo pone el JS midiendo el contenido.
+   font: inherit obligatorio — un textarea NO hereda la letra de la pagina y
+   saldria en monoespaciada del navegador. */
+.form-fila.form-fila-contra textarea {
+  font-family: inherit;
   border-color: var(--rust); color: var(--rust-ink); background: var(--rust-soft);
   font-size: 0.98rem; font-weight: 600; line-height: 1.45;
-  padding: 9px 11px; border-radius: 7px; border-width: 1px;
+  padding: 9px 11px; border-radius: 7px; border-width: 1px; border-style: solid;
+  resize: none; overflow: hidden; display: block; width: 100%; min-height: 0;
 }
-.form-fila.form-fila-contra input:focus-visible {
+.form-fila.form-fila-contra textarea:focus-visible {
   outline: 2px solid var(--rust); outline-offset: 1px; border-color: var(--rust);
 }
-.form-fila-contra input::placeholder { color: var(--rust-ink); opacity: 0.5; font-weight: 400; }
+.form-fila-contra textarea::placeholder { color: var(--rust-ink); opacity: 0.5; font-weight: 400; }
+/* El texto puede ocupar tres lineas; la papelera se queda arriba, a la
+   altura de la primera, en vez de irse al centro de un campo alto. */
+.form-fila.form-fila-contra { align-items: flex-start; }
+.form-fila.form-fila-contra textarea { flex: 1; }
+.form-fila.form-fila-contra > button { margin-top: 4px; }
 .form-contra-nota { font-size: 0.75rem; color: var(--muted); margin: 12px 0 0; line-height: 1.45; }
 
 @media (max-width: 600px) {
   .form-contra-titulo { font-size: 1.15rem; }
-  .form-fila.form-fila-contra input { font-size: 0.92rem; padding: 8px 9px; }
+  .form-fila.form-fila-contra textarea { font-size: 0.92rem; padding: 8px 9px; }
 }
 
 /* La foto del producto, a la izquierda de sus presentaciones y dentro de la
@@ -2311,9 +2336,11 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
   background: var(--paper-alt); border-left: 3px solid var(--line); border-radius: 6px;
 }
 .apartado-examenes { margin-bottom: 14px; }
-/* Las fotos van justo debajo de los exámenes y se leen como parte del
-   mismo bloque: una línea fina las separa sin partirlas en dos tarjetas. */
-.apartado-fotos { margin-bottom: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* Las fotos sueltas viven DENTRO de la sección de exámenes, al final:
+   son del caso y no de una hoja concreta. Separadas por una línea de
+   puntos, que dice "esto sigue siendo lo mismo" mejor que una continua. */
+.examenes-fotos { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--line); }
+.examenes-fotos .subcard-head > span { font-size: 0.64rem; }
 
 /* El micrófono de cada apartado es más pequeño que el botón único de
    antes: hay cuatro en pantalla y no pueden pesar como cuatro botones. */

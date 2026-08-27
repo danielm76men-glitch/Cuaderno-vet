@@ -756,6 +756,10 @@ button, input, select, textarea { font-family: inherit; }
 }
 .btn-mini:hover { border-color: var(--teal); background: var(--teal-soft); }
 .btn-mini:disabled { opacity: 0.5; cursor: default; }
+/* La calculadora dentro de los fármacos: es la acción que más se usa de
+   ese bloque, así que se ve como botón y no como enlace. */
+.btn-mini-calc { border-color: var(--teal); color: var(--teal-ink); font-weight: 700; }
+.btn-mini-calc:hover { background: var(--teal-soft); }
 
 .examen-lista { display: flex; flex-direction: column; gap: 14px; }
 .examenes-vacio { margin: 8px 0 0; font-size: 0.84rem; color: var(--muted); }
@@ -1363,8 +1367,15 @@ button, input, select, textarea { font-family: inherit; }
 .data-table tbody tr.subgroup-row .subgroup-count {
   margin-left: 8px; font-family: var(--mono); font-size: 0.66rem; color: var(--muted);
 }
-/* Las filas de fármaco quedan alineadas bajo su subclase. */
-.data-table tbody tr.subgroup-row ~ tr td:first-child { padding-left: 30px; }
+/* Las filas de fármaco quedan alineadas bajo su subclase.
+
+   Los dos :not() no sobran. El combinador "~" alcanza a TODAS las filas
+   que vengan despues de una subclase, y las cabeceras de familia tambien
+   vienen despues: sin esto, la primera familia sangraba 16 px y todas las
+   demas 30 px. Era el "no esta simetrico" que se veia en la lista. */
+.data-table tbody tr.subgroup-row ~ tr:not(.group-row):not(.subgroup-row) td:first-child {
+  padding-left: 30px;
+}
 
 /* Logo del arranque. Clase propia y no .brand-mark-lg: ese mismo tamaño (44 px)
    es el correcto en la tarjeta de acceso, donde el logo va al lado del texto.
@@ -1451,16 +1462,20 @@ button, input, select, textarea { font-family: inherit; }
    La clase .entra la pone render() SOLO cuando de verdad cambias de vista.
    Con cada snapshot de Firestore render() se repite, y animar en cada uno
    convertiria la sincronizacion en un parpadeo constante. */
+/* backwards y NUNCA both en una animacion que toca transform: con "both" la
+   animacion sigue en efecto despues de acabar y su ultimo fotograma le gana
+   a cualquier transform posterior. Eso dejo el zoom del visor sin funcionar
+   y el :hover de estas tarjetas sin levantarlas. */
 @keyframes entra-vista {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: none; }
 }
-.content-inner.entra { animation: entra-vista 0.22s var(--sale) both; }
+.content-inner.entra { animation: entra-vista 0.22s var(--sale) backwards; }
 
 /* Las tarjetas del inicio entran escalonadas, 35 ms de diferencia. Es poco
    a proposito: lo justo para que el ojo las lea como cuatro cosas y no
    como un bloque, sin que la ultima llegue tarde. */
-.content-inner.entra .stat-grid > * { animation: entra-vista 0.26s var(--sale) both; }
+.content-inner.entra .stat-grid > * { animation: entra-vista 0.26s var(--sale) backwards; }
 .content-inner.entra .stat-grid > *:nth-child(2) { animation-delay: 0.035s; }
 .content-inner.entra .stat-grid > *:nth-child(3) { animation-delay: 0.07s; }
 .content-inner.entra .stat-grid > *:nth-child(4) { animation-delay: 0.105s; }
@@ -1585,10 +1600,16 @@ button, input, select, textarea { font-family: inherit; }
   from { opacity: 0; transform: scale(0.94); }
   to   { opacity: 1; transform: scale(1); }
 }
-.visor-foto { animation: entra-visor 0.18s ease both; }
-/* Solo la primera aparicion: una vez dentro el zoom lo maneja el JS con su
-   propio transform, y una animacion encima pelearia con el. */
-.visor-foto .visor-img { animation: crece-foto 0.24s var(--sale) both; }
+.visor-foto { animation: entra-visor 0.18s ease backwards; }
+/* La animacion va en el MARCO y no en la imagen, y con "backwards" y no con
+   "both". Las dos cosas por el mismo motivo: dentro del visor el zoom lo
+   maneja el JS con su propio transform sobre la imagen, y una animacion CSS
+   gana a un style en linea mientras esta en efecto. Con "both" seguia en
+   efecto despues de terminar, asi que su ultimo fotograma —scale(1)— se
+   quedaba encima del zoom para siempre: el rotulo decia 274 % y la foto no
+   se movia. Con "backwards" la animacion suelta el elemento al acabar, y
+   poniendola en el marco ya no hay dos manos sobre el mismo transform. */
+.visor-foto .visor-marco { animation: crece-foto 0.24s var(--sale) backwards; }
 .visor-nav { transition: background var(--rapido) ease, transform var(--rapido) ease; }
 .visor-nav:hover { transform: translateY(-50%) scale(1.1); }
 .visor-nav:active { transform: translateY(-50%) scale(0.95); }
@@ -1802,11 +1823,11 @@ button, input, select, textarea { font-family: inherit; }
      Y el alto fijo iguala las que llevan aclaracion con las que no; sin el,
      la tabla iba a saltos. 64 px esta medido: con el rango a 1,05rem, las
      notas de tres lineas (equino, felino, caprino) llegan a 62. */
-  grid-template-columns: 104px 70px 24px minmax(0, 1fr) 46px;
+  grid-template-columns: 128px 82px 30px minmax(0, 1fr) 52px;
   /* 60 px: medido, no a ojo. Las notas mas largas (equino y caprino) se
      van a tres lineas y llegaban a 59; por debajo de eso, esas dos filas
      sobresalian y la tabla volvia a ir a saltos. */
-  min-height: 64px;
+  min-height: 70px;
   align-items: center; column-gap: 10px;
   padding: 7px 10px 7px 8px;
   border-left: 3px solid transparent;
@@ -1814,11 +1835,11 @@ button, input, select, textarea { font-family: inherit; }
 }
 .const-fila:last-child { border-bottom: none; }
 .const-nombre {
-  font-size: 0.82rem; font-weight: 600; color: var(--ink);
+  font-size: 0.98rem; font-weight: 600; color: var(--ink);
   text-transform: none; letter-spacing: normal; margin: 0;
 }
 .const-input {
-  width: 100%; padding: 4px 6px; font: inherit; font-size: 0.84rem;
+  width: 100%; padding: 6px 7px; font: inherit; font-size: 1rem;
   font-family: var(--mono);
   border: 1px solid var(--line); border-radius: 5px;
   background: var(--paper-raised); color: var(--ink);
@@ -1826,9 +1847,9 @@ button, input, select, textarea { font-family: inherit; }
 }
 .const-input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
 .const-input-ancho {
-  grid-column: 2 / 4; font-family: inherit; text-align: left; font-size: 0.8rem;
+  grid-column: 2 / 4; font-family: inherit; text-align: left; font-size: 0.94rem;
 }
-.const-unidad { font-size: 0.74rem; color: var(--muted); font-family: var(--mono); }
+.const-unidad { font-size: 0.86rem; color: var(--muted); font-family: var(--mono); }
 /* El rango y su matiz, apilados y pegados al borde derecho de su columna.
    min-width: 0 para que la nota pueda partirse en dos lineas en vez de
    empujar la rejilla y estirar la fila. */
@@ -1839,10 +1860,10 @@ button, input, select, textarea { font-family: inherit; }
 /* Los numeros del rango son lo que se compara con lo medido: van al mismo
    cuerpo que el valor tecleado, no en letra de pie de pagina. */
 .const-ref {
-  font-size: 1.05rem; font-weight: 700; color: var(--ink); font-family: var(--mono);
+  font-size: 1.15rem; font-weight: 700; color: var(--ink); font-family: var(--mono);
   white-space: nowrap; text-align: right; letter-spacing: -0.02em;
 }
-.const-marca { font-size: 0.7rem; font-weight: 700; white-space: nowrap; text-align: right; }
+.const-marca { font-size: 0.82rem; font-weight: 700; white-space: nowrap; text-align: right; }
 
 /* Fuera de rango: banda, fondo y borde del campo. Tres señales, porque en
    una fila de 30 px un cambio de fondo solo no se ve (el mismo error que
@@ -1856,7 +1877,7 @@ button, input, select, textarea { font-family: inherit; }
 .const-fila[data-estado="bajo"] .const-input { border-color: var(--rust); }
 
 .const-nota {
-  font-size: 0.67rem; color: var(--muted); line-height: 1.25;
+  font-size: 0.76rem; color: var(--muted); line-height: 1.3;
   text-align: right; font-style: italic; max-width: 100%;
 }
 .const-joven { margin: 0 0 10px; }
@@ -1871,8 +1892,11 @@ button, input, select, textarea { font-family: inherit; }
   /* En estrecho el rango baja a su propia linea, asi que la fila crece:
      76 px medidos, para que las que llevan nota sigan igualando a las que
      no. */
-  .const-fila { grid-template-columns: 1fr 70px 24px auto; column-gap: 8px; min-height: 76px; }
-  .const-nombre { font-size: 0.78rem; }
+  /* 90 px medidos con la letra ya crecida: las tres filas que llevan
+     rango y nota llegan a 90, y por debajo de eso la tabla vuelve a ir a
+     saltos. */
+  .const-fila { grid-template-columns: 1fr 78px 28px auto; column-gap: 8px; min-height: 90px; }
+  .const-nombre { font-size: 0.9rem; }
   /* 1/4 y no 1/-1: ocupando TODA la fila, la marca ("↑ alto") no cabía
      detrás y se iba sola a una tercera línea, debajo del nombre. Dejando
      libre la última pista se queda al lado y la fila baja de 72 a 57 px. */

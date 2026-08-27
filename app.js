@@ -73,6 +73,26 @@ function iconoDeEspecie(especie, nombre) {
 
 const SPECIES_OPTIONS = ["Bovino", "Equino", "Porcino", "Aves", "Canino", "Felino", "Ovino", "Caprino", "Exótico", "Otro"];
 const AREA_OPTIONS = ["Cirugía", "Medicina interna", "Reproducción", "Emergencia", "Seguimiento", "Otro"];
+const SEXO_OPTIONS = ["Macho", "Hembra"];
+
+/* En la ficha no se lee "macho, esterilizado: si". Se lee "macho castrado".
+   La palabra depende del sexo, pero lo que se guarda no: siempre "si" o
+   "no". Asi, si despues se corrige el sexo, la ficha se corrige sola en vez
+   de quedarse diciendo "hembra castrado". */
+const ESTERILIZADO_PALABRAS = {
+  "Macho": { si: "castrado", no: "entero" },
+  "Hembra": { si: "esterilizada", no: "entera" },
+  "": { si: "esterilizado", no: "sin esterilizar" }
+};
+
+function sexoResumido(sexo, esterilizado) {
+  const s = String(sexo || "").trim();
+  const e = String(esterilizado || "").trim();
+  const palabras = ESTERILIZADO_PALABRAS[s] || ESTERILIZADO_PALABRAS[""];
+  const palabra = palabras[e] || "";
+  if (!s) return palabra ? palabra.charAt(0).toUpperCase() + palabra.slice(1) : "";
+  return palabra ? s + " " + palabra : s;
+}
 
 const els = {
   app: document.getElementById("app"),
@@ -175,6 +195,9 @@ function matchesQuery(entry, q) {
     incluyeNormalizado(entry.title, q) ||
     incluyeNormalizado(entry.meta, q) ||
     incluyeNormalizado(entry.especie, q) ||
+    /* Por el resumen y no por el campo: asi "castrado" y "entera"
+       encuentran, que es como se busca, y no solo "si" o "no". */
+    incluyeNormalizado(sexoResumido(entry.sexo, entry.esterilizado), q) ||
     incluyeNormalizado(entry.area, q) ||
     incluyeNormalizado(entry.tutorNombre, q) ||
     incluyeNormalizado(textoDelCaso(entry), q)
@@ -1925,6 +1948,110 @@ const EXAMEN_ANALITOS = {
   "Prueba rápida / serología": [["Título", ""]]
 };
 
+/* Pruebas propias de cada especie.
+
+   Las de arriba valen para cualquier animal; estas se SUMAN a ellas cuando
+   el caso tiene especie y desaparecen si la cambias. Son nombres de prueba
+   —lo que se pide al laboratorio—, no resultados ni interpretaciones: aqui
+   no se afirma nada clinico, solo se nombra el examen.
+
+   La lista es corta a proposito. "Otro" sigue estando para lo que falte, y
+   anadir una prueba aqui es una linea. */
+const EXAMEN_TIPOS_ESPECIE = {
+  canino: [
+    "Parvovirus canino",
+    "Moquillo (distemper)",
+    "Ehrlichia / Anaplasma",
+    "Dirofilaria immitis",
+    "Leptospira",
+    "Giardia"
+  ],
+  felino: [
+    "Leucemia felina (FeLV)",
+    "Inmunodeficiencia felina (FIV)",
+    "Coronavirus felino / PIF",
+    "Giardia"
+  ],
+  bovino: [
+    "Brucelosis",
+    "Tuberculinización",
+    "Leucosis bovina enzoótica",
+    "Diarrea viral bovina (DVB)",
+    "Rinotraqueítis infecciosa (IBR)",
+    "Anaplasmosis / Babesiosis"
+  ],
+  equino: [
+    "Anemia infecciosa equina (Coggins)",
+    "Piroplasmosis"
+  ],
+  porcino: [
+    "Peste porcina clásica",
+    "PRRS",
+    "Aujeszky"
+  ],
+  ovino: ["Brucelosis", "Maedi-Visna"],
+  caprino: ["Brucelosis", "Artritis-encefalitis caprina (CAE)"],
+  aves: ["Newcastle", "Influenza aviar", "Salmonella"]
+};
+
+function tiposDeEspecie(especie) {
+  return EXAMEN_TIPOS_ESPECIE[normalizarBusqueda(especie).trim()] || [];
+}
+
+function esExamenDeEspecie(tipo) {
+  if (!tipo) return false;
+  return Object.keys(EXAMEN_TIPOS_ESPECIE).some(function (k) {
+    return EXAMEN_TIPOS_ESPECIE[k].indexOf(tipo) >= 0;
+  });
+}
+
+/* Rellena el desplegable de tipo con las generales y, si hay especie, las
+   suyas debajo.
+
+   `valorActual` no es un adorno: un examen ya guardado NO puede perder su
+   tipo porque despues se corrija la especie del caso. Si su tipo ya no
+   esta en la lista, se anade en un grupo aparte. Sin esto, el desplegable
+   elegiria la primera opcion por su cuenta y al siguiente guardado el
+   hemograma se habria convertido en otra cosa. */
+function pintarTiposDeExamen(sel, especie, valorActual) {
+  const propias = tiposDeEspecie(especie);
+  sel.textContent = "";
+
+  const generales = document.createElement("optgroup");
+  generales.label = "Generales";
+  EXAMEN_TIPOS.forEach(function (t) {
+    const o = document.createElement("option");
+    o.value = t;
+    o.textContent = t;
+    generales.appendChild(o);
+  });
+  sel.appendChild(generales);
+
+  if (propias.length) {
+    const grupo = document.createElement("optgroup");
+    grupo.label = "Propias de " + String(especie || "").toLowerCase();
+    propias.forEach(function (t) {
+      const o = document.createElement("option");
+      o.value = t;
+      o.textContent = t;
+      grupo.appendChild(o);
+    });
+    sel.appendChild(grupo);
+  }
+
+  const yaEsta = Array.from(sel.options).some(function (o) { return o.value === valorActual; });
+  if (valorActual && !yaEsta) {
+    const guardado = document.createElement("optgroup");
+    guardado.label = "Guardado en este examen";
+    const o = document.createElement("option");
+    o.value = valorActual;
+    o.textContent = valorActual;
+    guardado.appendChild(o);
+    sel.appendChild(guardado);
+  }
+  sel.value = valorActual || EXAMEN_TIPOS[0];
+}
+
 /* El modo escaner arruina una radiografia: la pasa a blanco y negro
    duro y se pierde justo lo que hay que ver. Estos tipos son imagen
    medica, no papel, y entran sin tocar. El interruptor de la ficha
@@ -1936,7 +2063,11 @@ function escanearPorDefecto(tipo) {
 }
 
 function analitosDeTipo(tipo) {
-  return EXAMEN_ANALITOS[tipo] || [];
+  if (EXAMEN_ANALITOS[tipo]) return EXAMEN_ANALITOS[tipo];
+  /* Las pruebas propias de una especie son rapidas o serologicas: lo que
+     se anota es el resultado, no una cifra con su rango. */
+  if (esExamenDeEspecie(tipo)) return [["Resultado", ""]];
+  return [];
 }
 
 /* Los adjuntos de un caso ya vienen todos en una consulta; aqui solo se
@@ -2127,6 +2258,24 @@ function buildExamenesSection(entry, statusText, cargarAdjuntos) {
   const wrap = document.createElement("div");
   wrap.className = "examenes";
 
+  /* Igual que la tarjeta de constantes: quien monte esto puede avisarle del
+     cambio de especie sin volver a construirlo. */
+  let especieActual = entry.especie || "";
+
+  wrap.setEspecie = function (especie) {
+    especieActual = especie;
+    /* Se relee el DOM en vez de guardar una lista de desplegables: la
+       lista de examenes se vuelve a pintar entera cada vez que se anade o
+       se borra uno, y una lista guardada apuntaria a tarjetas muertas.
+
+       El valor de cada desplegable ES el tipo guardado de ese examen, asi
+       que se le pasa a si mismo y ninguno cambia de tipo. Poner .value a
+       mano no dispara "change", asi que esto tampoco guarda nada. */
+    Array.from(wrap.querySelectorAll("select.examen-tipo")).forEach(function (sel) {
+      pintarTiposDeExamen(sel, especie, sel.value);
+    });
+  };
+
   const head = document.createElement("div");
   head.className = "subcard-head";
   const titulo = document.createElement("span");
@@ -2240,13 +2389,7 @@ function buildExamenesSection(entry, statusText, cargarAdjuntos) {
 
     const tipoSel = document.createElement("select");
     tipoSel.className = "examen-tipo";
-    EXAMEN_TIPOS.forEach(function (t) {
-      const o = document.createElement("option");
-      o.value = t;
-      o.textContent = t;
-      tipoSel.appendChild(o);
-    });
-    tipoSel.value = examen.tipo || EXAMEN_TIPOS[0];
+    pintarTiposDeExamen(tipoSel, especieActual, examen.tipo);
     filaTop.appendChild(tipoSel);
 
     const fecha = document.createElement("input");
@@ -2750,8 +2893,9 @@ function buildMedsSection(entry, statusText) {
   toggleBtn.className = "toggle-btn";
   const consultBtn = document.createElement("button");
   consultBtn.type = "button";
-  consultBtn.className = "link-btn";
-  consultBtn.textContent = "Consultar formulario";
+  consultBtn.className = "btn-mini btn-mini-calc";
+  consultBtn.textContent = "🧮 Calcular dosis";
+  consultBtn.title = "Abre la calculadora y el formulario de fármacos con el peso de este paciente";
   consultBtn.addEventListener("click", () => openCalculatorOverlay({ caseEntry: entry }));
   const addBtn = document.createElement("button");
   addBtn.type = "button";
@@ -5241,6 +5385,7 @@ function buildPrintableCase(entry, fotos) {
 
   const datos = bloqueImpreso("Datos del paciente");
   datos.appendChild(campoImpreso("Especie / Raza", [caso.especie, caso.raza].filter(Boolean).join(" · ")));
+  datos.appendChild(campoImpreso("Sexo", sexoResumido(caso.sexo, caso.esterilizado)));
   datos.appendChild(campoImpreso("Edad", caso.edad));
   datos.appendChild(campoImpreso("Peso", caso.peso));
   datos.appendChild(campoImpreso("Fecha de ingreso", formatDate(caso.date)));
@@ -5474,6 +5619,7 @@ function renderPatientDetail(root, entry) {
      especie está más arriba: hace falta el hueco declarado antes para que
      el listener pueda avisarle. */
   let constantesNodo = null;
+  let examenesNodo = null;
 
   const head = document.createElement("div");
   head.className = "patient-head";
@@ -5508,34 +5654,40 @@ function renderPatientDetail(root, entry) {
 
   const sub = document.createElement("div");
   sub.className = "sub";
+  /* El sexo va en dos variables y no leyendo los desplegables, porque
+     refreshSub se define aquí arriba y los desplegables se crean más
+     abajo: leerlos desde aquí sería usarlos antes de que existan. */
+  let sexoActual = entry.sexo || "";
+  let esterilizadoActual = entry.esterilizado || "";
   // Se arma desde los inputs vivos, no desde el objeto entry, que ya no se
   // refresca mientras la ficha está abierta.
   function refreshSub() {
     sub.textContent =
-      [speciesSelect.value, razaInput.value, pesoInput.value].filter(Boolean).join(" · ") ||
+      [speciesSelect.value, razaInput.value, sexoResumido(sexoActual, esterilizadoActual), pesoInput.value]
+        .filter(Boolean).join(" · ") ||
       "Especie, raza y peso sin especificar";
     // El icono cambia con la especie en el momento, sin recargar.
     pintarAvatar(speciesSelect.value, nameInput.value);
     if (typeof actualizarHato === "function") actualizarHato(speciesSelect.value);
   }
-  sub.textContent = [entry.especie, entry.raza, entry.peso].filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
+  sub.textContent =
+    [entry.especie, entry.raza, sexoResumido(entry.sexo, entry.esterilizado), entry.peso]
+      .filter(Boolean).join(" · ") || "Especie, raza y peso sin especificar";
 
   info.appendChild(nameRow);
   info.appendChild(sub);
 
   const actions = document.createElement("div");
   actions.className = "patient-head-actions";
-  const calcBtn = document.createElement("button");
-  calcBtn.type = "button";
-  calcBtn.className = "btn-secondary";
-  calcBtn.textContent = "🧮 Calcular dosis";
-  calcBtn.addEventListener("click", () => openCalculatorOverlay({ caseEntry: entry }));
+  /* La calculadora ya no vive aqui arriba: se fue al bloque de farmacos,
+     dentro del Tratamiento. Calcular una dosis y anotarla eran dos sitios
+     distintos de la pantalla, y en la cabecera no se ve a que farmaco se
+     refiere lo que acabas de calcular. */
   const pdfBtn = document.createElement("button");
   pdfBtn.type = "button";
   pdfBtn.className = "btn-secondary";
   pdfBtn.textContent = "📄 Descargar PDF";
   pdfBtn.addEventListener("click", () => imprimirCaso(entry, pdfBtn));
-  actions.appendChild(calcBtn);
   actions.appendChild(pdfBtn);
 
   head.appendChild(avatar);
@@ -5619,6 +5771,8 @@ function renderPatientDetail(root, entry) {
     // Los rangos de referencia dependen de la especie y tienen que
     // cambiar aquí mismo, no en la siguiente recarga.
     if (constantesNodo) constantesNodo.setEspecie(speciesSelect.value);
+    // Las pruebas propias de la especie cambian aqui mismo, sin recargar.
+    if (examenesNodo) examenesNodo.setEspecie(speciesSelect.value);
   });
   speciesGroup.appendChild(speciesLabel);
   speciesGroup.appendChild(speciesSelect);
@@ -5638,7 +5792,68 @@ function renderPatientDetail(root, entry) {
   dateInput.addEventListener("input", () => save("date", dateInput.value));
   dateGroup.appendChild(dateLabel);
   dateGroup.appendChild(dateInput);
+
+  const sexoGroup = document.createElement("div");
+  sexoGroup.className = "field-group";
+  const sexoLabel = document.createElement("label");
+  sexoLabel.textContent = "Sexo";
+  const sexoSelect = document.createElement("select");
+  const blankSexoOpt = document.createElement("option");
+  blankSexoOpt.value = "";
+  blankSexoOpt.textContent = "— Sin especificar —";
+  sexoSelect.appendChild(blankSexoOpt);
+  SEXO_OPTIONS.forEach((opt) => {
+    const o = document.createElement("option");
+    o.value = opt;
+    o.textContent = opt;
+    sexoSelect.appendChild(o);
+  });
+  sexoSelect.value = entry.sexo || "";
+  sexoGroup.appendChild(sexoLabel);
+  sexoGroup.appendChild(sexoSelect);
+
+  const esterGroup = document.createElement("div");
+  esterGroup.className = "field-group";
+  const esterLabel = document.createElement("label");
+  esterLabel.textContent = "Esterilización";
+  const esterSelect = document.createElement("select");
+  esterGroup.appendChild(esterLabel);
+  esterGroup.appendChild(esterSelect);
+
+  /* Las opciones se vuelven a escribir cuando cambia el sexo, pero el valor
+     elegido se conserva: lo que cambia es la palabra, no el dato. */
+  function pintarOpcionesEsterilizado() {
+    const palabras = ESTERILIZADO_PALABRAS[sexoSelect.value] || ESTERILIZADO_PALABRAS[""];
+    esterSelect.textContent = "";
+    const vacio = document.createElement("option");
+    vacio.value = "";
+    vacio.textContent = "— Sin especificar —";
+    esterSelect.appendChild(vacio);
+    [["si", palabras.si], ["no", palabras.no]].forEach((par) => {
+      const o = document.createElement("option");
+      o.value = par[0];
+      o.textContent = par[1].charAt(0).toUpperCase() + par[1].slice(1);
+      esterSelect.appendChild(o);
+    });
+    esterSelect.value = esterilizadoActual;
+  }
+  pintarOpcionesEsterilizado();
+
+  sexoSelect.addEventListener("change", () => {
+    sexoActual = sexoSelect.value;
+    save("sexo", sexoActual);
+    pintarOpcionesEsterilizado();
+    refreshSub();
+  });
+  esterSelect.addEventListener("change", () => {
+    esterilizadoActual = esterSelect.value;
+    save("esterilizado", esterilizadoActual);
+    refreshSub();
+  });
+
   row2.appendChild(dateGroup);
+  row2.appendChild(sexoGroup);
+  row2.appendChild(esterGroup);
 
   const row3 = document.createElement("div");
   row3.className = "field-row";
@@ -5939,7 +6154,8 @@ function renderPatientDetail(root, entry) {
 
       const bloqueEx = document.createElement("div");
       bloqueEx.className = "apartado apartado-examenes";
-      bloqueEx.appendChild(buildExamenesSection(entry, statusText, adjuntos));
+      examenesNodo = buildExamenesSection(entry, statusText, adjuntos);
+      bloqueEx.appendChild(examenesNodo);
       notesCard.appendChild(bloqueEx);
 
       /* Las fotos, pegadas a los exámenes: son lo mismo —imágenes de

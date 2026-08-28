@@ -17,7 +17,7 @@
 
    IMPORTANTE: sube VERSION en cada despliegue. Es la unica linea que hay
    que tocar aqui. */
-const VERSION = "74";
+const VERSION = "76";
 
 const CACHE_SHELL = "vetdiario-shell-v" + VERSION;
 
@@ -41,6 +41,7 @@ const APP_SHELL = [
   "./index.html",
   "./app.js",
   "./semilla-formulario.js",
+  "./fichas-farmaco.js",
   "./styles.css",
   "./firebase-config.js",
   "./manifest.json",

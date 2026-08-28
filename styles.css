@@ -889,7 +889,16 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
 .examen-add-imagen { border-style: solid; border-color: var(--teal); color: var(--teal-ink); }
 .examen-add-imagen:hover { background: var(--teal-soft); }
 
-.data-table th.col-add { width: 1%; }
+.data-table th.col-add,
+.data-table th.col-borrar { width: 1%; }
+/* El boton no se ve hasta que pasas por la fila: borrar un caso clinico no
+   es una accion que deba estar pidiendo que la pulses. Con el dedo no hay
+   "pasar por encima", asi que en tactil se ve siempre. */
+@media (hover: hover) {
+  .data-table tbody tr .row-actions .icon-btn.danger { opacity: 0; transition: opacity var(--rapido) ease; }
+  .data-table tbody tr:hover .row-actions .icon-btn.danger,
+  .data-table tbody tr .row-actions .icon-btn.danger:focus-visible { opacity: 1; }
+}
 .data-table td.group-add-cell {
   text-align: right;
   white-space: nowrap;
@@ -2524,3 +2533,44 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
 .apunte-guia.apunte-guia-bloque[data-pos="izq"]::after { left: 0; }
 .apunte-guia.apunte-guia-bloque[data-pos="centro"]::after { left: 50%; margin-left: -4px; }
 .apunte-guia.apunte-guia-bloque[data-pos="der"]::after { right: 0; }
+
+/* ---------- Descripción del fármaco ----------
+   Va arriba de la ficha, antes de la familia: es lo primero que se quiere
+   leer al abrir un fármaco que no se maneja a diario.
+
+   Es un textarea (crece solo, casi ninguna descripción cabe en un renglón)
+   y por eso NO le llega la regla ".field-group input, .field-group select":
+   un textarea no es ninguno de los dos. Hay que darle la letra a mano —
+   font-family: inherit obligatorio, o sale en monoespaciada del navegador—
+   y apagar el tirador y la barra, porque el alto lo pone el JS midiendo.
+
+   La clase lleva .field-group delante a propósito (invariante de la
+   especificidad): ".input-desc" sola vale 0,1,0 y perdería contra
+   cualquier regla base que lleve un elemento en el selector. */
+.farmaco-desc { margin: 0 0 12px; }
+.farmaco-desc .field-group { min-width: 0; }
+.field-group textarea.input-desc {
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper-alt);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 10px;
+  resize: none;
+  overflow: hidden;
+  display: block;
+  width: 100%;
+  min-height: 0;
+}
+.field-group textarea.input-desc:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+  border-color: var(--teal);
+}
+.field-group textarea.input-desc::placeholder { color: var(--muted); }
+
+@media (max-width: 600px) {
+  .field-group textarea.input-desc { font-size: 0.86rem; }
+}

@@ -1,5 +1,6 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { SEMILLA_FORMULARIO, AMPLIACION_FORMULARIO } from "./semilla-formulario.js";
+import { FICHAS_FARMACO } from "./fichas-farmaco.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
   getAuth,
@@ -5271,6 +5272,36 @@ function grupoDeEspecie(entry) {
   return ESPECIE_PLURAL[especie] || especie;
 }
 
+/* Borrar un caso clinico. Un solo sitio para los dos botones que lo hacen
+   —el de la ficha y el de la lista—, porque el orden de los borrados no es
+   un detalle: las fotos van PRIMERO. Si fallara a mitad, la entrada sigue
+   ahi y se puede reintentar; al reves quedarian fotos huerfanas invisibles,
+   sin ninguna ficha desde la que volver a alcanzarlas.
+
+   Devuelve false si Daniel dijo que no, para que quien llame sepa que no
+   pasó nada. */
+async function eliminarCaso(entry) {
+  const ok = await askConfirm({
+    title: "¿Eliminar este caso clínico?",
+    message:
+      "Se borrará el caso de " +
+      (entry.meta || "este paciente") +
+      " con sus fármacos, fotos y evoluciones. No se puede deshacer.",
+    confirmLabel: "Eliminar caso"
+  });
+  if (!ok) return false;
+  // Si estabas dentro de la ficha que se borra, hay que salir de ella.
+  if (state.activeId === entry.id) state.activeId = null;
+  render();
+  try {
+    await borrarFotosDeEntrada(entry.id);
+    await deleteDoc(doc(db, "entries", entry.id));
+  } catch (err) {
+    alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
+  }
+  return true;
+}
+
 function buildPatientsTable(list, compact, grouped) {
   const wrap = document.createElement("div");
   wrap.className = "table-wrap";
@@ -5289,7 +5320,14 @@ function buildPatientsTable(list, compact, grouped) {
   const cols = compact
     ? ["Paciente", "Especie", "Área", "Ingreso", "Evoluciones"]
     : ["Paciente", "Especie / Raza", "Fecha de ingreso", "Área", "Tutor", "Evoluciones"];
-  thead.innerHTML = "<tr>" + cols.map((c) => "<th>" + c + "</th>").join("") + "</tr>";
+  /* Solo en la lista completa. El resumen del inicio son cinco casos de
+     vistazo; un boton de borrar ahi solo invita al accidente. */
+  const conBorrar = !compact;
+  thead.innerHTML =
+    "<tr>" +
+    cols.map((c) => "<th>" + c + "</th>").join("") +
+    (conBorrar ? '<th class="col-borrar" aria-label="Eliminar"></th>' : "") +
+    "</tr>";
   table.appendChild(thead);
 
   const tbody = document.createElement("tbody");
@@ -5323,7 +5361,8 @@ function buildPatientsTable(list, compact, grouped) {
       const headTr = document.createElement("tr");
       headTr.className = "group-row";
       const headTd = document.createElement("td");
-      headTd.colSpan = cols.length;
+      // La cabecera cubre TODA la fila, incluida la columna de borrar.
+      headTd.colSpan = cols.length + (conBorrar ? 1 : 0);
       headTd.setAttribute("role", "button");
       headTd.tabIndex = 0;
       headTd.setAttribute("aria-expanded", expandido ? "true" : "false");
@@ -5441,6 +5480,23 @@ function buildPatientRow(entry, compact) {
     badge.textContent = summary.text;
     evoTd.appendChild(badge);
     tr.appendChild(evoTd);
+
+    if (!compact) {
+      const delTd = document.createElement("td");
+      delTd.className = "row-actions";
+      const delBtn = botonQuitar(
+        "Eliminar el caso de " + (entry.meta || "este paciente"),
+        (e) => {
+          /* La fila entera abre el caso. Sin cortar el clic aqui, borrar
+             abriria ademas la ficha del caso que acabas de borrar. */
+          e.stopPropagation();
+          eliminarCaso(entry);
+        }
+      );
+      delBtn.title = "Eliminar este caso";
+      delTd.appendChild(delBtn);
+      tr.appendChild(delTd);
+    }
 
     return tr;
   }
@@ -6405,25 +6461,7 @@ function renderPatientDetail(root, entry) {
   del.className = "btn-delete";
   del.type = "button";
   del.textContent = "Eliminar caso";
-  del.addEventListener("click", async () => {
-    const ok = await askConfirm({
-      title: "¿Eliminar este caso clínico?",
-      message: "Se borrará el caso de " + (entry.meta || "este paciente") + " con sus fármacos, fotos y evoluciones. No se puede deshacer.",
-      confirmLabel: "Eliminar caso"
-    });
-    if (!ok) return;
-    state.activeId = null;
-    render();
-    try {
-      // Las fotos PRIMERO. Si fallara a mitad, la entrada sigue ahi y se
-      // puede reintentar; al reves quedarian fotos huerfanas invisibles,
-      // sin ninguna ficha desde la que volver a alcanzarlas.
-      await borrarFotosDeEntrada(entry.id);
-      await deleteDoc(doc(db, "entries", entry.id));
-    } catch (err) {
-      alert("No se pudo eliminar (sin conexión). Se reintentará cuando vuelvas a estar en línea.");
-    }
-  });
+  del.addEventListener("click", () => eliminarCaso(entry));
   foot.appendChild(status);
   foot.appendChild(del);
   root.appendChild(foot);
@@ -6914,6 +6952,9 @@ function farmacoNormalizado(f) {
     id: f.id,
     uid: f.uid,
     nombreGenerico: f.nombreGenerico || f.nombre || "",
+    /* Que es y para que sirve, en una o dos lineas. Lo carga
+       fichas-farmaco.js y se puede reescribir a mano en la ficha. */
+    descripcion: f.descripcion || "",
     familia: f.familia || "",
     /* En que familia de la lista aparece, si se forzo a mano. Sin esto,
        normalizar el farmaco borraba la eleccion y volvia a deducirse. */
@@ -7011,14 +7052,66 @@ function especiesDe(farmaco) {
   return Array.from(set);
 }
 
-/* Una alerta bloquea el calculo si NOMBRA la especie elegida. Es una
-   coincidencia de texto: las alertas son prosa libre, no un campo
-   estructurado, asi que no hay forma mas fiable de cruzarlas con la
-   especie sin obligarte a llenar un campo mas por cada alerta. */
+/* Que una advertencia BLOQUEE el calculo es la comprobacion de
+   seguridad mas fuerte que tiene la app, y hasta ahora se decidia por
+   una simple busqueda de texto: si la alerta contenia "bovino", se
+   bloqueaba el bovino.
+
+   Eso bloqueaba de mas y bloqueaba mal. Medido sobre las 155 fichas
+   nuevas, la regla vieja producia 31 bloqueos; solo 10 eran
+   prohibiciones reales de etiqueta. Los otros 21 salian de frases como
+   "no usar en vacas de aptitud lechera en lactancia" (que no prohibe el
+   bovino entero) o "Bovino: mucho mas sensible que el equino" (que es
+   una advertencia de dosis, no una prohibicion). Una app que bloquea
+   cuando no toca ensena a ignorar el bloqueo.
+
+   Y ademas fallaba por un motivo tonto: 'bovinos' CONTIENE 'ovino'. La
+   palabra ovino saltaba en cualquier frase sobre bovinos.
+
+   Ahora hay tres casos, en este orden:
+
+     1. Si la lista tiene alguna linea con ⛔, SOLO esas pueden
+        bloquear. Es el candado explicito de fichas-farmaco.js.
+     2. Si no tiene ninguna ⛔ pero si la linea de fuente (📄), es una
+        lista cargada y revisada: no bloquea nada. Que no lleve candado
+        significa que no hay prohibicion absoluta de etiqueta.
+     3. Si no tiene ni una cosa ni otra, es una lista escrita a mano en
+        la ficha. Ahi se mantiene el comportamiento de siempre, para no
+        quitarle en silencio el bloqueo a nada que ya lo tuviera.
+
+   La especie se busca como PALABRA COMPLETA, admitiendo el plural. */
+const MARCA_BLOQUEO = "⛔";
+const MARCA_FUENTE = "📄";
+
+function nombraLaEspecie(texto, especie) {
+  const t = normalizarBusqueda(texto);
+  const e = normalizarBusqueda(especie);
+  if (!t || !e) return false;
+  let desde = 0;
+  for (;;) {
+    const i = t.indexOf(e, desde);
+    if (i < 0) return false;
+    const antes = i === 0 ? "" : t.charAt(i - 1);
+    const despues = t.charAt(i + e.length);
+    const letra = (c) => c >= "a" && c <= "z";
+    // Se admite el plural ('felinos') pero no que la palabra este
+    // metida dentro de otra ('bovinos' no es 'ovino').
+    const finOk = despues === "" || !letra(despues) || (despues === "s" && !letra(t.charAt(i + e.length + 1)));
+    if (!letra(antes) && finOk) return true;
+    desde = i + 1;
+  }
+}
+
 function alertaQueBloquea(farmaco, especie) {
   if (!especie) return null;
-  const e = normalizarBusqueda(especie);
-  return (farmaco.alertas || []).find((a) => normalizarBusqueda(a).includes(e)) || null;
+  const lista = farmaco.alertas || [];
+  const conCandado = lista.filter((a) => String(a).indexOf(MARCA_BLOQUEO) >= 0);
+  if (conCandado.length) {
+    return conCandado.find((a) => nombraLaEspecie(a, especie)) || null;
+  }
+  const esListaCargada = lista.some((a) => String(a).indexOf(MARCA_FUENTE) >= 0);
+  if (esListaCargada) return null;
+  return lista.find((a) => nombraLaEspecie(a, especie)) || null;
 }
 
 function retiroEsOrientativo(entrada) {
@@ -7138,6 +7231,120 @@ async function cargarAmpliacionFormulario() {
     }
   }
   return { creados: creados, existentes: existentes, fallos: fallos };
+}
+
+/* Carga las descripciones y las contraindicaciones de fichas-farmaco.js
+   sobre los farmacos que YA existen en el formulario.
+
+   Tres decisiones que conviene tener escritas, porque las tres son de las
+   que se olvidan y luego duelen:
+
+   1. NO crea farmacos. Si una ficha no encuentra su farmaco, se cuenta y
+      se deja. Crear aqui duplicaria lo que ya hacen la semilla y la
+      ampliacion, cada una con su id.
+
+   2. NO toca dosis, presentaciones, tiempos de retiro ni verificadoEl. El
+      unico campo clinico que escribe son las contraindicaciones, y la
+      descripcion solo si esta vacia: si Daniel escribio la suya, la suya
+      manda.
+
+   3. Lo que el escribio a mano en las contraindicaciones SE CONSERVA. Se
+      quitan solo las lineas que vinieron de una carga anterior — se
+      reconocen porque coinciden con el texto nuevo o porque son la linea
+      de fuente (📄) — y el resto se vuelve a poner debajo. Asi el boton se
+      puede pulsar las veces que haga falta sin que su trabajo se acumule
+      duplicado ni desaparezca. */
+async function cargarFichasFarmaco() {
+  let actualizados = 0;
+  let sinFicha = 0;
+  let noEncontrados = 0;
+  const fallos = [];
+
+  /* Indice por nombre normalizado, para el farmaco que Daniel creo a mano
+     y que por tanto no tiene el id de la semilla ni el de la ampliacion.
+
+     El nombre no se repite en fichas-farmaco.js: se saca del slug contra
+     la semilla y la ampliacion, que ya lo tienen. Duplicarlo seria una
+     tercera copia del mismo dato, y la tercera copia es la que se queda
+     desactualizada. */
+  const porNombre = new Map();
+  state.formulario.forEach(function (f) {
+    const n = normalizarBusqueda(f.nombreGenerico || f.nombre);
+    if (n && !porNombre.has(n)) porNombre.set(n, f);
+  });
+  const nombreDeSlug = new Map();
+  SEMILLA_FORMULARIO.concat(AMPLIACION_FORMULARIO).forEach(function (r) {
+    if (r && r.slug) nombreDeSlug.set(r.slug, r.nombreGenerico || "");
+  });
+
+  /* Lo que trajo la semilla tampoco es letra de Daniel: es una carga
+     anterior, hecha por la app. Si no se reconociera, cada farmaco
+     sembrado acabaria diciendo lo mismo tres veces con otras palabras
+     — medido en tilosina: la linea con ⛔, mas «No usar en equidos:
+     puede ser mortal», mas la alerta vieja del mismo tenor. El texto no
+     coincide letra a letra, asi que el descarte por igualdad no lo pilla
+     y hay que mirarlo aparte. */
+  const viejasDeSemilla = new Map();
+  SEMILLA_FORMULARIO.forEach(function (r) {
+    if (!r || !r.slug) return;
+    const v = (r.alertas || []).concat(r.contraindicaciones || []).map(normalizarBusqueda);
+    viejasDeSemilla.set(r.slug, new Set(v));
+  });
+
+  for (const ficha of FICHAS_FARMACO) {
+    if (!ficha || !ficha.slug) { sinFicha++; continue; }
+
+    const crudo =
+      state.formulario.find(function (f) {
+        return f.id === "semilla_" + ficha.slug || f.id === "amp_" + ficha.slug;
+      }) || porNombre.get(normalizarBusqueda(nombreDeSlug.get(ficha.slug) || "")) || null;
+
+    if (!crudo) { noEncontrados++; continue; }
+
+    const far = farmacoNormalizado(crudo);
+    const nuevas = (ficha.contra || []).slice();
+    const lineaFuente = "📄 Fuente: " + (ficha.fuente || "");
+
+    // Lo que ya estaba, sin lo que va a volver a entrar y sin la linea de
+    // fuente de la carga anterior.
+    const yaPuestas = new Set(nuevas.map(normalizarBusqueda));
+    const deLaSemilla = viejasDeSemilla.get(ficha.slug) || new Set();
+    const propias = contraindicacionesDe(far).filter(function (t) {
+      const s = String(t || "").trim();
+      if (!s) return false;
+      if (s.indexOf("📄") >= 0) return false;          // linea de fuente de una carga anterior
+      if (deLaSemilla.has(normalizarBusqueda(s))) return false; // texto de la semilla
+      return !yaPuestas.has(normalizarBusqueda(s));   // texto identico al nuevo
+    });
+
+    const parche = {
+      alertas: nuevas.concat(propias).concat([lineaFuente]),
+      /* El campo viejo se vacia: contraindicacionesDe ya lo leyo y su
+         contenido acaba de pasar a "alertas". Dejarlo lleno duplicaria
+         cada linea en la pantalla. */
+      contraindicaciones: [],
+      updatedAt: serverTimestamp()
+    };
+    // La descripcion solo si no hay ninguna: la que el escriba manda.
+    if (!String(far.descripcion || "").trim() && ficha.descripcion) {
+      parche.descripcion = ficha.descripcion;
+    }
+
+    try {
+      await updateDoc(doc(db, "formulario", crudo.id), parche);
+      actualizados++;
+    } catch (err) {
+      console.error("No se pudo actualizar " + crudo.id + ":", err);
+      fallos.push(ficha.slug + ": " + ((err && err.code) || "error"));
+    }
+  }
+
+  return {
+    actualizados: actualizados,
+    sinFicha: sinFicha,
+    noEncontrados: noEncontrados,
+    fallos: fallos
+  };
 }
 
 async function cargarSemillaFormulario() {
@@ -8377,6 +8584,35 @@ function buildMantenimientoFormulario() {
   });
   acciones.appendChild(btnAmpliacion);
 
+  const btnFichas = document.createElement("button");
+  btnFichas.type = "button";
+  btnFichas.className = "btn-secondary";
+  btnFichas.textContent = "Cargar descripciones y contraindicaciones (" + FICHAS_FARMACO.length + ")";
+  btnFichas.title = "Una descripción y la lista de contraindicaciones con su fuente para cada fármaco del formulario";
+  btnFichas.addEventListener("click", async () => {
+    const ok = await askConfirm({
+      title: "¿Cargar descripciones y contraindicaciones?",
+      message:
+        "Se escribe una descripción y la lista de contraindicaciones de " + FICHAS_FARMACO.length +
+        " fármacos, cada una con la etiqueta o el artículo de donde sale. NO se tocan las dosis, las presentaciones, los tiempos de retiro ni la fecha de verificación. Lo que hayas escrito tú a mano en las contraindicaciones se conserva.",
+      confirmLabel: "Cargar"
+    });
+    if (!ok) return;
+    btnFichas.disabled = true;
+    btnFichas.textContent = "Cargando…";
+    const r = await cargarFichasFarmaco();
+    showToast(r.actualizados ? "Actualizados " + r.actualizados + " fármacos" : "No había nada que actualizar");
+    informar(
+      "Actualizados " + r.actualizados +
+        (r.sinFicha ? ". Sin ficha en el archivo: " + r.sinFicha : "") +
+        (r.noEncontrados ? ". No están en tu formulario: " + r.noEncontrados : "") +
+        (r.fallos.length ? ". Fallaron: " + r.fallos.join("; ") : "."),
+      r.fallos.length > 0
+    );
+    render();
+  });
+  acciones.appendChild(btnFichas);
+
   card.appendChild(acciones);
   card.appendChild(salida);
 
@@ -8444,6 +8680,18 @@ function renderFormularioDetail(root, item) {
 
   root.appendChild(tag);
   root.appendChild(titleInput);
+
+  /* La descripcion va ANTES de la familia: es lo primero que uno quiere
+     leer al abrir un farmaco que no maneja a diario. Crece sola porque
+     casi ninguna cabe en un renglon. */
+  const descWrap = document.createElement("div");
+  descWrap.className = "farmaco-desc";
+  const descArea = areaQueCrece(far.descripcion, "Qué es y para qué se usa");
+  descArea.className += " input-desc";
+  descArea.addEventListener("input", () => save("descripcion", descArea.value));
+  descWrap.appendChild(campoFormulario("Descripción", descArea));
+  root.appendChild(descWrap);
+  setTimeout(() => descArea.ajustarAlto(), 0);
 
   const familiaRow = document.createElement("div");
   familiaRow.className = "field-row field-row-familia";

@@ -1,5 +1,5 @@
 import { firebaseConfig } from "./firebase-config.js";
-import { SEMILLA_FORMULARIO } from "./semilla-formulario.js";
+import { SEMILLA_FORMULARIO, AMPLIACION_FORMULARIO } from "./semilla-formulario.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
   getAuth,
@@ -261,6 +261,10 @@ function matchesFormularioQuery(item, q) {
 function setConn(state_, text) {
   els.connPill.setAttribute("data-state", state_);
   els.connText.textContent = text;
+  /* El aviso entero, tambien en el titulo. En pantallas estrechas la frase
+     se recorta con puntos suspensivos para no aplastar el buscador, y asi
+     se sigue pudiendo leer completa. */
+  els.connPill.title = text;
 }
 
 let toastEl = null;
@@ -658,7 +662,12 @@ async function borrarFotosDeEntrada(entryId) {
 
 async function guardarFoto(entryId, file) {
   const datos = await prepararFotoParaFirestore(file);
-  const ref = await addDoc(collection(db, "fotos"), {
+  /* Sin esperar al servidor: addDoc no resuelve hasta que la escritura
+     se confirma, y sin conexion no resuelve NUNCA. Con await, la miniatura
+     se quedaba en "Guardando…" para siempre justo cuando mas se usa esto
+     — en el campo, sin senal. El id se genera en local con doc(). */
+  const ref = doc(collection(db, "fotos"));
+  setDoc(ref, {
     uid: currentUid,
     entryId,
     uidEntrada: claveFotos(entryId),
@@ -666,6 +675,8 @@ async function guardarFoto(entryId, file) {
     datos,
     orden: Date.now(),
     createdAt: serverTimestamp()
+  }).catch(function (err) {
+    logFoto("no se pudo guardar la foto: " + ((err && err.code) || err));
   });
   return { id: ref.id, nombre: file.name || "foto.jpg", datos };
 }
@@ -2271,7 +2282,12 @@ async function crearExamen(entryId) {
     orden: Date.now(),
     createdAt: serverTimestamp()
   };
-  const ref = await addDoc(collection(db, "fotos"), base);
+  /* Igual que las fotos: sin conexion, await dejaba el boton
+     "+ Examen" sin hacer nada visible. */
+  const ref = doc(collection(db, "fotos"));
+  setDoc(ref, base).catch(function (err) {
+    logFoto("no se pudo crear el examen: " + ((err && err.code) || err));
+  });
   return { ...base, id: ref.id, createdAt: null };
 }
 
@@ -2279,7 +2295,12 @@ async function guardarPaginaDeExamen(entryId, examenId, file, comoEscaneo) {
   const fuente = comoEscaneo ? await procesarComoEscaneo(file) : file;
   const datos = await prepararFotoParaFirestore(fuente);
   const nombre = file.name || "página.jpg";
-  const ref = await addDoc(collection(db, "fotos"), {
+  /* Sin esperar al servidor: addDoc no resuelve hasta que la escritura
+     se confirma, y sin conexion no resuelve NUNCA. Con await, la miniatura
+     se quedaba en "Guardando…" para siempre justo cuando mas se usa esto
+     — en el campo, sin senal. El id se genera en local con doc(). */
+  const ref = doc(collection(db, "fotos"));
+  setDoc(ref, {
     clase: "pagina",
     examenId: examenId,
     uid: currentUid,
@@ -2289,6 +2310,8 @@ async function guardarPaginaDeExamen(entryId, examenId, file, comoEscaneo) {
     datos: datos,
     orden: Date.now(),
     createdAt: serverTimestamp()
+  }).catch(function (err) {
+    logFoto("no se pudo guardar la hoja: " + ((err && err.code) || err));
   });
   return { id: ref.id, clase: "pagina", examenId: examenId, nombre: nombre, datos: datos };
 }
@@ -2758,7 +2781,13 @@ function buildExamenesSection(entry, statusText, cargarAdjuntos) {
   function pintarLista() {
     lista.innerHTML = "";
     vacio.hidden = examenes.length > 0;
-    if (!examenes.length) vacio.textContent = "Aún no hay exámenes. Escanea la hoja del laboratorio o sube el archivo.";
+    /* Nombra las tres vias, y sobre todo dice que hay que crear el examen
+       primero: los botones viven DENTRO de la tarjeta, asi que sin ninguna
+       creada no hay nada que ver y parece que la funcion no existe. */
+    if (!examenes.length) {
+      vacio.textContent =
+        "Aún no hay exámenes. Toca «+ Examen» y dentro podrás escanear la hoja del laboratorio, subir un archivo o agregar una radiografía o ecografía.";
+    }
     examenes
       .slice()
       .sort(function (a, b) { return String(b.fecha || "").localeCompare(String(a.fecha || "")); })
@@ -2800,7 +2829,7 @@ function buildPhotosSection(entry, statusText, etiqueta, cargarAdjuntos) {
   const head = document.createElement("div");
   head.className = "subcard-head";
   const label = document.createElement("span");
-  label.textContent = etiqueta || "Fotos (radiografías, ecografías, paciente)";
+  label.textContent = etiqueta || "Fotos del paciente (lesiones, heridas, evolución)";
   head.appendChild(label);
   wrap.appendChild(head);
 
@@ -5068,11 +5097,74 @@ function renderDashboardPage(root) {
   drugTitle.textContent = "Tabla de referencia de fármacos";
   drugHead.appendChild(drugTitle);
   drugCard.appendChild(drugHead);
-  const drugList = state.formulario.slice().sort((a, b) => (a.nombre || "").localeCompare(b.nombre || "")).slice(0, 5);
   const drugTablePad = document.createElement("div");
   drugTablePad.className = "card-pad";
-  drugTablePad.appendChild(buildFormularioTable(drugList, false));
+
+  /* Buscador propio y no el de la barra de arriba: aquel busca casos y
+     pacientes por todo el cuaderno. Este busca UN farmaco en el formulario,
+     por su nombre o por su familia. */
+  const buscarFila = document.createElement("div");
+  buscarFila.className = "tabla-buscar";
+  const buscarInput = document.createElement("input");
+  buscarInput.type = "search";
+  buscarInput.className = "tabla-buscar-input";
+  buscarInput.placeholder = "Buscar un fármaco por nombre o familia…";
+  buscarInput.setAttribute("aria-label", "Buscar un fármaco en el formulario");
+  const buscarCuenta = document.createElement("span");
+  buscarCuenta.className = "tabla-buscar-cuenta";
+  buscarFila.appendChild(buscarInput);
+  buscarFila.appendChild(buscarCuenta);
+  drugTablePad.appendChild(buscarFila);
+
+  const drugTablaCaja = document.createElement("div");
+  drugTablePad.appendChild(drugTablaCaja);
   drugCard.appendChild(drugTablePad);
+
+  /* Cuantos se ensenan sin buscar. El numero da igual mientras se DIGA:
+     antes cortaba a cinco sin avisar y parecia que el formulario entero
+     tenia cinco farmacos. */
+  const FARMACOS_DE_ENTRADA = 8;
+
+  function pintarTablaFarmacos() {
+    const q = normalizarBusqueda(String(buscarInput.value || "").trim());
+    /* Se ordena por nombreGenerico, que es el campo real. Antes se ordenaba
+       por "nombre": como no existe, comparaba undefined con undefined, daba
+       0 siempre y la lista se quedaba en el orden en que llego. */
+    const todos = state.formulario
+      .map(function (crudo) { return { crudo: crudo, far: farmacoNormalizado(crudo) }; })
+      .filter(function (p) { return p.far; })
+      .sort(function (a, b) {
+        return (a.far.nombreGenerico || "").localeCompare(b.far.nombreGenerico || "", "es");
+      });
+    const encontrados = q
+      ? todos.filter(function (p) {
+          return (
+            incluyeNormalizado(p.far.nombreGenerico, q) ||
+            incluyeNormalizado(p.far.familia, q) ||
+            incluyeNormalizado(p.far.grupo, q)
+          );
+        })
+      : todos;
+    const visibles = (q ? encontrados : encontrados.slice(0, FARMACOS_DE_ENTRADA))
+      .map(function (p) { return p.crudo; });
+
+    drugTablaCaja.innerHTML = "";
+    drugTablaCaja.appendChild(buildFormularioTable(visibles, false, true));
+
+    const total = todos.length;
+    if (q) {
+      buscarCuenta.textContent = encontrados.length
+        ? encontrados.length + (encontrados.length === 1 ? " fármaco" : " fármacos") + " de " + total
+        : "Ningún fármaco con ese nombre";
+    } else if (total > FARMACOS_DE_ENTRADA) {
+      buscarCuenta.textContent = "Mostrando " + FARMACOS_DE_ENTRADA + " de " + total + " — escribe para buscar";
+    } else {
+      buscarCuenta.textContent = total + (total === 1 ? " fármaco" : " fármacos");
+    }
+  }
+
+  buscarInput.addEventListener("input", pintarTablaFarmacos);
+  pintarTablaFarmacos();
 
   const calcCard = document.createElement("div");
   calcCard.className = "card card-pad";
@@ -5101,24 +5193,47 @@ function renderDashboardPage(root) {
 
 /* ---------- Pacientes (casos clínicos) ---------- */
 
-async function createCase() {
-  try {
-    const ref = await addDoc(collection(db, "entries"), {
-      uid: currentUid,
-      section: "casos",
-      title: "",
-      meta: "",
-      date: todayISO(),
-      body: "",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    state.page = "patients";
-    state.activeId = ref.id;
-    render();
-  } catch (err) {
-    alert("No se pudo crear el caso. Revisa tu conexión e intenta de nuevo.");
-  }
+/* La ficha se abre EN EL MOMENTO, sin esperar al servidor.
+
+   Antes esto era `const ref = await addDoc(...)` y despues abrir. El
+   problema: addDoc no resuelve hasta que el servidor confirma. Con buena
+   red se nota poco; con la red de una finca tarda segundos, y sin
+   conexion NO RESUELVE NUNCA — la escritura queda en la cola de
+   Firestore, pero la linea que abre la ficha no llega a ejecutarse. Lo
+   que veias era el caso nuevo apareciendo vacio en la lista de abajo y
+   nada mas.
+
+   doc() sobre una coleccion genera el identificador en LOCAL, sin red.
+   Con el id ya en la mano se abre la ficha y la escritura viaja por
+   detras; si falla, se avisa. Es el mismo patron que ya usan las fotos
+   del apunte por la misma razon. */
+function createCase() {
+  const ref = doc(collection(db, "entries"));
+  setDoc(ref, {
+    uid: currentUid,
+    section: "casos",
+    title: "",
+    meta: "",
+    date: todayISO(),
+    body: "",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  }).catch(function (err) {
+    console.error("No se pudo crear el caso:", err);
+    alert("No se pudo guardar el caso nuevo. Lo que escribas se enviará cuando vuelva la conexión.");
+  });
+  /* Y la ficha se mete en la lista de memoria a mano, sin esperar a que
+     Firestore devuelva el snapshot. render() abre la ficha buscandola en
+     state.entries: si no esta, ensena la lista y el caso nuevo aparece
+     abajo vacio — que es exactamente lo que se veia. Cuando llegue el
+     snapshot de verdad, state.entries se reemplaza entero y este apaño
+     desaparece solo; no puede duplicarse. */
+  state.entries = state.entries.concat([
+    { id: ref.id, uid: currentUid, section: "casos", title: "", meta: "", date: todayISO(), body: "", _pending: true, _sortKey: 0 }
+  ]);
+  state.page = "patients";
+  state.activeId = ref.id;
+  render();
 }
 
 function evolutionSummary(entry) {
@@ -6262,7 +6377,10 @@ function renderPatientDetail(root, entry) {
       const fotosNodo = buildPhotosSection(
         entry,
         statusText,
-        "Otras imágenes (lesiones, radiografías, ecografías, paciente)",
+        /* Sin "radiografias" ni "ecografias": esas van dentro del examen,
+           con su fecha y su interpretacion. Aqui queda lo que no es un
+           examen y no tiene otro sitio. */
+        "Fotos del paciente (lesiones, heridas, evolución)",
         adjuntos
       );
       fotosNodo.classList.add("examenes-fotos");
@@ -6483,24 +6601,30 @@ function renderStudyPage(root) {
   else renderFormularioTab(root);
 }
 
-async function createMateria() {
-  try {
-    const ref = await addDoc(collection(db, "entries"), {
-      uid: currentUid,
-      section: "materias",
-      title: "",
-      meta: "",
-      date: todayISO(),
-      body: "",
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    state.studyTab = "materias";
-    state.activeId = ref.id;
-    render();
-  } catch (err) {
-    alert("No se pudo crear la materia. Revisa tu conexión e intenta de nuevo.");
-  }
+// Mismo motivo que en createCase: el id se genera en local y la ficha
+// se abre sin esperar a la red.
+function createMateria() {
+  const ref = doc(collection(db, "entries"));
+  setDoc(ref, {
+    uid: currentUid,
+    section: "materias",
+    title: "",
+    meta: "",
+    date: todayISO(),
+    body: "",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  }).catch(function (err) {
+    console.error("No se pudo crear la materia:", err);
+    alert("No se pudo guardar la materia nueva. Lo que escribas se enviará cuando vuelva la conexión.");
+  });
+  // Mismo motivo que en createCase.
+  state.entries = state.entries.concat([
+    { id: ref.id, uid: currentUid, section: "materias", title: "", meta: "", date: todayISO(), body: "", _pending: true, _sortKey: 0 }
+  ]);
+  state.studyTab = "materias";
+  state.activeId = ref.id;
+  render();
 }
 
 function renderMateriasTab(root) {
@@ -6969,6 +7093,53 @@ async function revertirMigracionFormulario() {
 /* ---------- Carga de la semilla ----------
    Id determinista a partir del slug: volver a pulsar el boton reescribe el
    mismo documento en vez de crear copias. merge:true conserva createdAt. */
+/* La ampliacion se AÑADE; la semilla REESCRIBE. La diferencia importa:
+   la semilla usa setDoc con merge y su payload lleva dosis: [], asi que
+   volver a pulsarla borraria las dosis que Daniel ya hubiera escrito en
+   un farmaco sembrado. Aqui cada ficha se crea SOLO si no existe, y las
+   que ya estan se cuentan y se dejan intactas: el boton se puede pulsar
+   las veces que sea sin miedo. */
+async function cargarAmpliacionFormulario() {
+  let creados = 0;
+  let existentes = 0;
+  const fallos = [];
+  for (const receta of AMPLIACION_FORMULARIO) {
+    if (!receta || !receta.slug) continue;
+    const id = "amp_" + receta.slug;
+    /* Se mira en la lista que ya esta en memoria, sin consultar: la
+       suscripcion al formulario trae todas las fichas. Y tambien por
+       nombre, por si esa misma molecula entro por otro camino. */
+    const nombre = normalizarBusqueda(receta.nombreGenerico);
+    const yaEsta = state.formulario.some(function (f) {
+      return f.id === id || normalizarBusqueda(f.nombreGenerico || f.nombre) === nombre;
+    });
+    if (yaEsta) { existentes++; continue; }
+    try {
+      await setDoc(doc(db, "formulario", id), {
+        uid: currentUid,
+        nombreGenerico: receta.nombreGenerico || "",
+        familia: receta.familia || "",
+        presentaciones: [],
+        dosis: [],
+        retiro: [],
+        contraindicaciones: [],
+        alertas: [],
+        /* Sin verificar y sin nada que verificar: esta ficha no trae
+           ninguna dosis. La firma la pone Daniel cuando la llene. */
+        verificadoEl: null,
+        esquemaFormulario: 2,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      creados++;
+    } catch (err) {
+      console.error("No se pudo crear " + id + ":", err);
+      fallos.push(receta.slug + ": " + ((err && err.code) || "error"));
+    }
+  }
+  return { creados: creados, existentes: existentes, fallos: fallos };
+}
+
 async function cargarSemillaFormulario() {
   let cargados = 0;
   const fallos = [];
@@ -7222,6 +7393,23 @@ const GRUPOS_FARMACO = [
   ["Anestésicos y sedantes", ["anestésico", "inductor", "alfa-2", "benzodiazepina", "fenotiazina", "disociativo", "anticolinérgico"]],
   ["Antiparasitarios", ["lactona macrocíclica", "benzimidazol", "isoxazolina", "cestodicida", "tetrahidropirimidina", "triazinona", "anticoccidial", "antiparasitario", "avermectina"]],
   ["Fluidos y electrolitos", ["electrolito", "fluido", "alcalinizante"]],
+  /* Las de abajo se anadieron despues, con la ampliacion del formulario.
+     Cuidado con el orden: grupoDeFarmaco devuelve la PRIMERA que casa, y
+     hay claves que se pisan a proposito. "Antidoto de rodenticidas
+     anticoagulantes" tiene que caer en Antidotos y no en Hematologicos,
+     asi que Antidotos va antes. */
+  ["Diuréticos", ["diurético"]],
+  ["Digestivos y antieméticos", ["antiemético", "procinético", "antiácido", "protector de mucosa", "antiespasmódico", "antidiarreico", "hepatoprotector", "laxante", "probiótico"]],
+  ["Cardiovasculares", ["cardiovascular", "inodilatador", "ieca", "digitálico", "antiarrítmico", "vasopresor", "inotrópico"]],
+  ["Respiratorios", ["respiratorio", "broncodilatador", "mucolítico", "antitusígeno"]],
+  ["Antihistamínicos", ["antihistamínico"]],
+  ["Antifúngicos", ["antifúngico"]],
+  ["Hormonales y reproductivos", ["hormonal", "prostaglandina", "gonadotropina", "progestágeno", "insulina", "gnrh"]],
+  ["Neurológicos y anticonvulsivos", ["anticonvulsivo", "antiepiléptico", "neuromodulador"]],
+  ["Antídotos y reversores", ["antídoto", "reversor", "quelante", "adsorbente"]],
+  ["Vitaminas y minerales", ["vitamina", "mineral", "suplemento", "oligoelemento"]],
+  ["Hematológicos", ["antifibrinolítico", "anticoagulante", "antiagregante", "hematínico"]],
+  ["Antisépticos y dermatológicos", ["antiséptico", "dermatológico", "cicatrizante"]],
   ["Otros", []]
 ];
 
@@ -7352,7 +7540,40 @@ const SUBCLASES_FARMACO = [
   [/diurético|diuretico/i, "Diuréticos"],
   [/alcalinizante/i, "Alcalinizantes"],
   [/electrolito/i, "Electrolitos"],
-  [/fluido/i, "Fluidos"]
+  [/fluido/i, "Fluidos"],
+  [/diurético de asa|diuretico de asa/i, "Diuréticos de asa"],
+  [/tiazíd|tiazid/i, "Tiazídicos"],
+  [/osmótico|osmotico/i, "Osmóticos"],
+  [/ahorrador de potasio/i, "Ahorradores de potasio"],
+  [/antiemético|antiemetico/i, "Antieméticos"],
+  [/procinético|procinetico/i, "Procinéticos"],
+  [/antiácido|antiacido|protector de mucosa/i, "Antiácidos y protectores"],
+  [/hepatoprotector/i, "Hepatoprotectores"],
+  [/antidiarreico|laxante|probiótico|probiotico/i, "Intestinales"],
+  [/antiespasmódico|antiespasmodico/i, "Antiespasmódicos"],
+  [/ieca/i, "IECA"],
+  [/inodilatador|digitálico|digitalico/i, "Inotrópicos"],
+  [/vasopresor|inotrópico|inotropico/i, "Vasopresores e inotrópicos"],
+  [/bloqueante de calcio/i, "Bloqueantes de calcio"],
+  [/betabloqueante/i, "Betabloqueantes"],
+  [/antiarrítmico|antiarritmico/i, "Antiarrítmicos"],
+  [/broncodilatador/i, "Broncodilatadores"],
+  [/mucolítico|mucolitico/i, "Mucolíticos"],
+  [/antihistamínico|antihistaminico/i, "Antihistamínicos"],
+  [/azol$|antifúngico azol|antifungico azol/i, "Azoles"],
+  [/polieno/i, "Polienos"],
+  [/alilamina/i, "Alilaminas"],
+  [/uterotónico|uterotonico|prostaglandina|gonadotropina|gnrh|progestágeno|progestageno/i, "Reproductivos"],
+  [/tiroideo/i, "Tiroideos"],
+  [/insulina/i, "Insulinas"],
+  [/anticonvulsivo|antiepiléptico|antiepileptico/i, "Anticonvulsivos"],
+  [/neuromodulador/i, "Neuromoduladores"],
+  [/reversor/i, "Reversores"],
+  [/antídoto|antidoto|quelante|adsorbente/i, "Antídotos"],
+  [/vitamina/i, "Vitaminas"],
+  [/mineral|suplemento/i, "Minerales y suplementos"],
+  [/antifibrinolítico|antifibrinolitico|anticoagulante|antiagregante/i, "Coagulación"],
+  [/antiséptico|antiseptico/i, "Antisépticos"]
 ];
 
 function subclaseDeFarmaco(farmaco) {
@@ -7374,7 +7595,55 @@ const gruposFarmacoExpandidos = new Set();
    pared de texto que había antes de agrupar. Se anota lo que ABRES. */
 const subclasesExpandidas = new Set();
 
-function buildFormularioTable(list, withActions) {
+/* Una pauta escrita como se lee en una etiqueta: "10–20 mg/kg".
+
+   Devuelve cadena vacia si la pauta no tiene cifra. No todas la tienen: hay
+   pautas cargadas con su fuente y su via mientras la cifra se comprueba, y
+   escribir "NaN mg/kg" en una lista de dosis es peor que no escribir nada. */
+function textoDeDosis(pauta) {
+  if (!pauta) return "";
+  /* El "== null" va ANTES de isFinite y no sobra: Number(null) es 0 y
+     isFinite(0) es true, asi que una pauta sin cifra cargada salia como
+     "0 mg/kg". Un cero parece un dato; el hueco tiene que verse como hueco. */
+  if (pauta.dosisMin == null || pauta.dosisMin === "") return "";
+  const min = Number(pauta.dosisMin);
+  if (!isFinite(min) || min <= 0) return "";
+  const bruto = Number(pauta.dosisMax);
+  const hayMax = pauta.dosisMax != null && pauta.dosisMax !== "" && isFinite(bruto) && bruto > 0;
+  const max = hayMax ? bruto : min;
+  const cifra = max !== min ? Math.min(min, max) + "–" + Math.max(min, max) : String(min);
+  return cifra + " " + (pauta.unidad || "mg/kg");
+}
+
+/* Lo que se ve en la columna Dosis de la lista.
+
+   En una celda cabe UNA pauta y un farmaco puede tener varias. Se ensena la
+   primera con cifra y un "+N" que avisa de que hay mas; sin ese aviso
+   pareceria que esa es la unica dosis del farmaco, que es justo el error
+   que puede acabar en una sobredosis. El detalle completo —especie, via e
+   indicacion de cada una— va en el titulo emergente, asi que no se esconde
+   nada, solo se resume. */
+function dosisResumida(pautas) {
+  const lista = pautas || [];
+  if (!lista.length) return { texto: "—", titulo: "" };
+  const conCifra = lista.filter(function (p) { return textoDeDosis(p); });
+  const detalle = lista
+    .map(function (p) {
+      const via = viaTexto(p.via);
+      return [p.especie, textoDeDosis(p) || "sin cifra cargada", via ? "(" + via + ")" : "", p.indicacion || ""]
+        .filter(Boolean)
+        .join(" · ");
+    })
+    .join("\n");
+  if (!conCifra.length) return { texto: "sin cifra", titulo: detalle };
+  const otras = lista.length - 1;
+  return {
+    texto: textoDeDosis(conCifra[0]) + (otras > 0 ? "  +" + otras : ""),
+    titulo: detalle
+  };
+}
+
+function buildFormularioTable(list, withActions, forzarAbierto) {
   const wrap = document.createElement("div");
   wrap.className = "table-wrap";
   if (list.length === 0) {
@@ -7406,15 +7675,19 @@ function buildFormularioTable(list, withActions) {
   function filaDeFarmaco(crudo) {
     const far = farmacoNormalizado(crudo);
     const tr = document.createElement("tr");
-    if (!withActions) tr.style.cursor = "default";
-    else {
-      tr.addEventListener("click", (e) => {
-        if (e.target.closest(".row-actions")) return;
-        state.studyTab = "formulario";
-        state.activeId = far.id;
-        render();
-      });
-    }
+    /* La fila abre la ficha del farmaco desde cualquier tabla. Antes solo
+       desde la lista del formulario: en la del inicio era mirar y no tocar,
+       asi que encontrar el farmaco no servia para llegar a el.
+
+       state.page se fija ademas de la pestana porque desde el inicio no
+       estas en Estudio todavia. */
+    tr.addEventListener("click", (e) => {
+      if (e.target.closest(".row-actions")) return;
+      state.page = "study";
+      state.studyTab = "formulario";
+      state.activeId = far.id;
+      render();
+    });
 
     const nameTd = document.createElement("td");
     nameTd.className = "cell-title";
@@ -7436,12 +7709,15 @@ function buildFormularioTable(list, withActions) {
 
     if (withActions) {
       const doseTd = document.createElement("td");
-      doseTd.className = "cell-muted";
-      // Con una especie elegida se cuentan solo SUS pautas, no todas.
+      doseTd.className = "cell-dosis";
+      // Con una especie elegida se leen solo SUS pautas, no todas: una dosis
+      // de otra especie en esta fila seria peor que no poner ninguna.
       const pautas = especie
         ? far.dosis.filter((d) => String(d.especie || "").toLowerCase() === especie)
         : far.dosis;
-      doseTd.textContent = pautas.length ? pautas.length + " pauta(s)" : "—";
+      const resumen = dosisResumida(pautas);
+      doseTd.textContent = resumen.texto;
+      if (resumen.titulo) doseTd.title = resumen.titulo;
       tr.appendChild(doseTd);
     }
 
@@ -7523,7 +7799,10 @@ function buildFormularioTable(list, withActions) {
     (a, b) => ordenGrupos.indexOf(a) - ordenGrupos.indexOf(b)
   );
 
-  const abrirTodo = !!state.query || !!state.formularioEspecieFilter;
+  /* forzarAbierto lo usa la tabla del inicio: alli se filtra con su propio
+     buscador, no con el global, y con los grupos plegados los resultados
+     quedarian escondidos detras de las cabeceras. */
+  const abrirTodo = !!forzarAbierto || !!state.query || !!state.formularioEspecieFilter;
 
   nombres.forEach((nombre) => {
     const filas = grupos.get(nombre);
@@ -7694,9 +7973,13 @@ function buildFormularioTable(list, withActions) {
    meter nada dentro dejaba la familia vacia para siempre. El unico
    camino era crear el farmaco arriba, abrir su ficha y cambiar
    "Aparece en" — tres pasos y ninguno a la vista. */
-async function createFormularioEntry(grupo) {
-  try {
-    const ref = await addDoc(collection(db, "formulario"), {
+// Y lo mismo aqui: el formulario se llena muchas veces desde el aula,
+// con la red del campus, y esperar al servidor para abrir la ficha
+// dejaba el boton sin respuesta aparente.
+function createFormularioEntry(grupo) {
+  {
+    const ref = doc(collection(db, "formulario"));
+    setDoc(ref, {
       uid: currentUid,
       nombreGenerico: "",
       familia: "",
@@ -7710,12 +7993,17 @@ async function createFormularioEntry(grupo) {
       esquemaFormulario: 2,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
+    }).catch(function (err) {
+      console.error("No se pudo crear el fármaco:", err);
+      alert("No se pudo guardar el fármaco nuevo. Lo que escribas se enviará cuando vuelva la conexión.");
     });
+    // Mismo motivo que en createCase, sobre la lista del formulario.
+    state.formulario = state.formulario.concat([
+      { id: ref.id, uid: currentUid, nombreGenerico: "", familia: "", grupo: grupo || "", presentaciones: [], dosis: [], retiro: [], contraindicaciones: [], alertas: [], verificadoEl: null, esquemaFormulario: 2, _pending: true }
+    ]);
     state.studyTab = "formulario";
     state.activeId = ref.id;
     render();
-  } catch (err) {
-    alert("No se pudo crear la entrada. Revisa tu conexión e intenta de nuevo.");
   }
 }
 
@@ -8056,13 +8344,47 @@ function buildMantenimientoFormulario() {
   });
   acciones.appendChild(btnSemilla);
 
+  const btnAmpliacion = document.createElement("button");
+  btnAmpliacion.type = "button";
+  btnAmpliacion.className = "btn-secondary";
+  btnAmpliacion.textContent = "Agregar fármacos nuevos (" + AMPLIACION_FORMULARIO.length + ")";
+  btnAmpliacion.title = "Diuréticos, antieméticos, cardiovasculares, antifúngicos, hormonales… solo el nombre y la familia";
+  btnAmpliacion.addEventListener("click", async () => {
+    const ok = await askConfirm({
+      title: "¿Agregar los fármacos nuevos?",
+      message:
+        "Se crean fichas EN BLANCO (nombre y familia, sin dosis ni concentraciones) para los que todavía no tengas: diuréticos, antieméticos, cardiovasculares, respiratorios, antihistamínicos, antifúngicos, hormonales, anticonvulsivos, antídotos, vitaminas y antisépticos. Los que ya existen no se tocan.",
+      confirmLabel: "Agregar"
+    });
+    if (!ok) return;
+    btnAmpliacion.disabled = true;
+    btnAmpliacion.textContent = "Agregando…";
+    const r = await cargarAmpliacionFormulario();
+    /* El aviso de la tarjeta no se llega a leer: render() la reconstruye
+       justo despues y lo borra. El toast sobrevive al redibujado. */
+    showToast(
+      r.creados
+        ? "Agregados " + r.creados + " fármacos nuevos"
+        : "No había ninguno nuevo que agregar"
+    );
+    informar(
+      "Agregados " + r.creados +
+        (r.existentes ? ". Ya estaban " + r.existentes : "") +
+        (r.fallos.length ? ". Fallaron: " + r.fallos.join("; ") : "."),
+      r.fallos.length > 0
+    );
+    render();
+  });
+  acciones.appendChild(btnAmpliacion);
+
   card.appendChild(acciones);
   card.appendChild(salida);
 
   const nota = document.createElement("p");
   nota.className = "form-mant-desc";
   nota.textContent =
-    "Los fármacos del esquema viejo se leen y se calculan igual sin migrar: la migración solo habilita los campos nuevos (varias dosis por especie, retiro, alertas).";
+    "Los fármacos del esquema viejo se leen y se calculan igual sin migrar: la migración solo habilita los campos nuevos (varias dosis por especie, retiro, alertas). " +
+    "“Cargar semilla” REESCRIBE los fármacos sembrados y borraría las dosis que hayas escrito en ellos; “Agregar fármacos nuevos” solo crea los que faltan y no toca nada de lo que ya existe.";
   card.appendChild(nota);
 
   return card;

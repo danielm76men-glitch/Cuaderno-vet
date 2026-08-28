@@ -323,7 +323,11 @@ button, input, select, textarea { font-family: inherit; }
   border: 1px solid var(--line);
   border-radius: 20px;
 }
-.conn-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+/* Una sola linea siempre. Partido en dos, el aviso crecia hacia abajo y
+   empujaba al buscador hasta dejarlo sin ancho. */
+.conn-pill { white-space: nowrap; min-width: 0; overflow: hidden; }
+.conn-pill #connText { overflow: hidden; text-overflow: ellipsis; }
+.conn-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); flex: none; }
 .conn-pill[data-state="online"] .dot { background: var(--teal); }
 .conn-pill[data-state="online"] { color: var(--teal); border-color: var(--teal-soft); }
 .conn-pill[data-state="offline"] .dot { background: var(--rust); }
@@ -468,6 +472,15 @@ button, input, select, textarea { font-family: inherit; }
 .data-table tbody tr:last-child td { border-bottom: none; }
 .data-table .cell-title { font-weight: 700; color: var(--ink); }
 .data-table .cell-muted { color: var(--muted); }
+/* Una dosis es una cifra, y las cifras que se comparan en columna van en
+   monoespaciada para que cuadren unas debajo de otras. Sin partirse en dos
+   lineas: "10–20 mg/kg" cortado por el guion se lee como otra cosa. */
+.data-table .cell-dosis {
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
 .data-table .row-actions { display: flex; gap: 8px; white-space: nowrap; }
 .icon-btn {
   appearance: none;
@@ -482,6 +495,26 @@ button, input, select, textarea { font-family: inherit; }
 .icon-btn:hover { color: var(--teal-ink); background: var(--teal-soft); }
 .icon-btn.danger:hover { color: var(--rust); background: var(--rust-soft); }
 .empty-table { padding: 40px 16px; text-align: center; color: var(--muted); font-size: 0.86rem; }
+
+/* Buscador dentro de una tarjeta con tabla. */
+.tabla-buscar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.tabla-buscar-input {
+  flex: 1 1 200px; min-width: 0;
+  font: inherit; font-size: 0.86rem;
+  padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--paper-alt); color: var(--ink);
+}
+.tabla-buscar-input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+/* El recuento dice cuantos hay de verdad, no solo cuantos se ven. Una tabla
+   recortada en silencio miente sobre el tamano del formulario. */
+.tabla-buscar-cuenta {
+  flex: none;
+  font-size: 0.74rem; color: var(--muted); font-family: var(--mono);
+}
 
 /* Encabezado de grupo por especie dentro de la tabla de pacientes. */
 .data-table tbody tr.group-row { cursor: pointer; }
@@ -1142,7 +1175,29 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
   .mobile-menu-btn { display: flex; align-items: center; justify-content: center; }
   .content { padding: 16px; }
   .detail-grid { grid-template-columns: 1fr; }
-  .topbar-search { max-width: none; }
+  /* El buscador se lleva la fila entera. En un telefono escribir en una
+     caja de 60 px no es buscar, es adivinar: no se ve ni lo que tecleas.
+     Arriba quedan el menu, el estado y los botones; abajo el buscador. */
+  .topbar { flex-wrap: wrap; row-gap: 8px; padding: 10px 14px; gap: 8px; }
+  .mobile-menu-btn { order: 1; flex: none; }
+  /* flex: 1 1 auto y min-width: 0 para que PUEDA encogerse. Sin esto pedia
+     su ancho entero y se bajaba a una fila propia, dejando el menu solo
+     arriba y la barra en tres pisos. */
+  .topbar-right {
+    order: 2; gap: 8px; min-width: 0;
+    flex: 1 1 0%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+  .conn-pill { flex: 0 1 auto; }
+  .theme-toggle, .sign-out-btn { flex: none; }
+  .topbar-search {
+    order: 3;
+    flex: 1 0 100%;
+    max-width: none;
+    min-width: 0;
+  }
+  .topbar-search input { min-width: 0; }
 }
 
 /* ---------- Impresión / Guardar como PDF ---------- */

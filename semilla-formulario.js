@@ -2695,3 +2695,143 @@ export const SEMILLA_FORMULARIO = [
     verificadoEl: null
   }
 ];
+
+/* ============================================================
+   AMPLIACIÓN DEL FORMULARIO — solo nombres y familias
+   ============================================================
+
+   Esta lista NO trae dosis, ni presentaciones, ni tiempos de retiro. Es a
+   propósito: son fichas en blanco con el nombre y la clase farmacológica
+   puestos, para no tener que crear cada una a mano. Las dosis y las
+   concentraciones las llena Daniel contra la etiqueta del producto
+   registrado, que es de donde tienen que salir.
+
+   Por eso también van todas con verificadoEl: null. Ninguna está
+   verificada por nadie: no hay nada que verificar todavía.
+
+   El botón que las carga OMITE las que ya existen, así que se puede pulsar
+   las veces que haga falta sin pisar lo que ya hayas escrito. Eso lo
+   distingue del botón de la semilla, que reescribe.
+
+   Los nombres son los genéricos; la familia es la clase farmacológica, que
+   es lo que decide en qué grupo aparece cada uno en la lista. */
+
+export const AMPLIACION_FORMULARIO = [
+  /* ---------- Diuréticos (furosemida ya está en la semilla) ---------- */
+  { slug: "espironolactona", nombreGenerico: "Espironolactona", familia: "Diurético ahorrador de potasio — antagonista de la aldosterona" },
+  { slug: "hidroclorotiazida", nombreGenerico: "Hidroclorotiazida", familia: "Diurético tiazídico" },
+  { slug: "torasemida", nombreGenerico: "Torasemida", familia: "Diurético de asa" },
+  { slug: "manitol", nombreGenerico: "Manitol", familia: "Diurético osmótico" },
+
+  /* ---------- Digestivos y antieméticos ---------- */
+  { slug: "maropitant", nombreGenerico: "Maropitant", familia: "Antiemético — antagonista NK-1" },
+  { slug: "ondansetron", nombreGenerico: "Ondansetrón", familia: "Antiemético — antagonista 5-HT3" },
+  { slug: "metoclopramida", nombreGenerico: "Metoclopramida", familia: "Procinético — antagonista dopaminérgico" },
+  { slug: "omeprazol", nombreGenerico: "Omeprazol", familia: "Antiácido — inhibidor de la bomba de protones" },
+  { slug: "pantoprazol", nombreGenerico: "Pantoprazol", familia: "Antiácido — inhibidor de la bomba de protones" },
+  { slug: "famotidina", nombreGenerico: "Famotidina", familia: "Antiácido — antagonista H2" },
+  { slug: "sucralfato", nombreGenerico: "Sucralfato", familia: "Protector de mucosa gástrica" },
+  { slug: "butilescopolamina", nombreGenerico: "Butilescopolamina", familia: "Antiespasmódico — bloqueante muscarínico" },
+  { slug: "silimarina", nombreGenerico: "Silimarina", familia: "Hepatoprotector" },
+  { slug: "sam-e", nombreGenerico: "S-adenosilmetionina (SAM-e)", familia: "Hepatoprotector" },
+  { slug: "lactulosa", nombreGenerico: "Lactulosa", familia: "Laxante osmótico — hipoamoniemiante" },
+  { slug: "caolin-pectina", nombreGenerico: "Caolín-pectina", familia: "Antidiarreico adsorbente" },
+  { slug: "probiotico-enterococcus", nombreGenerico: "Probiótico (Enterococcus faecium)", familia: "Antidiarreico — probiótico" },
+
+  /* ---------- Cardiovasculares ---------- */
+  { slug: "pimobendan", nombreGenerico: "Pimobendán", familia: "Cardiovascular — inodilatador" },
+  { slug: "benazepril", nombreGenerico: "Benazepril", familia: "Cardiovascular — IECA" },
+  { slug: "enalapril", nombreGenerico: "Enalapril", familia: "Cardiovascular — IECA" },
+  { slug: "digoxina", nombreGenerico: "Digoxina", familia: "Cardiovascular — digitálico" },
+  { slug: "diltiazem", nombreGenerico: "Diltiazem", familia: "Cardiovascular — bloqueante de calcio" },
+  { slug: "amlodipino", nombreGenerico: "Amlodipino", familia: "Cardiovascular — bloqueante de calcio" },
+  { slug: "atenolol", nombreGenerico: "Atenolol", familia: "Cardiovascular — betabloqueante" },
+  { slug: "sotalol", nombreGenerico: "Sotalol", familia: "Cardiovascular — antiarrítmico" },
+  { slug: "dobutamina", nombreGenerico: "Dobutamina", familia: "Cardiovascular — inotrópico" },
+  { slug: "dopamina", nombreGenerico: "Dopamina", familia: "Cardiovascular — vasopresor" },
+  { slug: "epinefrina", nombreGenerico: "Epinefrina (adrenalina)", familia: "Cardiovascular — vasopresor simpaticomimético" },
+  { slug: "norepinefrina", nombreGenerico: "Norepinefrina", familia: "Cardiovascular — vasopresor" },
+
+  /* ---------- Respiratorios ---------- */
+  { slug: "aminofilina", nombreGenerico: "Aminofilina", familia: "Respiratorio — broncodilatador metilxantina" },
+  { slug: "teofilina", nombreGenerico: "Teofilina", familia: "Respiratorio — broncodilatador metilxantina" },
+  { slug: "salbutamol", nombreGenerico: "Salbutamol", familia: "Respiratorio — broncodilatador beta-2" },
+  { slug: "terbutalina", nombreGenerico: "Terbutalina", familia: "Respiratorio — broncodilatador beta-2" },
+  { slug: "bromhexina", nombreGenerico: "Bromhexina", familia: "Respiratorio — mucolítico" },
+  { slug: "ambroxol", nombreGenerico: "Ambroxol", familia: "Respiratorio — mucolítico" },
+  { slug: "n-acetilcisteina", nombreGenerico: "N-acetilcisteína", familia: "Respiratorio — mucolítico (también antídoto del paracetamol)" },
+
+  /* ---------- Antihistamínicos ---------- */
+  { slug: "difenhidramina", nombreGenerico: "Difenhidramina", familia: "Antihistamínico H1 de primera generación" },
+  { slug: "clorfenamina", nombreGenerico: "Clorfenamina (clorfeniramina)", familia: "Antihistamínico H1 de primera generación" },
+  { slug: "hidroxicina", nombreGenerico: "Hidroxicina", familia: "Antihistamínico H1 de primera generación" },
+  { slug: "cetirizina", nombreGenerico: "Cetirizina", familia: "Antihistamínico H1 de segunda generación" },
+  { slug: "loratadina", nombreGenerico: "Loratadina", familia: "Antihistamínico H1 de segunda generación" },
+
+  /* ---------- Antifúngicos ---------- */
+  { slug: "itraconazol", nombreGenerico: "Itraconazol", familia: "Antifúngico azol" },
+  { slug: "ketoconazol", nombreGenerico: "Ketoconazol", familia: "Antifúngico azol" },
+  { slug: "fluconazol", nombreGenerico: "Fluconazol", familia: "Antifúngico azol" },
+  { slug: "terbinafina", nombreGenerico: "Terbinafina", familia: "Antifúngico alilamina" },
+  { slug: "griseofulvina", nombreGenerico: "Griseofulvina", familia: "Antifúngico" },
+  { slug: "anfotericina-b", nombreGenerico: "Anfotericina B", familia: "Antifúngico polieno" },
+  { slug: "nistatina", nombreGenerico: "Nistatina", familia: "Antifúngico polieno" },
+
+  /* ---------- Hormonales y reproductivos ---------- */
+  { slug: "oxitocina", nombreGenerico: "Oxitocina", familia: "Hormonal — uterotónico" },
+  { slug: "cloprostenol", nombreGenerico: "Cloprostenol", familia: "Hormonal — prostaglandina F2 alfa" },
+  { slug: "gonadorelina", nombreGenerico: "Gonadorelina (GnRH)", familia: "Hormonal — liberadora de gonadotropinas" },
+  { slug: "hcg", nombreGenerico: "Gonadotropina coriónica (hCG)", familia: "Hormonal — gonadotropina" },
+  { slug: "ecg-pmsg", nombreGenerico: "Gonadotropina sérica equina (eCG/PMSG)", familia: "Hormonal — gonadotropina" },
+  { slug: "altrenogest", nombreGenerico: "Altrenogest", familia: "Hormonal — progestágeno" },
+  { slug: "medroxiprogesterona", nombreGenerico: "Acetato de medroxiprogesterona", familia: "Hormonal — progestágeno" },
+  { slug: "deslorelina", nombreGenerico: "Deslorelina", familia: "Hormonal — agonista de GnRH" },
+  { slug: "levotiroxina", nombreGenerico: "Levotiroxina", familia: "Hormonal — tiroideo" },
+  { slug: "metimazol", nombreGenerico: "Metimazol", familia: "Hormonal — antitiroideo" },
+  { slug: "trilostano", nombreGenerico: "Trilostano", familia: "Hormonal — antiadrenal" },
+  { slug: "insulina-nph", nombreGenerico: "Insulina NPH", familia: "Hormonal — insulina de acción intermedia" },
+  { slug: "insulina-glargina", nombreGenerico: "Insulina glargina", familia: "Hormonal — insulina de acción prolongada" },
+  { slug: "desmopresina", nombreGenerico: "Desmopresina", familia: "Hormonal — análogo de la vasopresina" },
+
+  /* ---------- Neurológicos y anticonvulsivos ---------- */
+  { slug: "fenobarbital", nombreGenerico: "Fenobarbital", familia: "Anticonvulsivo barbitúrico" },
+  { slug: "bromuro-de-potasio", nombreGenerico: "Bromuro de potasio", familia: "Anticonvulsivo" },
+  { slug: "levetiracetam", nombreGenerico: "Levetiracetam", familia: "Anticonvulsivo" },
+  { slug: "imepitoina", nombreGenerico: "Imepitoína", familia: "Anticonvulsivo" },
+  { slug: "gabapentina", nombreGenerico: "Gabapentina", familia: "Neuromodulador — análogo del GABA" },
+  { slug: "pregabalina", nombreGenerico: "Pregabalina", familia: "Neuromodulador" },
+  { slug: "fluoxetina", nombreGenerico: "Fluoxetina", familia: "Neuromodulador — ISRS (conducta)" },
+  { slug: "trazodona", nombreGenerico: "Trazodona", familia: "Neuromodulador (conducta)" },
+
+  /* ---------- Antídotos y reversores ---------- */
+  { slug: "atipamezol", nombreGenerico: "Atipamezol", familia: "Reversor — antagonista alfa adrenérgico" },
+  { slug: "naloxona", nombreGenerico: "Naloxona", familia: "Reversor — antagonista opiáceo" },
+  { slug: "flumazenilo", nombreGenerico: "Flumazenilo", familia: "Reversor — antagonista del sitio benzodiazepínico" },
+  { slug: "vitamina-k1", nombreGenerico: "Vitamina K1 (fitomenadiona)", familia: "Antídoto de rodenticidas anticoagulantes" },
+  { slug: "carbon-activado", nombreGenerico: "Carbón activado", familia: "Adsorbente — descontaminación digestiva" },
+  { slug: "azul-de-metileno", nombreGenerico: "Azul de metileno", familia: "Antídoto — metahemoglobinemia" },
+  { slug: "fomepizol", nombreGenerico: "Fomepizol", familia: "Antídoto — etilenglicol" },
+  { slug: "pralidoxima", nombreGenerico: "Pralidoxima", familia: "Antídoto — organofosforados" },
+  { slug: "edta-calcico", nombreGenerico: "Edetato cálcico disódico", familia: "Quelante — intoxicación por plomo" },
+
+  /* ---------- Vitaminas y minerales ---------- */
+  { slug: "complejo-b", nombreGenerico: "Complejo vitamínico B", familia: "Vitamina hidrosoluble" },
+  { slug: "cianocobalamina", nombreGenerico: "Cianocobalamina (B12)", familia: "Vitamina hidrosoluble" },
+  { slug: "vitamina-ad3e", nombreGenerico: "Vitamina AD3E", familia: "Vitamina liposoluble" },
+  { slug: "vitamina-e-selenio", nombreGenerico: "Vitamina E + selenio", familia: "Vitamina y mineral traza" },
+  { slug: "hierro-dextrano", nombreGenerico: "Hierro dextrano", familia: "Mineral — hematínico" },
+  { slug: "calcio-borogluconato", nombreGenerico: "Calcio borogluconato", familia: "Mineral — calcio inyectable" },
+  { slug: "propilenglicol", nombreGenerico: "Propilenglicol", familia: "Suplemento — precursor de glucosa (cetosis)" },
+  { slug: "sulfato-de-magnesio", nombreGenerico: "Sulfato de magnesio", familia: "Mineral — magnesio" },
+
+  /* ---------- Hematológicos ---------- */
+  { slug: "acido-tranexamico", nombreGenerico: "Ácido tranexámico", familia: "Antifibrinolítico" },
+  { slug: "clopidogrel", nombreGenerico: "Clopidogrel", familia: "Antiagregante plaquetario" },
+  { slug: "heparina-sodica", nombreGenerico: "Heparina sódica", familia: "Anticoagulante" },
+
+  /* ---------- Antisépticos y dermatológicos ---------- */
+  { slug: "clorhexidina", nombreGenerico: "Clorhexidina", familia: "Antiséptico" },
+  { slug: "yodo-povidona", nombreGenerico: "Yodo povidona", familia: "Antiséptico" },
+  { slug: "peroxido-de-hidrogeno", nombreGenerico: "Peróxido de hidrógeno", familia: "Antiséptico" },
+  { slug: "sulfadiazina-de-plata", nombreGenerico: "Sulfadiazina de plata", familia: "Antiséptico tópico — quemaduras" }
+];

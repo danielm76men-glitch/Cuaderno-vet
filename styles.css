@@ -512,7 +512,10 @@ button, input, select, textarea { font-family: inherit; }
 /* El recuento dice cuantos hay de verdad, no solo cuantos se ven. Una tabla
    recortada en silencio miente sobre el tamano del formulario. */
 .tabla-buscar-cuenta {
-  flex: none;
+  /* Ni "flex: none" ni base auto: la base auto de un item flex es su ancho
+     de contenido sin partir, asi que el texto largo se salia de la pantalla
+     en el movil en vez de partirse en dos renglones. */
+  flex: 1 1 auto; min-width: 0;
   font-size: 0.74rem; color: var(--muted); font-family: var(--mono);
 }
 
@@ -890,7 +893,8 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
 .examen-add-imagen:hover { background: var(--teal-soft); }
 
 .data-table th.col-add,
-.data-table th.col-borrar { width: 1%; }
+.data-table th.col-accion,
+.data-table th.col-borrar { width: 1%; white-space: nowrap; }
 /* El boton no se ve hasta que pasas por la fila: borrar un caso clinico no
    es una accion que deba estar pidiendo que la pulses. Con el dedo no hay
    "pasar por encima", asi que en tactil se ve siempre. */
@@ -1842,7 +1846,10 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
    empatadas, que es justo lo que habia que arreglar. Apilando, la tabla se
    lleva el ancho entero. */
 @media (max-width: 1100px) {
-  .tools-grid { grid-template-columns: 1fr; }
+  /* minmax(0, 1fr) tambien aqui. Con "1fr" a secas la columna no baja del
+     ancho natural de la tabla: en el movil la tabla se salia de la tarjeta,
+     justo lo que advierte el comentario de arriba. */
+  .tools-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 

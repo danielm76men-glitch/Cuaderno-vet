@@ -5121,11 +5121,6 @@ function renderDashboardPage(root) {
   drugTablePad.appendChild(drugTablaCaja);
   drugCard.appendChild(drugTablePad);
 
-  /* Cuantos se ensenan sin buscar. El numero da igual mientras se DIGA:
-     antes cortaba a cinco sin avisar y parecia que el formulario entero
-     tenia cinco farmacos. */
-  const FARMACOS_DE_ENTRADA = 8;
-
   function pintarTablaFarmacos() {
     const q = normalizarBusqueda(String(buscarInput.value || "").trim());
     /* Se ordena por nombreGenerico, que es el campo real. Antes se ordenaba
@@ -5146,21 +5141,27 @@ function renderDashboardPage(root) {
           );
         })
       : todos;
-    const visibles = (q ? encontrados : encontrados.slice(0, FARMACOS_DE_ENTRADA))
-      .map(function (p) { return p.crudo; });
+    /* Sin busqueda van TODOS, pero con los grupos plegados. Antes se
+       cortaba a ocho: con la tabla agrupada eso ademas mentia en las
+       cabeceras —"2 farmacos" era 2 del recorte, no 2 de verdad—. Plegada,
+       lo que se ve son las familias y las abre Daniel. */
+    const visibles = encontrados.map(function (p) { return p.crudo; });
 
     drugTablaCaja.innerHTML = "";
-    drugTablaCaja.appendChild(buildFormularioTable(visibles, false, true));
+    /* Los grupos se abren solo si hay busqueda: sin abrirlos, los
+       resultados quedarian escondidos detras de las cabeceras. Sin buscar
+       nace plegada y la despliega Daniel. */
+    drugTablaCaja.appendChild(buildFormularioTable(visibles, false, !!q));
 
     const total = todos.length;
     if (q) {
       buscarCuenta.textContent = encontrados.length
         ? encontrados.length + (encontrados.length === 1 ? " fármaco" : " fármacos") + " de " + total
         : "Ningún fármaco con ese nombre";
-    } else if (total > FARMACOS_DE_ENTRADA) {
-      buscarCuenta.textContent = "Mostrando " + FARMACOS_DE_ENTRADA + " de " + total + " — escribe para buscar";
     } else {
-      buscarCuenta.textContent = total + (total === 1 ? " fármaco" : " fármacos");
+      buscarCuenta.textContent =
+        total + (total === 1 ? " fármaco" : " fármacos") +
+        " — abre una familia o escribe para buscar";
     }
   }
 
@@ -7102,6 +7103,19 @@ function nombraLaEspecie(texto, especie) {
   }
 }
 
+/* Devuelve la advertencia que merece un triangulo en la lista, o null.
+   Es la hermana de alertaQueBloquea sin la especie: la primera linea con
+   candado ⛔, o —si la lista es de las escritas a mano, sin linea de
+   fuente— la primera que haya, que es lo que se veia antes. */
+function alertaAbsolutaDe(farmaco) {
+  const lista = farmaco.alertas || [];
+  const conCandado = lista.filter((a) => String(a).indexOf(MARCA_BLOQUEO) >= 0);
+  if (conCandado.length) return conCandado[0];
+  const esListaCargada = lista.some((a) => String(a).indexOf(MARCA_FUENTE) >= 0);
+  if (esListaCargada) return null;
+  return lista.length ? lista[0] : null;
+}
+
 function alertaQueBloquea(farmaco, especie) {
   if (!especie) return null;
   const lista = farmaco.alertas || [];
@@ -7273,8 +7287,11 @@ async function cargarFichasFarmaco() {
     if (n && !porNombre.has(n)) porNombre.set(n, f);
   });
   const nombreDeSlug = new Map();
+  const familiaDeSlug = new Map();
   SEMILLA_FORMULARIO.concat(AMPLIACION_FORMULARIO).forEach(function (r) {
-    if (r && r.slug) nombreDeSlug.set(r.slug, r.nombreGenerico || "");
+    if (!r || !r.slug) return;
+    nombreDeSlug.set(r.slug, r.nombreGenerico || "");
+    familiaDeSlug.set(r.slug, r.familia || "");
   });
 
   /* Lo que trajo la semilla tampoco es letra de Daniel: es una carga
@@ -7328,6 +7345,21 @@ async function cargarFichasFarmaco() {
     // La descripcion solo si no hay ninguna: la que el escriba manda.
     if (!String(far.descripcion || "").trim() && ficha.descripcion) {
       parche.descripcion = ficha.descripcion;
+    }
+
+    /* Y la familia, con la misma regla. Hace falta porque un farmaco
+       creado a mano ANTES de que existiera la ampliacion se quedo sin
+       ella: la ampliacion lo salta al encontrarlo por nombre, asi que
+       nadie se la ponia nunca. Y sin familia, grupoDeFarmaco no tiene de
+       donde deducir el grupo y lo manda a "Otros" — que es como el
+       maropitant, siendo un antiemetico de manual, acababa fuera de los
+       antiemeticos.
+
+       Solo si esta vacia. La que Daniel haya escrito no se toca, igual
+       que la descripcion. */
+    const familiaBase = familiaDeSlug.get(ficha.slug);
+    if (!String(far.familia || "").trim() && familiaBase) {
+      parche.familia = familiaBase;
     }
 
     try {
@@ -7872,7 +7904,16 @@ function buildFormularioTable(list, withActions, forzarAbierto) {
      con lector de pantalla. */
   const colsTotal = cols.length + (withActions ? 1 : 0);
   table.innerHTML =
-    "<thead><tr>" + cols.map((c) => "<th>" + c + "</th>").join("") +
+    "<thead><tr>" +
+    cols
+      .map((c) =>
+        /* La columna de Accion se encoge a lo que ocupa su boton. Sin esto
+           el reparto automatico le daba 207 px para un lapiz de 26, y con
+           los 110 del "+ Farmaco" al lado quedaban 317 px vacios a la
+           derecha: la tabla se veia descuadrada. */
+        c === "Acción" ? '<th class="col-accion">' + c + "</th>" : "<th>" + c + "</th>"
+      )
+      .join("") +
     (withActions ? '<th class="col-add" aria-label="Agregar fármaco"></th>' : "") +
     "</tr></thead>";
   const tbody = document.createElement("tbody");
@@ -7899,12 +7940,23 @@ function buildFormularioTable(list, withActions, forzarAbierto) {
     const nameTd = document.createElement("td");
     nameTd.className = "cell-title";
     nameTd.textContent = far.nombreGenerico || "(sin nombre)";
-    // Una alerta absoluta tiene que verse ya en la lista, no solo al abrir.
-    if (far.alertas.length) {
+    /* Una prohibicion absoluta tiene que verse ya en la lista, no solo al
+       abrir la ficha.
+
+       Antes el triangulo salia con CUALQUIER alerta. Eso funcionaba
+       cuando solo cuatro farmacos tenian lista; desde que todos la
+       tienen, el triangulo salia en los 155 y dejaba de decir nada: si
+       marca a todos, no marca a ninguno.
+
+       Ahora solo lo lleva lo que de verdad es una prohibicion — la
+       misma condicion que usa alertaQueBloquea, para que la lista y la
+       calculadora no se contradigan. */
+    const advertencia = alertaAbsolutaDe(far);
+    if (advertencia) {
       const chip = document.createElement("span");
       chip.className = "form-chip-alerta";
       chip.textContent = "⚠";
-      chip.title = far.alertas.length + " alerta(s)";
+      chip.title = advertencia;
       nameTd.appendChild(chip);
     }
     tr.appendChild(nameTd);

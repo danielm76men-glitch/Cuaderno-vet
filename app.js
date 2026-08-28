@@ -1,6 +1,6 @@
 import { firebaseConfig } from "./firebase-config.js";
 import { SEMILLA_FORMULARIO, AMPLIACION_FORMULARIO } from "./semilla-formulario.js";
-import { FICHAS_FARMACO } from "./fichas-farmaco.js";
+import { FICHAS_FARMACO, MOMENTOS, MOMENTO_DE_USO, PENETRACION } from "./fichas-farmaco.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import {
   getAuth,
@@ -6956,6 +6956,12 @@ function farmacoNormalizado(f) {
     /* Que es y para que sirve, en una o dos lineas. Lo carga
        fichas-farmaco.js y se puede reescribir a mano en la ficha. */
     descripcion: f.descripcion || "",
+    /* A donde llega el farmaco. Dato distinto de la descripcion y con su
+       propia fuente: la descripcion dice que ES, esto dice DONDE alcanza
+       concentracion util. Solo lo tienen los que lo tienen escrito en
+       alguna etiqueta o articulo; el resto se queda vacio a proposito. */
+    penetracion: f.penetracion || "",
+    penetracionFuente: f.penetracionFuente || "",
     familia: f.familia || "",
     /* En que familia de la lista aparece, si se forzo a mano. Sin esto,
        normalizar el farmaco borraba la eleccion y volvia a deducirse. */
@@ -6965,6 +6971,14 @@ function farmacoNormalizado(f) {
     retiro: Array.isArray(f.retiro) ? f.retiro : [],
     contraindicaciones: Array.isArray(f.contraindicaciones) ? f.contraindicaciones : [],
     alertas: Array.isArray(f.alertas) ? f.alertas : [],
+    /* En que cajones del eje "momento de uso" aparece.
+
+       null = no se ha tocado, manda el reparto de fichas-farmaco.js.
+       [] = se han quitado todos a proposito, y eso hay que respetarlo.
+
+       Por eso NO se normaliza a lista vacia como los demas campos: aqui
+       la diferencia entre "vacio" y "sin poner" es justo el dato. */
+    momentos: Array.isArray(f.momentos) ? f.momentos : null,
     verificadoEl: f.verificadoEl || null,
     createdAt: f.createdAt,
     updatedAt: f.updatedAt,
@@ -7347,6 +7361,16 @@ async function cargarFichasFarmaco() {
       parche.descripcion = ficha.descripcion;
     }
 
+    /* La penetracion, igual. Solo la tienen 20 de los 155: el resto no
+       aparece en PENETRACION porque su etiqueta no dice nada de
+       distribucion tisular, y ahi el campo se queda vacio. Vacio es la
+       respuesta correcta cuando no hay fuente. */
+    const pen = PENETRACION[ficha.slug];
+    if (pen && !String(far.penetracion || "").trim()) {
+      parche.penetracion = pen.texto;
+      parche.penetracionFuente = pen.fuente;
+    }
+
     /* Y la familia, con la misma regla. Hace falta porque un farmaco
        creado a mano ANTES de que existiera la ampliacion se quedo sin
        ella: la ampliacion lo salta al encontrarlo por nombre, asi que
@@ -7717,6 +7741,94 @@ function clavesDeGrupoPropio(grupo) {
   return escritas.concat([grupo.nombre]);
 }
 
+/* ---------- El segundo eje de la lista: el momento de uso ----------
+
+   La familia contesta "que es esto"; el momento, "cuando lo agarro". No se
+   sustituyen: la primera sirve para buscar una alternativa o pensar una
+   interaccion, la segunda sirve con el animal delante.
+
+   Un farmaco puede llevar DOS cajones y salir en los dos. La ketamina es de
+   anestesia y de urgencias. Aqui repetir no es un defecto: esto es una
+   estanteria, no una taxonomia, y esconderla en un solo sitio seria peor.
+
+   Se descarto un tercer eje por sistema (digestivo, respiratorio…). Medido
+   sobre los 155: 61 no tienen sistema propio —todos los antibioticos, los
+   AINEs y los antiparasitarios, que es lo que mas se usa— y los 94 que si
+   lo tienen ya estan agrupados asi por familia. Habria sido una copia de
+   "Familia" mas un cajon de sobras. */
+
+const SIN_MOMENTO = "Sin clasificar";
+const AGRUPAR_KEY = "vetdiario_agrupar_formulario";
+
+/* Se recuerda entre sesiones, como el tema. Trabajar una semana en
+   "Momento" y que cada recarga te devuelva a "Familia" seria hostil. */
+function agruparPorActual() {
+  try {
+    return localStorage.getItem(AGRUPAR_KEY) === "momento" ? "momento" : "familia";
+  } catch (e) {
+    return "familia";
+  }
+}
+
+function fijarAgruparPor(valor) {
+  try { localStorage.setItem(AGRUPAR_KEY, valor); } catch (e) { /* modo privado */ }
+}
+
+/* El slug no se guarda en el documento: se deduce del id que le puso la
+   semilla o la ampliacion. Para un farmaco creado a mano, que tiene un id
+   cualquiera, se busca por nombre. Es el mismo camino que usa el cargador
+   de fichas, y por la misma razon: duplicar el slug en el documento seria
+   una tercera copia del mismo dato. */
+let indiceSlugPorNombre = null;
+function slugDeFarmaco(farmaco) {
+  const id = String((farmaco && farmaco.id) || "");
+  if (id.indexOf("semilla_") === 0) return id.slice(8);
+  if (id.indexOf("amp_") === 0) return id.slice(4);
+  if (!indiceSlugPorNombre) {
+    indiceSlugPorNombre = new Map();
+    SEMILLA_FORMULARIO.concat(AMPLIACION_FORMULARIO).forEach(function (r) {
+      if (!r || !r.slug) return;
+      const n = normalizarBusqueda(r.nombreGenerico);
+      if (n && !indiceSlugPorNombre.has(n)) indiceSlugPorNombre.set(n, r.slug);
+    });
+  }
+  return indiceSlugPorNombre.get(normalizarBusqueda(farmaco && farmaco.nombreGenerico)) || "";
+}
+
+/* Lo que Daniel haya puesto en la ficha manda. Si no ha puesto nada, se usa
+   el reparto de fichas-farmaco.js. Y si el farmaco no esta ahi —porque lo
+   creo el—, no se inventa: va a "Sin clasificar", que es la respuesta
+   honesta. */
+function momentosDeFarmaco(farmaco) {
+  const validos = new Set(MOMENTOS.map(function (m) { return m.clave; }));
+  if (Array.isArray(farmaco && farmaco.momentos)) {
+    return farmaco.momentos.filter(function (c) { return validos.has(c); });
+  }
+  const slug = slugDeFarmaco(farmaco);
+  const base = slug ? MOMENTO_DE_USO[slug] : null;
+  return Array.isArray(base) ? base.slice() : [];
+}
+
+function etiquetaDeMomento(clave) {
+  const m = MOMENTOS.find(function (x) { return x.clave === clave; });
+  return m ? m.icono + " " + m.etiqueta : SIN_MOMENTO;
+}
+
+/* En que cajones aparece un farmaco. Devuelve SIEMPRE una lista, porque en
+   modo "momento" puede ser mas de uno: es lo que permite que la ketamina
+   salga en anestesia y en urgencias sin duplicar la ficha. */
+function cajonesDeFarmaco(far, modo) {
+  if (modo !== "momento") return [grupoDeFarmaco(far)];
+  const ms = momentosDeFarmaco(far);
+  if (!ms.length) return [SIN_MOMENTO];
+  return ms.map(etiquetaDeMomento);
+}
+
+function ordenDeCajones(modo) {
+  if (modo !== "momento") return nombresDeGrupos();
+  return MOMENTOS.map(function (m) { return m.icono + " " + m.etiqueta; }).concat([SIN_MOMENTO]);
+}
+
 function grupoDeFarmaco(farmaco) {
   /* Asignado a mano en la ficha: manda sobre todo lo demas. Se comprueba
      que la familia siga existiendo; si se borro, el farmaco vuelve a
@@ -8036,24 +8148,34 @@ function buildFormularioTable(list, withActions, forzarAbierto) {
      pacientes: encabezado plegable, contador, y todo abierto cuando hay
      una búsqueda o un filtro activo — colapsar entonces escondería justo
      lo que estás buscando. */
+  const modoAgrupar = agruparPorActual();
   const grupos = new Map();
   list.forEach((crudo) => {
-    const g = grupoDeFarmaco(farmacoNormalizado(crudo));
-    if (!grupos.has(g)) grupos.set(g, []);
-    grupos.get(g).push(crudo);
+    /* Un farmaco puede caer en DOS cajones cuando se agrupa por momento;
+       por eso esto es un bucle y no una asignacion. En modo familia la
+       lista siempre trae un solo nombre y se comporta como antes. */
+    cajonesDeFarmaco(farmacoNormalizado(crudo), modoAgrupar).forEach((g) => {
+      if (!grupos.has(g)) grupos.set(g, []);
+      grupos.get(g).push(crudo);
+    });
   });
 
   // Se respeta el orden de la lista de familias (las de siempre primero,
   // las propias después y "Otros" al final) en vez del alfabético:
   // agrupa por afinidad de uso.
-  const ordenGrupos = nombresDeGrupos();
+  const ordenGrupos = ordenDeCajones(modoAgrupar);
   /* Una familia propia recién creada sale aunque esté vacía. Si no
      apareciera hasta tener fármacos dentro, crearla parecería no haber
      hecho nada. Las de fábrica vacías sí se callan: son ocho y estarían
-     casi siempre de más. */
-  gruposPropios().forEach((g) => {
-    if (g.nombre && !grupos.has(g.nombre)) grupos.set(g.nombre, []);
-  });
+     casi siempre de más.
+
+     Solo aplica al eje de familias: en el de momentos no hay cajones
+     propios que puedan quedarse vacíos sin que se note. */
+  if (modoAgrupar !== "momento") {
+    gruposPropios().forEach((g) => {
+      if (g.nombre && !grupos.has(g.nombre)) grupos.set(g.nombre, []);
+    });
+  }
   const nombres = Array.from(grupos.keys()).sort(
     (a, b) => ordenGrupos.indexOf(a) - ordenGrupos.indexOf(b)
   );
@@ -8090,7 +8212,11 @@ function buildFormularioTable(list, withActions, forzarAbierto) {
        al abrir la ficha del farmaco nuevo. */
     headTr.appendChild(headTd);
 
-    if (withActions) {
+    /* El alta directa solo existe agrupando por FAMILIA. Agrupando por
+       momento, "+ Fármaco" dentro de "Urgencias" tendría que escribir
+       "Urgencias" en el campo grupo del fármaco nuevo, que es un campo de
+       familia: quedaría un fármaco en una familia que no existe. */
+    if (withActions && modoAgrupar !== "momento") {
       /* En su propia celda y no dentro del titulo: pegado al nombre, su
          sitio cambiaba con lo largo que fuera la familia. */
       const addTd = document.createElement("td");
@@ -8460,6 +8586,46 @@ function renderFormularioTab(root) {
   });
   filterRow.appendChild(especieSelect);
 
+  /* El interruptor va aquí y no arriba con "🗂 Familias" y "+ Agregar
+     fármaco": esos dos ESCRIBEN datos, este solo cambia la vista. Mezclar
+     un control inofensivo con los que tocan la base hace que parezca de
+     los peligrosos.
+
+     Y va a la DERECHA del selector de especie: los dos controles juntos y
+     la pista, que es prosa larga, al final quedándose con el hueco que
+     sobre. */
+  const modoActual = agruparPorActual();
+  const agrupador = document.createElement("div");
+  agrupador.className = "agrupar-por";
+  agrupador.setAttribute("role", "group");
+  agrupador.setAttribute("aria-label", "Agrupar la lista por");
+  const rotulo = document.createElement("span");
+  rotulo.className = "agrupar-rotulo";
+  rotulo.textContent = "Agrupar por";
+  agrupador.appendChild(rotulo);
+  [
+    { v: "familia", t: "Familia", ayuda: "Por lo que ES el fármaco: antibiótico, AINE, diurético…" },
+    { v: "momento", t: "Momento", ayuda: "Por CUÁNDO lo agarras: urgencias, cirugía, consulta diaria…" }
+  ].forEach((op) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "agrupar-op" + (modoActual === op.v ? " activo" : "");
+    b.textContent = op.t;
+    b.title = op.ayuda;
+    b.setAttribute("aria-pressed", modoActual === op.v ? "true" : "false");
+    b.addEventListener("click", () => {
+      if (agruparPorActual() === op.v) return;
+      fijarAgruparPor(op.v);
+      /* Los plegados son de la vista anterior: en el eje nuevo esos
+         nombres no existen y dejarían todo cerrado sin motivo. */
+      gruposFarmacoExpandidos.clear();
+      subclasesExpandidas.clear();
+      render();
+    });
+    agrupador.appendChild(b);
+  });
+  filterRow.appendChild(agrupador);
+
   // El buscador global de la barra superior ya filtra por nombre y familia
   // (matchesFormularioQuery). Esta pista lo explica en vez de duplicar un
   // segundo campo de busqueda que haria lo mismo.
@@ -8470,7 +8636,9 @@ function renderFormularioTab(root) {
     ? "Mostrando solo lo de " + espPista + ": las dosis y especies de cada fila son las de esa especie."
     : state.query
       ? 'Filtrando por “' + state.query + '” (nombre genérico, familia, vía o indicación).'
-      : "Usa el buscador de arriba para filtrar por nombre genérico, familia, vía o indicación.";
+      : modoActual === "momento"
+        ? "Por momento de uso. Un fármaco puede salir en dos cajones: la ketamina es de anestesia y de urgencias."
+        : "Usa el buscador de arriba para filtrar por nombre genérico, familia, vía o indicación.";
   if (espPista) pista.classList.add("form-pista-activa");
   filterRow.appendChild(pista);
   card.appendChild(filterRow);
@@ -8745,6 +8913,60 @@ function renderFormularioDetail(root, item) {
   root.appendChild(descWrap);
   setTimeout(() => descArea.ajustarAlto(), 0);
 
+  /* Penetración tisular: a dónde llega. Campo aparte y no dentro de la
+     descripción, porque son dos hechos con orígenes distintos y cada uno
+     necesita poder citar el suyo.
+
+     Solo se dibuja si hay algo que decir. Un campo vacío con el rótulo
+     puesto invita a rellenarlo de memoria, que es justo lo que este
+     formulario no hace. Para escribirlo a mano está el botón de abajo. */
+  const penWrap = document.createElement("div");
+  penWrap.className = "farmaco-pen";
+  /* Que el campo esté abierto es estado de PANTALLA, no del documento.
+
+     El primer intento usó far.penetracion = " " como señal de "ábrelo
+     aunque esté vacío", y no funcionaba: la propia comprobación de más
+     abajo hace .trim(), así que el espacio contaba como vacío y el botón
+     se volvía a dibujar. Pulsarlo no hacía nada visible. Un centinela que
+     la siguiente línea normaliza no es un centinela. */
+  let penAbierta = !!String(far.penetracion || "").trim();
+  function pintarPenetracion() {
+    penWrap.innerHTML = "";
+    if (!penAbierta) {
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "btn-mini";
+      add.textContent = "+ Añadir penetración tisular";
+      add.title = "A dónde llega el fármaco: pulmón, líquido cefalorraquídeo, piel, orina…";
+      add.addEventListener("click", () => {
+        penAbierta = true;
+        pintarPenetracion();
+        const t = penWrap.querySelector("textarea");
+        if (t) t.focus();
+      });
+      penWrap.appendChild(add);
+      return;
+    }
+    const area = areaQueCrece(String(far.penetracion || ""), "A dónde llega: pulmón, LCR, piel, orina…");
+    area.className += " input-pen";
+    area.addEventListener("input", () => {
+      far.penetracion = area.value;
+      save("penetracion", area.value);
+    });
+    penWrap.appendChild(campoFormulario("Penetración", area));
+    setTimeout(() => area.ajustarAlto(), 0);
+    const fuenteArea = areaQueCrece(far.penetracionFuente, "Etiqueta o artículo de donde sale");
+    fuenteArea.className += " input-pen-fuente";
+    fuenteArea.addEventListener("input", () => {
+      far.penetracionFuente = fuenteArea.value;
+      save("penetracionFuente", fuenteArea.value);
+    });
+    penWrap.appendChild(campoFormulario("Fuente de la penetración", fuenteArea));
+    setTimeout(() => fuenteArea.ajustarAlto(), 0);
+  }
+  pintarPenetracion();
+  root.appendChild(penWrap);
+
   const familiaRow = document.createElement("div");
   familiaRow.className = "field-row field-row-familia";
   const familiaInput = inputTexto(far.familia, "Ej. AINE, aminoglucósido, fluoroquinolona");
@@ -8774,6 +8996,51 @@ function renderFormularioDetail(root, item) {
   });
   familiaRow.appendChild(campoFormulario("Aparece en", grupoSelect));
   root.appendChild(familiaRow);
+
+  /* En qué cajones sale al agrupar por momento de uso. Son casillas y no
+     un desplegable porque un fármaco puede estar en dos: la ketamina es
+     de anestesia y de urgencias.
+
+     Lo que se pinta es el valor EFECTIVO — el del archivo si nunca se ha
+     tocado —, así que al abrir la ficha ya se ve dónde está sin tener
+     que ir a mirar la lista. */
+  const momWrap = document.createElement("div");
+  momWrap.className = "momento-campo";
+  const momLabel = document.createElement("label");
+  momLabel.className = "momento-rotulo";
+  momLabel.textContent = "Momento de uso";
+  momWrap.appendChild(momLabel);
+  const momFila = document.createElement("div");
+  momFila.className = "momento-chips";
+  let momActivos = momentosDeFarmaco(far);
+  MOMENTOS.forEach(function (m) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "momento-chip" + (momActivos.indexOf(m.clave) >= 0 ? " activo" : "");
+    chip.textContent = m.icono + " " + m.etiqueta;
+    chip.title = m.nota;
+    chip.setAttribute("aria-pressed", momActivos.indexOf(m.clave) >= 0 ? "true" : "false");
+    chip.addEventListener("click", function () {
+      const i = momActivos.indexOf(m.clave);
+      momActivos = i >= 0
+        ? momActivos.filter(function (c) { return c !== m.clave; })
+        : momActivos.concat([m.clave]);
+      /* Se guarda SIEMPRE la lista completa, incluso vacía: a partir de
+         aquí manda lo que Daniel decidió, no el reparto del archivo. */
+      far.momentos = momActivos;
+      save("momentos", momActivos);
+      chip.classList.toggle("activo", momActivos.indexOf(m.clave) >= 0);
+      chip.setAttribute("aria-pressed", momActivos.indexOf(m.clave) >= 0 ? "true" : "false");
+      momNota.textContent = momActivos.length ? "" : "Sin cajón: saldrá en “Sin clasificar”.";
+    });
+    momFila.appendChild(chip);
+  });
+  momWrap.appendChild(momFila);
+  const momNota = document.createElement("p");
+  momNota.className = "momento-nota";
+  momNota.textContent = momActivos.length ? "" : "Sin cajón: saldrá en “Sin clasificar”.";
+  momWrap.appendChild(momNota);
+  root.appendChild(momWrap);
 
   /* --- 1. Presentaciones, con la foto del producto al lado ---
 

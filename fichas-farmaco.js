@@ -2068,3 +2068,336 @@ export const FICHAS_FARMACO = [
   }
 
 ];
+
+/* ============================================================
+   MOMENTO DE USO — el segundo eje de la lista
+   ============================================================
+
+   La familia contesta "¿qué es esto?". Esto contesta "¿cuándo lo
+   agarro?". Son dos preguntas distintas y por eso son dos ejes, no uno
+   que sustituye al otro: la familia sirve para buscar una alternativa o
+   pensar una interaccion; el momento sirve con el animal delante.
+
+   Un farmaco puede llevar DOS cajones y salir en los dos. La ketamina es
+   de anestesia y de urgencias, y esconderla en uno solo seria peor que
+   repetirla. Dos es el tope: con tres, el eje deja de separar nada.
+
+   Esto es criterio de uso, no dato de etiqueta, asi que NO lleva fuente y
+   NO pretende tenerla. Es una estanteria: se corrige desde la ficha
+   cuando no coincida con como trabaja Daniel.
+
+   Claves validas: urgencias · anestesia · diaria · cronico · hato
+   ============================================================ */
+
+export const MOMENTOS = [
+  { clave: "urgencias", etiqueta: "Urgencias", icono: "🚨", nota: "Lo del carro de paro y lo que se agarra corriendo." },
+  { clave: "anestesia", etiqueta: "Anestesia y cirugía", icono: "💉", nota: "Lo que se prepara antes de entrar a la mesa." },
+  { clave: "diaria", etiqueta: "Consulta diaria", icono: "🩺", nota: "Lo que sale casi todos los días en consulta." },
+  { clave: "cronico", etiqueta: "Tratamiento crónico", icono: "📅", nota: "Lo que el dueño se lleva a casa durante meses." },
+  { clave: "hato", etiqueta: "Hato y producción", icono: "🐄", nota: "Ganado: reproducción, desparasitación y carencias." }
+];
+
+export const MOMENTO_DE_USO = {
+  /* --- Antibacterianos --- */
+  "amoxicilina": ["diaria"],
+  "amoxicilina-clavulanico": ["diaria"],
+  "ampicilina": ["diaria"],
+  "penicilina-g": ["diaria", "hato"],
+  "cefalexina": ["diaria"],
+  "ceftiofur": ["hato"],
+  "enrofloxacina": ["diaria", "hato"],
+  "marbofloxacina": ["diaria"],
+  "oxitetraciclina-la": ["hato"],
+  "doxiciclina": ["diaria"],
+  "gentamicina": ["diaria"],
+  "amikacina": ["diaria"],
+  "florfenicol": ["hato"],
+  "tilosina": ["hato"],
+  "tulatromicina": ["hato"],
+  "trimetoprim-sulfa": ["diaria", "hato"],
+  "metronidazol": ["diaria"],
+
+  /* --- AINEs y analgesia --- */
+  "meloxicam": ["diaria"],
+  "carprofeno": ["diaria"],
+  "firocoxib": ["diaria"],
+  "flunixin": ["hato"],
+  "ketoprofeno": ["diaria", "hato"],
+  "fenilbutazona": ["diaria"],
+  "dipirona": ["urgencias"],
+  "morfina": ["anestesia"],
+  "metadona": ["anestesia"],
+  "buprenorfina": ["anestesia"],
+  "butorfanol": ["anestesia"],
+  "fentanilo": ["anestesia"],
+  "tramadol": ["anestesia", "diaria"],
+
+  /* --- Anestesia y sedacion --- */
+  "propofol": ["anestesia", "urgencias"],
+  "ketamina": ["anestesia", "urgencias"],
+  "alfaxalona": ["anestesia"],
+  "isoflurano": ["anestesia"],
+  "sevoflurano": ["anestesia"],
+  "xilacina": ["anestesia", "hato"],
+  "dexmedetomidina": ["anestesia"],
+  "acepromacina": ["anestesia"],
+  "midazolam": ["anestesia", "urgencias"],
+  "diazepam": ["urgencias", "anestesia"],
+  "lidocaina": ["anestesia", "urgencias"],
+  "bupivacaina": ["anestesia"],
+  "atropina": ["urgencias", "anestesia"],
+
+  /* --- Antiparasitarios --- */
+  "ivermectina": ["diaria", "hato"],
+  "doramectina": ["hato"],
+  "selamectina": ["diaria"],
+  "fenbendazol": ["diaria", "hato"],
+  "albendazol": ["hato"],
+  "praziquantel": ["diaria"],
+  "pirantel": ["diaria"],
+  "afoxolaner": ["diaria"],
+  "fluralaner": ["diaria"],
+  "toltrazuril": ["hato"],
+  "amprolio": ["hato"],
+
+  /* --- Corticoides --- */
+  "dexametasona": ["urgencias", "diaria"],
+  "prednisolona": ["diaria", "cronico"],
+
+  /* --- Diureticos, fluidos y electrolitos --- */
+  "furosemida": ["urgencias", "cronico"],
+  "espironolactona": ["cronico"],
+  "hidroclorotiazida": ["cronico"],
+  "torasemida": ["cronico"],
+  "manitol": ["urgencias"],
+  "gluconato-calcio": ["urgencias"],
+  "cloruro-potasio": ["urgencias"],
+  "bicarbonato-sodio": ["urgencias"],
+  "dextrosa": ["urgencias"],
+
+  /* --- Digestivos --- */
+  "maropitant": ["diaria"],
+  "ondansetron": ["diaria"],
+  "metoclopramida": ["diaria"],
+  "omeprazol": ["diaria"],
+  "pantoprazol": ["diaria"],
+  "famotidina": ["diaria"],
+  "sucralfato": ["diaria"],
+  "butilescopolamina": ["urgencias"],
+  "silimarina": ["cronico"],
+  "sam-e": ["cronico"],
+  "lactulosa": ["cronico"],
+  "caolin-pectina": ["diaria"],
+  "probiotico-enterococcus": ["diaria"],
+
+  /* --- Cardiovasculares --- */
+  "pimobendan": ["cronico"],
+  "benazepril": ["cronico"],
+  "enalapril": ["cronico"],
+  "digoxina": ["cronico"],
+  "diltiazem": ["cronico", "urgencias"],
+  "amlodipino": ["cronico"],
+  "atenolol": ["cronico"],
+  "sotalol": ["cronico"],
+  "dobutamina": ["urgencias"],
+  "dopamina": ["urgencias"],
+  "epinefrina": ["urgencias"],
+  "norepinefrina": ["urgencias"],
+
+  /* --- Respiratorios --- */
+  "aminofilina": ["cronico"],
+  "teofilina": ["cronico"],
+  "salbutamol": ["urgencias", "cronico"],
+  "terbutalina": ["urgencias"],
+  "bromhexina": ["diaria"],
+  "ambroxol": ["diaria"],
+  "n-acetilcisteina": ["urgencias", "diaria"],
+
+  /* --- Antihistaminicos --- */
+  "difenhidramina": ["urgencias", "diaria"],
+  "clorfenamina": ["diaria"],
+  "hidroxicina": ["diaria"],
+  "cetirizina": ["diaria"],
+  "loratadina": ["diaria"],
+
+  /* --- Antifungicos --- */
+  "itraconazol": ["diaria"],
+  "ketoconazol": ["diaria"],
+  "fluconazol": ["diaria"],
+  "terbinafina": ["diaria"],
+  "griseofulvina": ["diaria"],
+  "anfotericina-b": ["cronico"],
+  "nistatina": ["diaria"],
+
+  /* --- Hormonales y reproductivos --- */
+  "oxitocina": ["urgencias", "hato"],
+  "cloprostenol": ["hato"],
+  "gonadorelina": ["hato"],
+  "hcg": ["hato"],
+  "ecg-pmsg": ["hato"],
+  "altrenogest": ["hato"],
+  "medroxiprogesterona": ["cronico"],
+  "deslorelina": ["cronico"],
+  "levotiroxina": ["cronico"],
+  "metimazol": ["cronico"],
+  "trilostano": ["cronico"],
+  "insulina-nph": ["cronico"],
+  "insulina-glargina": ["cronico"],
+  "desmopresina": ["cronico"],
+
+  /* --- Neurologicos --- */
+  "fenobarbital": ["cronico", "urgencias"],
+  "bromuro-de-potasio": ["cronico"],
+  "levetiracetam": ["cronico", "urgencias"],
+  "imepitoina": ["cronico"],
+  "gabapentina": ["cronico"],
+  "pregabalina": ["cronico"],
+  "fluoxetina": ["cronico"],
+  "trazodona": ["cronico"],
+
+  /* --- Antidotos y reversores --- */
+  "atipamezol": ["anestesia", "urgencias"],
+  "naloxona": ["urgencias", "anestesia"],
+  "flumazenilo": ["urgencias", "anestesia"],
+  "vitamina-k1": ["urgencias"],
+  "carbon-activado": ["urgencias"],
+  "azul-de-metileno": ["urgencias"],
+  "fomepizol": ["urgencias"],
+  "pralidoxima": ["urgencias"],
+  "edta-calcico": ["urgencias"],
+
+  /* --- Vitaminas y minerales --- */
+  "complejo-b": ["diaria", "hato"],
+  "cianocobalamina": ["diaria"],
+  "vitamina-ad3e": ["hato"],
+  "vitamina-e-selenio": ["hato"],
+  "hierro-dextrano": ["hato"],
+  "calcio-borogluconato": ["urgencias", "hato"],
+  "propilenglicol": ["hato"],
+  "sulfato-de-magnesio": ["urgencias", "hato"],
+
+  /* --- Hematologicos --- */
+  "acido-tranexamico": ["urgencias", "anestesia"],
+  "clopidogrel": ["cronico"],
+  "heparina-sodica": ["urgencias"],
+
+  /* --- Antisepticos --- */
+  "clorhexidina": ["anestesia", "diaria"],
+  "yodo-povidona": ["anestesia", "diaria"],
+  "peroxido-de-hidrogeno": ["diaria"],
+  "sulfadiazina-de-plata": ["diaria"]
+};
+
+/* ============================================================
+   PENETRACIÓN TISULAR
+   ============================================================
+
+   A dónde llega el fármaco. Es un dato distinto de la descripción y por eso
+   va en campo aparte, con su propia fuente: la descripción dice qué es, esto
+   dice dónde alcanza concentración útil.
+
+   ------------------------------------------------------------
+   POR QUÉ ESTO NO ES UN EJE DE CLASIFICACIÓN
+   ------------------------------------------------------------
+   La penetración es real y está documentada, pero NO sirve para meter cada
+   fármaco en un órgano. Un antibiótico se elige por el germen, no por el
+   sitio: una cistitis por E. coli y una piodermia por Staphylococcus están
+   en órganos distintos y pueden llevar el mismo fármaco.
+
+   Por eso esto vive DENTRO de la ficha, cuando ya estás decidiendo, y no
+   como cajón de la lista. Un fármaco puede tener tres frases de penetración;
+   un cajón solo admite una.
+
+   ------------------------------------------------------------
+   SOLO LO QUE ESTÁ ESCRITO EN ALGUNA PARTE
+   ------------------------------------------------------------
+   Aquí hay 20 fármacos de 155. Los otros 135 NO están porque su etiqueta no
+   dice nada de distribución tisular, no porque se me haya olvidado. Rellenar
+   los huecos de memoria sería exactamente lo que este archivo no hace.
+
+   Si un fármaco no aparece, su ficha deja el campo vacío. Vacío es la
+   respuesta correcta cuando no hay fuente.
+   ============================================================ */
+
+export const PENETRACION = {
+  "amoxicilina": {
+    texto: "Difunde con facilidad a la mayoría de tejidos y líquidos corporales, CON LA EXCEPCIÓN del cerebro y el líquido cefalorraquídeo. Unión a proteínas baja (≈18 %).",
+    fuente: "FDA/DailyMed — etiqueta humana de amoxicilina/clavulánico, sección Clinical Pharmacology"
+  },
+  "amoxicilina-clavulanico": {
+    texto: "Difunde con facilidad a la mayoría de tejidos y líquidos, salvo cerebro y líquido cefalorraquídeo. Ninguno de los dos componentes se une mucho a proteínas: clavulánico ≈25 %, amoxicilina ≈18 %.",
+    fuente: "FDA/DailyMed — etiqueta humana de amoxicilina/clavulánico, sección Clinical Pharmacology"
+  },
+  "cefalexina": {
+    texto: "Unión a proteínas baja (10-15 %). Alcanza concentraciones muy altas en ORINA: del orden de 1000 a 5000 µg/mL según la dosis. La etiqueta no describe penetración en sistema nervioso.",
+    fuente: "FDA/DailyMed — CEPHALEXIN CAPSULE (etiqueta humana), sección Clinical Pharmacology"
+  },
+  "doxiciclina": {
+    texto: "Lipófila y con unión a proteínas alta (≈92 %), lo que le permite alcanzar el interior de la célula: por eso funciona contra Wolbachia, rickettsias y micoplasma. Se concentra en bilis y se elimina activa por orina y heces.",
+    fuente: "Papich, Parasit Vectors 2017, doi 10.1186/s13071-017-2449-1 (unión a proteínas y lipofilia) · FDA/DailyMed — DOXYCYCLINE (etiqueta humana), sección Clinical Pharmacology (bilis y excreción)"
+  },
+  "gentamicina": {
+    texto: "Se distribuye en el LÍQUIDO EXTRACELULAR, no dentro de la célula. Alcanza más de 100 µg/mL en orina. Una parte queda retenida en el tejido, sobre todo en el RIÑÓN — de ahí su nefrotoxicidad. Si la función renal está dañada, penetra peor en el propio parénquima renal.",
+    fuente: "FDA/DailyMed — GENTAMICIN SULFATE INJECTION (etiqueta humana), sección Clinical Pharmacology"
+  },
+  "amikacina": {
+    texto: "Como los demás aminoglucósidos, queda sobre todo en el espacio EXTRACELULAR. A dosis recomendadas alcanza concentraciones útiles en hueso, corazón, vesícula biliar y pulmón, y concentraciones altas en orina, bilis y esputo. Cruza la placenta y alcanza el líquido amniótico.",
+    fuente: "FDA/DailyMed — AMIKACIN SULFATE INJECTION (etiqueta humana), sección Clinical Pharmacology"
+  },
+  "marbofloxacina": {
+    texto: "Ampliamente distribuida en los tejidos del perro. La etiqueta veterinaria trae las concentraciones tisulares medidas en beagles a las 2, 18 y 24 horas de una dosis oral.",
+    fuente: "FDA/DailyMed — MARBOFLOXACIN TABLET (etiqueta veterinaria), sección Clinical Pharmacology"
+  },
+  "metronidazol": {
+    texto: "Alcanza el LÍQUIDO CEFALORRAQUÍDEO, la saliva y la leche en concentraciones parecidas a las del plasma. Entra en la bacteria por difusión pasiva y se activa dentro: eso mantiene un gradiente que favorece su entrada.",
+    fuente: "FDA/DailyMed — METRONIDAZOLE TABLET (etiqueta humana), sección Clinical Pharmacology — Distribution"
+  },
+  "trimetoprim-sulfa": {
+    texto: "Las concentraciones en ORINA son bastante más altas que en sangre. Ambos llegan a esputo, líquido vaginal y oído medio; el trimetoprim además a las secreciones bronquiales. Los dos cruzan la placenta y pasan a la leche.",
+    fuente: "FDA/DailyMed — SULFAMETHOXAZOLE AND TRIMETHOPRIM TABLET (etiqueta humana), sección Clinical Pharmacology"
+  },
+  "tulatromicina": {
+    texto: "Alcanza concentraciones MARCADAMENTE más altas en el parénquima PULMONAR que en plasma, y se mantienen ahí varios días después de dejar de medirse en sangre. La propia etiqueta advierte de que la relevancia clínica de esas concentraciones no está determinada.",
+    fuente: "FDA/DailyMed — DRAXXIN 25 (tulatromicina, etiqueta veterinaria, Zoetis), sección Clinical Pharmacology"
+  },
+  "itraconazol": {
+    texto: "Volumen de distribución enorme (>700 L). En pulmón, riñón, hígado, hueso, estómago, bazo y músculo alcanza 2-3 veces la concentración del plasma, y en tejido queratinizado —PIEL sobre todo— hasta 4 veces. En LÍQUIDO CEFALORRAQUÍDEO, mucho MENOS que en plasma. De la queratina no vuelve: se elimina al regenerarse la epidermis, y por eso el tratamiento dura lo que tarde en crecer el pelo.",
+    fuente: "FDA/DailyMed — ITRACONAZOLE CAPSULE (etiqueta humana), sección Clinical Pharmacology — Distribution"
+  },
+  "ketoconazol": {
+    texto: "Ampliamente distribuido en los tejidos, pero al LÍQUIDO CEFALORRAQUÍDEO llega una proporción despreciable. Se elimina sobre todo por bilis: alrededor del 57 % aparece en heces.",
+    fuente: "FDA/DailyMed — KETOCONAZOLE TABLET (etiqueta humana), sección Clinical Pharmacology — Distribution"
+  },
+  "fluconazol": {
+    texto: "Se reparte como el agua corporal total y penetra en todos los líquidos estudiados. En meningitis fúngica alcanza en LÍQUIDO CEFALORRAQUÍDEO alrededor del 80 % de la concentración plasmática — es el azol de elección cuando hay que llegar al sistema nervioso.",
+    fuente: "FDA/DailyMed — DIFLUCAN (fluconazol, etiqueta humana), sección Clinical Pharmacology"
+  },
+  "terbinafina": {
+    texto: "Se distribuye al SEBO y a la PIEL. Su semivida terminal de 200 a 400 horas refleja lo despacio que sale de tejidos como la piel y la grasa: sigue actuando mucho después de la última toma.",
+    fuente: "FDA/DailyMed — TERBINAFINE TABLET (etiqueta humana), sección Clinical Pharmacology"
+  },
+  "griseofulvina": {
+    texto: "Se deposita en las células precursoras de QUERATINA y tiene más afinidad por el tejido enfermo. Queda fuertemente unida a la queratina nueva, que se vuelve resistente a la invasión del hongo: el tratamiento dura hasta que crece todo el pelo o la uña.",
+    fuente: "FDA/DailyMed — GRISEOFULVIN SUSPENSION (etiqueta humana), sección Clinical Pharmacology"
+  },
+  "nistatina": {
+    texto: "NO se absorbe de forma significativa desde el tubo digestivo. Actúa solo donde toca: por eso sirve en candidiasis de mucosas y de piel, y no sirve para ninguna micosis sistémica.",
+    fuente: "FDA/DailyMed — NYSTATIN SUSPENSION (etiqueta humana), sección Indications and Usage"
+  },
+  "fenobarbital": {
+    texto: "Se absorbe y se distribuye rápido a todos los tejidos y líquidos, con concentraciones ALTAS EN CEREBRO, hígado y riñón. Cuanto más liposoluble es un barbitúrico, antes penetra en todos los tejidos.",
+    fuente: "FDA/DailyMed — PHENOBARBITAL TABLET (etiqueta humana), sección Clinical Pharmacology"
+  },
+  "gabapentina": {
+    texto: "Casi no se une a proteínas (menos del 3 %). En pacientes epilépticos, la concentración en LÍQUIDO CEFALORRAQUÍDEO antes de la dosis siguiente es alrededor del 20 % de la plasmática.",
+    fuente: "FDA/DailyMed — GABAPENTIN CAPSULE (etiqueta humana), sección Clinical Pharmacology — Distribution"
+  },
+  "levetiracetam": {
+    texto: "Prácticamente no se une a proteínas (menos del 10 %) y su volumen de distribución se aproxima al del agua corporal, intracelular y extracelular. Eso explica que apenas tenga interacciones por desplazamiento de otros fármacos.",
+    fuente: "FDA/DailyMed — LEVETIRACETAM INJECTION (etiqueta humana), sección Clinical Pharmacology — Distribution"
+  },
+  "ivermectina": {
+    texto: "La glicoproteína P de la barrera hematoencefálica la mantiene FUERA del sistema nervioso central. Esa es toda su seguridad: en los perros con la mutación ABCB1-1Δ (MDR1) la proteína es no funcional, la ivermectina entra al cerebro y aparece la neurotoxicidad.",
+    fuente: "Deshpande y col., J Vet Intern Med 2016, doi 10.1111/jvim.13827 (perros ABCB1-1Δ y su susceptibilidad a ivermectina, loperamida y vincristina)"
+  }
+};

@@ -2581,3 +2581,155 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
 @media (max-width: 600px) {
   .field-group textarea.input-desc { font-size: 0.86rem; }
 }
+
+/* ---------- El segundo eje: agrupar por momento de uso ----------
+
+   El interruptor vive en la fila de filtros, a la derecha del selector de
+   especie. Ahí y no arriba con "🗂 Familias" y "+ Agregar fármaco": esos dos
+   escriben datos y este solo cambia la vista.
+
+   flex: none en el grupo. Un flex se baja de fila ANTES de encogerse, así
+   que sin esto el navegador lo achicaría por debajo de su propio texto en
+   vez de dejar que baje la pista, que es lo que debe bajar. */
+.agrupar-por {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.agrupar-rotulo {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 700;
+  margin-right: 2px;
+}
+/* Dos clases en el selector (.agrupar-por .agrupar-op) y no una: las reglas
+   base de los botones llevan elemento en el selector y ganarían por
+   especificidad a ".agrupar-op" a secas. */
+.agrupar-por .agrupar-op {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 14px;
+  min-height: 34px;
+  cursor: pointer;
+}
+.agrupar-por .agrupar-op:hover { color: var(--ink); border-color: var(--teal); }
+.agrupar-por .agrupar-op.activo {
+  color: var(--paper);
+  background: var(--teal);
+  border-color: var(--teal);
+}
+.agrupar-por .agrupar-op:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+/* La pista es prosa: por debajo de 600 px baja SIEMPRE a su propio renglón
+   en vez de dejar que el navegador lo decida según lo larga que sea la
+   frase de turno. flex-basis: 100% la obliga a ocupar la fila entera. */
+@media (max-width: 600px) {
+  .form-filtros .form-pista { flex-basis: 100%; margin-top: 2px; }
+  .agrupar-por .agrupar-op { padding: 7px 11px; font-size: 0.74rem; }
+  .agrupar-rotulo { display: none; }
+}
+
+/* ---------- Los cajones de momento en la ficha ---------- */
+.momento-campo { margin: 0 0 14px; }
+.momento-rotulo {
+  display: block;
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.momento-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* 44 px de alto: se pulsa con el dedo y con el animal delante, no con
+   ratón. Apple y Google piden 44 y aquí no hay razón para bajarlo. */
+.momento-campo .momento-chip {
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 13px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.momento-campo .momento-chip:hover { color: var(--ink); border-color: var(--teal); }
+.momento-campo .momento-chip.activo {
+  color: var(--paper);
+  background: var(--teal);
+  border-color: var(--teal);
+}
+.momento-campo .momento-chip:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.momento-nota { font-size: 0.75rem; color: var(--muted); margin: 6px 0 0; }
+
+/* Los dos controles de la fila de filtros tienen que medir lo mismo: el
+   selector de especie daba 37 px y el interruptor 34, y tres píxeles de
+   desnivel en dos cosas pegadas se ven. Medido, no a ojo.
+
+   Y en pantalla estrecha suben a 44: es el mínimo que piden Apple y Google
+   para algo que se pulsa con el dedo, y esta app se usa con el animal
+   delante y a veces con una sola mano. */
+.form-filtros select.btn-secondary,
+.form-filtros .agrupar-por .agrupar-op {
+  min-height: 38px;
+}
+@media (max-width: 600px) {
+  .form-filtros select.btn-secondary,
+  .form-filtros .agrupar-por .agrupar-op {
+    min-height: 44px;
+  }
+}
+
+/* ---------- Penetración tisular ----------
+   Mismo tratamiento que la descripción: textarea que crece, letra heredada
+   (un textarea NO hereda la de la página y saldría en monoespaciada), y el
+   selector con .field-group delante para ganar por especificidad a la regla
+   base ".field-group input, .field-group select".
+
+   La fuente va más pequeña y en gris: es una cita, no el dato. */
+.farmaco-pen { margin: 0 0 12px; }
+.farmaco-pen .field-group { min-width: 0; }
+.farmaco-pen + .field-row { margin-top: 2px; }
+.field-group textarea.input-pen,
+.field-group textarea.input-pen-fuente {
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper-alt);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 10px;
+  resize: none;
+  overflow: hidden;
+  display: block;
+  width: 100%;
+  min-height: 0;
+}
+.field-group textarea.input-pen-fuente {
+  font-size: 0.78rem;
+  color: var(--muted);
+  background: transparent;
+  border-style: dashed;
+}
+.field-group textarea.input-pen:focus-visible,
+.field-group textarea.input-pen-fuente:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+  border-color: var(--teal);
+}
+.farmaco-pen .field-group + .field-group { margin-top: 8px; }
+
+@media (max-width: 600px) {
+  .field-group textarea.input-pen { font-size: 0.86rem; }
+}

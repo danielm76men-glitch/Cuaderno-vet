@@ -9019,12 +9019,26 @@ function renderFormularioTab(root) {
   card.appendChild(listWrap);
   root.appendChild(card);
 
+  /* El cuadro de Mantenimiento ya no se muestra: los 154 farmacos estan
+     migrados y esos botones solo servian para la puesta en marcha. Dos de
+     ellos —"Cargar semilla" y "Revertir migracion"— reescriben o deshacen
+     datos ya escritos, asi que tenerlos a un toque en la pantalla de uso
+     diario era mas riesgo que ayuda.
+
+     La funcion se queda debajo, sin usar y a proposito: si algun dia hay
+     que sembrar farmacos nuevos, se vuelve a ensenar descomentando esta
+     linea. Es un solo cambio.
+
   root.appendChild(buildMantenimientoFormulario());
+  */
 }
 
-/* Mantenimiento: migracion y semilla. Vive dentro de la pestaña Formulario
-   porque es lo unico que administra, y asi no hay que tocar Configuracion
-   ni la navegacion. */
+/* Mantenimiento: migracion y semilla.
+
+   NO SE DIBUJA. La llamada de arriba esta comentada porque la migracion ya
+   se hizo y estos botones solo hacian falta para arrancar. Se conserva
+   entera para poder volver a ensenarla el dia que haya que sembrar
+   farmacos nuevos. */
 function buildMantenimientoFormulario() {
   const card = document.createElement("div");
   card.className = "card card-pad form-mantenimiento";

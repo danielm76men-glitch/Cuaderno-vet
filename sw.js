@@ -17,7 +17,7 @@
 
    IMPORTANTE: sube VERSION en cada despliegue. Es la unica linea que hay
    que tocar aqui. */
-const VERSION = "83";
+const VERSION = "84";
 
 const CACHE_SHELL = "vetdiario-shell-v" + VERSION;
 

@@ -935,6 +935,53 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
   .familia-fila .familia-campo-claves { grid-column: 1 / -1; }
 }
 
+/* ---------- Vacunación y desparasitación ---------- */
+/* Dos bloques separados de verdad, con su línea: son dos preguntas
+   distintas y una vacuna no es un antiparasitario. */
+.vac-bloque + .vac-bloque {
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line);
+}
+.vac-pregunta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.vac-rotulo { font-size: 0.86rem; color: var(--ink); }
+.vac-opciones { display: flex; gap: 6px; flex-wrap: wrap; }
+/* 44 px de alto: se responde con el animal delante y a veces con una sola
+   mano. Es la misma regla que el botón de volver. */
+.vac-opcion {
+  appearance: none; font: inherit; font-size: 0.84rem; cursor: pointer;
+  min-height: 44px; padding: 8px 16px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--paper-raised); color: var(--ink);
+}
+.vac-opcion:hover { border-color: var(--teal); }
+.vac-opcion.activa {
+  background: var(--teal); border-color: var(--teal); color: var(--paper);
+  font-weight: 700;
+}
+/* La respuesta elegida se distingue por color Y por peso: si el contraste
+   queda justo, la negrita sigue haciendo el trabajo. */
+.vac-opcion:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+.vac-cuales { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.vac-cuales[hidden] { display: none; }
+.vac-casilla {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 44px; padding: 6px 12px 6px 10px;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--paper-raised); color: var(--ink);
+  font-size: 0.82rem; cursor: pointer;
+}
+.vac-casilla input { margin: 0; accent-color: var(--teal); width: 16px; height: 16px; }
+.vac-casilla:hover { border-color: var(--teal); }
+.vac-casilla.marcada { background: var(--teal-soft); border-color: var(--teal); color: var(--teal-ink); font-weight: 600; }
+.vac-nota { margin: 10px 0 0; font-size: 0.78rem; color: var(--muted); }
+.vac-nota[hidden] { display: none; }
+
+@media (max-width: 620px) {
+  .vac-rotulo { flex: 1 1 100%; }
+  .vac-opciones { flex: 1 1 100%; }
+  .vac-opcion { flex: 1 1 0; min-width: 0; padding: 8px 6px; }
+}
+
 .examen-lista { display: flex; flex-direction: column; gap: 14px; }
 .examenes-vacio { margin: 8px 0 0; font-size: 0.84rem; color: var(--muted); }
 

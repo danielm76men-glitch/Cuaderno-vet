@@ -153,7 +153,14 @@ const state = {
 let currentUid = null;
 
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  /* Por partes y no con toISOString(): ese convierte a UTC antes de
+     recortar, asi que en Guayaquil (UTC-5) a partir de las 19:00 devolvia
+     el dia siguiente. Un caso abierto de noche nacia fechado manana, y una
+     vacuna aplicada hoy quedaba aplicada manana. */
+  const d = new Date();
+  const mes = String(d.getMonth() + 1).padStart(2, "0");
+  const dia = String(d.getDate()).padStart(2, "0");
+  return d.getFullYear() + "-" + mes + "-" + dia;
 }
 
 function formatDate(iso) {
@@ -2060,6 +2067,86 @@ const EXAMEN_TIPOS_ESPECIE = {
   aves: ["Newcastle", "Influenza aviar", "Salmonella"]
 };
 
+/* ===================== Carnet de vacunacion =====================
+
+   Nombres de vacuna: son hechos, no monografias. Aqui no se afirma
+   ninguna pauta —ni edad de inicio, ni intervalo, ni dosis—: eso lo
+   escribe Daniel mirando el frasco que tiene delante.
+
+   La aftosa en bovinos va por campana nacional de AGROCALIDAD, con su
+   propio carnet oficial; esta aqui para poder anotarla en la ficha, no
+   para sustituirlo. */
+/* La rabia se pone en todas las especies, asi que no vive en ninguna
+   lista de especie. La desparasitacion NO esta aqui: no es una vacuna
+   —no inmuniza— y tiene su propio bloque mas abajo. */
+const VACUNAS_GENERALES = ["Rabia"];
+
+/* Interna y externa se guardan por su codigo, no por la palabra. */
+const DESPARASITACION_TIPOS = [
+  { valor: "interna", texto: "Interna" },
+  { valor: "externa", texto: "Externa" }
+];
+
+const VACUNAS_ESPECIE = {
+  canino: [
+    "Múltiple (quíntuple / séxtuple)",
+    "Parvovirus canino",
+    "Moquillo (distemper)",
+    "Hepatitis infecciosa (adenovirus)",
+    "Parainfluenza canina",
+    "Leptospirosis",
+    "Traqueobronquitis (Bordetella)",
+    "Coronavirus canino"
+  ],
+  felino: [
+    "Triple felina (panleucopenia, calicivirus, rinotraqueítis)",
+    "Cuádruple felina (triple + leucemia)",
+    "Leucemia felina (FeLV)",
+    "Panleucopenia felina",
+    "Rinotraqueítis viral felina (herpesvirus)",
+    "Calicivirus felino",
+    "Clamidiosis felina",
+    "Bordetella bronchiseptica felina"
+  ],
+  bovino: [
+    "Fiebre aftosa",
+    "Brucelosis (cepa 19 / RB51)",
+    "Carbunco sintomático / clostridiales",
+    "Rabia bovina (paralítica)",
+    "IBR / DVB",
+    "Leptospirosis"
+  ],
+  equino: [
+    "Influenza equina",
+    "Tétanos",
+    "Encefalomielitis equina (EEE/WEE/VEE)",
+    "Rinoneumonitis (herpesvirus equino)"
+  ],
+  porcino: [
+    "Peste porcina clásica",
+    "Erisipela",
+    "Parvovirus porcino",
+    "Circovirus porcino (PCV2)",
+    "Mycoplasma hyopneumoniae"
+  ],
+  ovino: ["Clostridiales (enterotoxemia)", "Brucelosis (Rev-1)"],
+  caprino: ["Clostridiales (enterotoxemia)", "Brucelosis (Rev-1)"],
+  aves: ["Newcastle", "Bronquitis infecciosa", "Gumboro", "Marek", "Viruela aviar"]
+};
+
+/* Tres respuestas, y la tercera no es un hueco. Se guarda el codigo, no
+   la palabra: si manana el rotulo pasa a "Desconocido", los casos ya
+   guardados no cambian de significado. */
+const VACUNADO_OPCIONES = [
+  { valor: "si", texto: "Sí" },
+  { valor: "no", texto: "No" },
+  { valor: "nosabe", texto: "No se sabe" }
+];
+
+function vacunasDeEspecie(especie) {
+  return VACUNAS_ESPECIE[normalizarBusqueda(especie).trim()] || [];
+}
+
 function tiposDeEspecie(especie) {
   return EXAMEN_TIPOS_ESPECIE[normalizarBusqueda(especie).trim()] || [];
 }
@@ -2332,6 +2419,186 @@ function estadoDeValor(valor, min, max) {
 
 /* La seccion entera. Recibe los adjuntos ya cargados por la seccion de
    fotos para no repetir la consulta: es la misma. */
+/* Vacunación y desparasitación. Dos preguntas de la misma forma —sí / no /
+   no se sabe, y debajo cuáles— asi que las arma la misma funcion. Estaban
+   juntas en una sola lista y no debian: una vacuna inmuniza y un
+   antiparasitario no, y mezclarlas hacia que la lista de vacunas dijera
+   cosas que no son.
+
+   Vive en el caso, como todo lo demas de esta app: no hay ficha de
+   paciente separada de la consulta. Si algun dia la hay, esto se mueve
+   entero cambiando de donde salen los cuatro campos. */
+function buildVacunasSection(entry, statusText) {
+  const wrap = document.createElement("div");
+  wrap.className = "vacunas";
+
+  let especieActual = entry.especie || "";
+
+  /* Un bloque: la pregunta y, si la respuesta es que si, las casillas.
+
+     opciones() se llama cada vez que hay que repintar y devuelve pares
+     {valor, texto}: en las vacunas depende de la especie, en la
+     desparasitacion es fija. Se guarda SIEMPRE el valor, nunca el texto,
+     para que cambiar un rotulo no cambie lo que dicen los casos viejos. */
+  function bloque(config) {
+    const caja = document.createElement("div");
+    caja.className = "vac-bloque";
+
+    let respuesta = entry[config.campoSi] || "";
+    /* Copia local de lo guardado: repintar la lista entera en cada clic
+       haria desaparecer bajo el dedo la casilla que se acaba de tocar. */
+    let marcadas = Array.isArray(entry[config.campoLista]) ? entry[config.campoLista].slice() : [];
+
+    const head = document.createElement("div");
+    head.className = "subcard-head";
+    const titulo = document.createElement("span");
+    titulo.textContent = config.titulo;
+    head.appendChild(titulo);
+    caja.appendChild(head);
+
+    const fila = document.createElement("div");
+    fila.className = "vac-pregunta";
+    const rotulo = document.createElement("span");
+    rotulo.className = "vac-rotulo";
+    rotulo.textContent = config.pregunta;
+    fila.appendChild(rotulo);
+
+    const grupo = document.createElement("div");
+    grupo.className = "vac-opciones";
+    grupo.setAttribute("role", "group");
+    grupo.setAttribute("aria-label", config.pregunta);
+    const botones = [];
+    VACUNADO_OPCIONES.forEach(function (op) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "vac-opcion";
+      b.textContent = op.texto;
+      b.dataset.valor = op.valor;
+      b.addEventListener("click", function () {
+        /* Volver a pulsar la misma respuesta la retira: sin esto, una
+           respuesta puesta por error no se puede quitar nunca. */
+        respuesta = respuesta === op.valor ? "" : op.valor;
+        entry[config.campoSi] = respuesta;
+        scheduleSave("entries", entry.id, { [config.campoSi]: respuesta }, statusText);
+        pintarRespuesta();
+      });
+      botones.push(b);
+      grupo.appendChild(b);
+    });
+    fila.appendChild(grupo);
+    caja.appendChild(fila);
+
+    const cuales = document.createElement("div");
+    cuales.className = "vac-cuales";
+    caja.appendChild(cuales);
+
+    const nota = document.createElement("p");
+    nota.className = "vac-nota";
+    caja.appendChild(nota);
+
+    function pintarCasillas() {
+      cuales.textContent = "";
+      const lista = config.opciones();
+      /* Lo marcado que ya no aparece en la lista —porque despues se
+         corrigio la especie del caso— se anade al final. Un dato anotado
+         no puede desaparecer de la ficha porque cambie un desplegable. */
+      marcadas.forEach(function (v) {
+        if (!lista.some(function (o) { return o.valor === v; })) lista.push({ valor: v, texto: v });
+      });
+
+      lista.forEach(function (op) {
+        const et = document.createElement("label");
+        et.className = "vac-casilla";
+        const c = document.createElement("input");
+        c.type = "checkbox";
+        c.checked = marcadas.indexOf(op.valor) >= 0;
+        c.addEventListener("change", function () {
+          if (c.checked) {
+            if (marcadas.indexOf(op.valor) < 0) marcadas.push(op.valor);
+          } else {
+            marcadas = marcadas.filter(function (v) { return v !== op.valor; });
+          }
+          entry[config.campoLista] = marcadas.slice();
+          scheduleSave("entries", entry.id, { [config.campoLista]: marcadas.slice() }, statusText);
+          et.classList.toggle("marcada", c.checked);
+          pintarNota();
+        });
+        et.classList.toggle("marcada", c.checked);
+        et.appendChild(c);
+        const t = document.createElement("span");
+        t.textContent = op.texto;
+        et.appendChild(t);
+        cuales.appendChild(et);
+      });
+    }
+
+    function pintarNota() {
+      /* Con "No" o "No se sabe" las casillas se esconden, pero lo marcado
+         NO se borra: se dice cuantas hay para que nada quede oculto en
+         silencio. */
+      if (respuesta !== "si" && marcadas.length) {
+        nota.textContent =
+          "Hay " + marcadas.length + (marcadas.length === 1 ? " anotada" : " anotadas") +
+          ". Responde «Sí» para verlas.";
+        nota.hidden = false;
+      } else {
+        nota.hidden = true;
+      }
+    }
+
+    function pintarRespuesta() {
+      botones.forEach(function (b) {
+        const activo = b.dataset.valor === respuesta;
+        b.classList.toggle("activa", activo);
+        b.setAttribute("aria-pressed", activo ? "true" : "false");
+      });
+      cuales.hidden = respuesta !== "si";
+      pintarNota();
+    }
+
+    pintarCasillas();
+    pintarRespuesta();
+    caja.repintar = pintarCasillas;
+    wrap.appendChild(caja);
+    return caja;
+  }
+
+  const vac = bloque({
+    titulo: "Vacunación",
+    pregunta: "¿Está vacunado?",
+    campoSi: "vacunado",
+    campoLista: "vacunasPuestas",
+    opciones: function () {
+      const propias = vacunasDeEspecie(especieActual);
+      /* La rabia general se omite cuando la especie ya trae la suya con
+         nombre propio —la paralítica del bovino—: si no, saldrian dos
+         casillas de rabia y no se sabria cual marcar. */
+      const yaHayRabia = propias.some(function (p) { return p.indexOf("Rabia") === 0; });
+      const todas = propias.concat(yaHayRabia ? [] : VACUNAS_GENERALES);
+      return todas.map(function (n) { return { valor: n, texto: n }; });
+    }
+  });
+
+  bloque({
+    titulo: "Desparasitación",
+    pregunta: "¿Está desparasitado?",
+    campoSi: "desparasitado",
+    campoLista: "desparasitaciones",
+    opciones: function () { return DESPARASITACION_TIPOS.slice(); }
+  });
+
+  wrap.setEspecie = function (especie) {
+    especieActual = especie;
+    /* Solo se repintan las vacunas: la desparasitacion es interna o
+       externa en cualquier animal. Repintar casillas es seguro —nadie
+       escribe dentro— y lo marcado se conserva porque vive en la copia
+       local, no en el DOM que se tira. */
+    vac.repintar();
+  };
+
+  return wrap;
+}
+
 function buildExamenesSection(entry, statusText, cargarAdjuntos) {
   const wrap = document.createElement("div");
   wrap.className = "examenes";
@@ -5731,6 +5998,34 @@ function buildPrintableCase(entry, fotos) {
     });
   }
 
+  /* La vacunación se imprime: quien recibe al animal lo pregunta antes
+     que casi nada. "No se sabe" tambien se imprime — es una respuesta. */
+  const opVac = VACUNADO_OPCIONES.find(function (o) { return o.valor === caso.vacunado; });
+  const opDes = VACUNADO_OPCIONES.find(function (o) { return o.valor === caso.desparasitado; });
+  if (opVac || opDes) {
+    const sec = bloqueImpreso("Vacunación y desparasitación");
+    if (opVac) {
+      sec.appendChild(campoImpreso("¿Está vacunado?", opVac.texto));
+      if (caso.vacunado === "si") {
+        const puestas = Array.isArray(caso.vacunasPuestas) ? caso.vacunasPuestas : [];
+        sec.appendChild(campoImpreso("Vacunas", puestas.length ? puestas.join(" · ") : "—"));
+      }
+    }
+    if (opDes) {
+      sec.appendChild(campoImpreso("¿Está desparasitado?", opDes.texto));
+      if (caso.desparasitado === "si") {
+        /* Se guardan los codigos; aqui se traducen a la palabra. */
+        const hechas = (Array.isArray(caso.desparasitaciones) ? caso.desparasitaciones : [])
+          .map(function (v) {
+            const t = DESPARASITACION_TIPOS.find(function (d) { return d.valor === v; });
+            return t ? t.texto : v;
+          });
+        sec.appendChild(campoImpreso("Tipo", hechas.length ? hechas.join(" · ") : "—"));
+      }
+    }
+    root.appendChild(sec);
+  }
+
   const meds = (Array.isArray(caso.farmacos) ? caso.farmacos : []).filter((m) => m && m.nombre);
   if (meds.length) {
     const sec = bloqueImpreso("Fármacos");
@@ -5834,7 +6129,12 @@ async function imprimirCaso(entry, boton) {
     }
   }
 
-  const area = buildPrintableCase(entry, fotos);
+  /* Repartir antes de imprimir. La consulta de adjuntos trae TODO lo que
+     cuelga del caso —examenes, vacunas, paginas— y hasta ahora se le
+     pasaba entero a la rejilla de imagenes: un documento de examen no
+     tiene "datos", asi que el PDF salia con un hueco de imagen rota por
+     cada examen del caso. */
+  const area = buildPrintableCase(entry, repartirAdjuntos(fotos).fotos);
   document.body.appendChild(area);
 
   function limpiar() {
@@ -5873,6 +6173,7 @@ function renderPatientDetail(root, entry) {
      el listener pueda avisarle. */
   let constantesNodo = null;
   let examenesNodo = null;
+  let vacunasNodo = null;
 
   const head = document.createElement("div");
   head.className = "patient-head";
@@ -6026,6 +6327,7 @@ function renderPatientDetail(root, entry) {
     if (constantesNodo) constantesNodo.setEspecie(speciesSelect.value);
     // Las pruebas propias de la especie cambian aqui mismo, sin recargar.
     if (examenesNodo) examenesNodo.setEspecie(speciesSelect.value);
+    if (vacunasNodo) vacunasNodo.setEspecie(speciesSelect.value);
   });
   speciesGroup.appendChild(speciesLabel);
   speciesGroup.appendChild(speciesSelect);
@@ -6419,6 +6721,15 @@ function renderPatientDetail(root, entry) {
        cuando se piden, y el diagnóstico de abajo se escribe mirándolos. */
     if (ap.clave === "anamnesis") {
       const adjuntos = fotosDeEntrada(entry.id).then(repartirAdjuntos);
+
+      /* La vacunación va ANTES de los examenes y justo despues de la
+         anamnesis: es parte de la historia, se pregunta al principio de la
+         consulta y cambia lo que se sospecha. */
+      const bloqueVac = document.createElement("div");
+      bloqueVac.className = "apartado apartado-vacunas";
+      vacunasNodo = buildVacunasSection(entry, statusText);
+      bloqueVac.appendChild(vacunasNodo);
+      notesCard.appendChild(bloqueVac);
 
       const bloqueEx = document.createElement("div");
       bloqueEx.className = "apartado apartado-examenes";
@@ -7817,9 +8128,25 @@ function etiquetaDeMomento(clave) {
 /* En que cajones aparece un farmaco. Devuelve SIEMPRE una lista, porque en
    modo "momento" puede ser mas de uno: es lo que permite que la ketamina
    salga en anestesia y en urgencias sin duplicar la ficha. */
+/* "Hato y produccion" no es una especie: es el ESCENARIO. Por eso la
+   enrofloxacina esta ahi y a la vez en consulta diaria, y por eso, con el
+   filtro puesto en canino, salia un cajon llamado "Hato y produccion" con
+   xilacina y florfenicol dentro. La etiqueta era correcta y la pantalla
+   se contradecia: un perro no es un hato.
+
+   Filtrando por canino o felino, ese cajon no se dibuja. Lo que NO se
+   hace es tirar el farmaco: si ese era su unico cajon —el florfenicol lo
+   es— pasa a "Sin clasificar" y sigue en la lista. Un recorte que hace
+   desaparecer filas sin decirlo es peor que el problema que arregla. */
+const ESPECIES_DE_COMPANIA = ["canino", "felino"];
+
 function cajonesDeFarmaco(far, modo) {
   if (modo !== "momento") return [grupoDeFarmaco(far)];
-  const ms = momentosDeFarmaco(far);
+  let ms = momentosDeFarmaco(far);
+  const esp = normalizarBusqueda(especieActiva());
+  if (esp && ESPECIES_DE_COMPANIA.indexOf(esp) >= 0) {
+    ms = ms.filter(function (c) { return c !== "hato"; });
+  }
   if (!ms.length) return [SIN_MOMENTO];
   return ms.map(etiquetaDeMomento);
 }
@@ -7888,19 +8215,23 @@ const SUBCLASES_FARMACO = [
   [/tetrahidropirimidina/i, "Tetrahidropirimidinas"],
   [/triazinona|anticoccidial|tiamina/i, "Anticoccidiales"],
   [/glucocorticoide|corticoide/i, "Glucocorticoides"],
-  [/diurético|diuretico/i, "Diuréticos"],
   [/alcalinizante/i, "Alcalinizantes"],
   [/electrolito/i, "Electrolitos"],
   [/fluido/i, "Fluidos"],
   [/diurético de asa|diuretico de asa/i, "Diuréticos de asa"],
   [/tiazíd|tiazid/i, "Tiazídicos"],
-  [/osmótico|osmotico/i, "Osmóticos"],
+  [/diurético osmótico|diuretico osmotico/i, "Osmóticos"],
   [/ahorrador de potasio/i, "Ahorradores de potasio"],
+  // Red de seguridad: cualquier diurético que no encaje en las cuatro de
+  // arriba. Va DESPUÉS a propósito; puesta antes las anulaba a todas.
+  [/diurético|diuretico/i, "Diuréticos"],
   [/antiemético|antiemetico/i, "Antieméticos"],
   [/procinético|procinetico/i, "Procinéticos"],
-  [/antiácido|antiacido|protector de mucosa/i, "Antiácidos y protectores"],
+  [/protector de mucosa|protector gástrico|protector gastrico/i, "Protectores gástricos"],
+  [/antiácido|antiacido|bomba de protones|antagonista h2/i, "Antiácidos"],
   [/hepatoprotector/i, "Hepatoprotectores"],
-  [/antidiarreico|laxante|probiótico|probiotico/i, "Intestinales"],
+  [/antidiarreico|probiótico|probiotico|adsorbente intestinal/i, "Antidiarreicos"],
+  [/laxante|hipoamoniemiante/i, "Laxantes"],
   [/antiespasmódico|antiespasmodico/i, "Antiespasmódicos"],
   [/ieca/i, "IECA"],
   [/inodilatador|digitálico|digitalico/i, "Inotrópicos"],
@@ -8239,14 +8570,41 @@ function buildFormularioTable(list, withActions, forzarAbierto) {
        propio plegado, y el de la categoría manda sobre todos: si la
        categoría está cerrada no se ve nada suyo, esté como esté cada
        subclase. */
+    /* Que es el segundo nivel depende del primero.
+
+       Agrupando por FAMILIA, dentro de "Antibióticos" tiene sentido
+       separar betalactámicos de fluoroquinolonas: es el detalle fino de
+       esa familia.
+
+       Agrupando por MOMENTO ese detalle no dice nada. Medido en
+       "Urgencias": 24 subgrupos para 40 fármacos, casi todos de uno solo
+       — "Pirazolonas 1", "Disociativos 1", "Alcalinizantes 1"—. Una
+       subclase fuera de su familia es ruido. Ahí el segundo nivel es la
+       FAMILIA, que sí sitúa: 14 subgrupos y los tres primeros son
+       antídotos, anestésicos y cardiovasculares.
+
+       Contado sobre los 155: 24→14, 14→5, 31→11, 20→9, 16→6. */
+    const segundoNivel = (crudo) =>
+      modoAgrupar === "momento"
+        ? grupoDeFarmaco(farmacoNormalizado(crudo))
+        : subclaseDeFarmaco(farmacoNormalizado(crudo));
+
     const subgrupos = new Map();
     filas.forEach((crudo) => {
-      const sc = subclaseDeFarmaco(farmacoNormalizado(crudo));
+      const sc = segundoNivel(crudo);
       if (!subgrupos.has(sc)) subgrupos.set(sc, []);
       subgrupos.get(sc).push(crudo);
     });
 
-    const nombresSub = Array.from(subgrupos.keys()).sort((a, b) => a.localeCompare(b, "es"));
+    /* Alfabético dentro de una familia; por el orden de siempre de las
+       familias dentro de un momento, para que "Antibióticos" salga
+       primero aquí igual que sale primero en la otra vista. */
+    const ordenFamilias = nombresDeGrupos();
+    const nombresSub = Array.from(subgrupos.keys()).sort((a, b) =>
+      modoAgrupar === "momento"
+        ? ordenFamilias.indexOf(a) - ordenFamilias.indexOf(b)
+        : a.localeCompare(b, "es")
+    );
     const controlados = [];
 
     nombresSub.forEach((sub) => {
@@ -8633,7 +8991,10 @@ function renderFormularioTab(root) {
   pista.className = "form-pista";
   const espPista = especieActiva();
   pista.textContent = espPista
-    ? "Mostrando solo lo de " + espPista + ": las dosis y especies de cada fila son las de esa especie."
+    ? "Mostrando solo lo de " + espPista + ": las dosis y especies de cada fila son las de esa especie." +
+      (modoActual === "momento" && ESPECIES_DE_COMPANIA.indexOf(normalizarBusqueda(espPista)) >= 0
+        ? " El cajón de hato y producción no se muestra con esta especie."
+        : "")
     : state.query
       ? 'Filtrando por “' + state.query + '” (nombre genérico, familia, vía o indicación).'
       : modoActual === "momento"

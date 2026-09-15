@@ -1,0 +1,570 @@
+<title>Ficha Veterinaria</title>
+<meta name="description" content="Méd. Vet. Daniel Mendoza · Consulta veterinaria a domicilio en Santo Domingo de los Tsáchilas. Perros y gatos, con cita previa.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Newsreader:opsz,wght@6..72,400;6..72,500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* ======================================================================
+     Paleta unica, clara a proposito.
+     La pagina NO se adapta al tema oscuro del telefono: el blanco con
+     matices de verde agua es la identidad, y el visitante que llega por QR
+     tiene que ver siempre lo mismo. Por eso no hay bloques de tema oscuro
+     y cada color se pinta explicito.
+     ====================================================================== */
+  :root{
+    /* Rampa unica de verde agua, del casi blanco al pino profundo.
+       Todo color de la pagina sale de aqui: es lo que hace que se lea
+       como un sistema y no como decisiones sueltas. */
+    --agua-50:#F2FAF8;
+    --agua-100:#E3F4F0;
+    --agua-200:#D3E8E3;
+    --agua-300:#C8E8E1;
+    --agua-400:#B0DCD3;
+    --agua-500:#17A295;
+    --agua-700:#0D6961;
+    --agua-950:#0C2B27;
+
+    /* Verde de apoyo: evita que toda la pagina sea un solo tono. */
+    --hoja-500:#2FB98A;
+    --hoja-700:#1B8C63;
+
+    /* Nombres de uso. El resto del CSS habla con estos, no con la rampa. */
+    --paper:var(--agua-50);
+    --ficha:#FFFFFF;
+    --agua-1:var(--agua-100);
+    --agua-2:var(--agua-200);
+    --regla:var(--agua-400);
+    --turquesa:var(--agua-500);
+    --turquesa-h:var(--agua-700);
+    --verde-h:var(--agua-950);
+    --verde-m:#4C6F69;
+    --ph:#A85A1C;
+    --ph-fondo:#FDF2E7;
+
+    --display:"Archivo","Helvetica Neue",Arial,sans-serif;
+    --body:"Newsreader",Georgia,"Times New Roman",serif;
+    --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+    --r:10px;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    background:var(--paper);
+    color:var(--verde-h);
+    font-family:var(--body);
+    font-size:17px;
+    line-height:1.65;
+    padding:0 18px 96px;
+    -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:600px;margin:0 auto}
+  p{margin:0}
+
+  .campo{
+    font-family:var(--mono);
+    font-size:11px;
+    font-weight:500;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--verde-m);
+  }
+
+  /* ---- Encabezado ---- */
+  header{padding-block:30px 0}
+  .ficha{
+    background:var(--ficha);
+    border:1px solid var(--regla);
+    border-radius:var(--r);
+    overflow:hidden;
+    box-shadow:0 1px 2px rgba(18,53,48,.04);
+  }
+  /* Banda superior en degradado de verdes agua, en vez de una barra maciza */
+  .banda{
+    height:5px;
+    background:linear-gradient(90deg,var(--agua-700) 0%,var(--agua-500) 52%,var(--hoja-500) 100%);
+  }
+  .ficha-in{
+    padding:24px 22px 22px;
+    display:flex;
+    flex-direction:column;
+    gap:20px;
+  }
+  .ficha-top{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-start;
+    gap:14px;
+  }
+  .ficha h1{
+    font-family:var(--display);
+    font-weight:700;
+    font-size:clamp(29px,8.2vw,38px);
+    line-height:1.08;
+    letter-spacing:-.018em;
+    margin:7px 0 0;
+    text-wrap:balance;
+  }
+  .lema{
+    font-size:18px;
+    color:var(--verde-m);
+    margin-top:11px;
+    max-width:34ch;
+  }
+  .retrato{
+    width:76px;height:76px;flex:none;
+    border-radius:50%;
+    border:1px dashed var(--regla);
+    background:var(--agua-1);
+    display:grid;place-items:center;
+    font-family:var(--mono);
+    font-size:9px;
+    letter-spacing:.08em;
+    text-align:center;
+    color:var(--verde-m);
+    padding:6px;
+    max-width:100%;
+  }
+  /* Campos de cabecera, como los de una historia clinica */
+  .datos{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    border:1px solid var(--regla);
+    border-radius:8px;
+    overflow:hidden;
+  }
+  .dato{
+    background:var(--agua-1);
+    padding:12px 14px;
+    display:flex;
+    flex-direction:column;
+    gap:3px;
+    border-top:1px solid var(--regla);
+    border-left:1px solid var(--regla);
+  }
+  .dato:nth-child(-n+2){border-top:0}
+  .dato:nth-child(odd){border-left:0}
+  .dato b{
+    font-family:var(--display);
+    font-weight:600;
+    font-size:15px;
+    line-height:1.3;
+  }
+
+  /* ---- Secciones ---- */
+  .seccion{
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+    padding-block:36px;
+    border-top:1px solid var(--regla);
+  }
+  .seccion-tit{display:flex;align-items:baseline;gap:10px;margin:0}
+  .seccion-tit h2{
+    font-family:var(--display);
+    font-weight:700;
+    font-size:25px;
+    line-height:1.18;
+    letter-spacing:-.012em;
+    text-wrap:balance;
+    margin:0;
+  }
+  .cruz{
+    color:var(--turquesa);
+    font-family:var(--display);
+    font-weight:700;
+    font-size:20px;
+    line-height:1;
+    flex:none;
+    transform:translateY(-2px);
+  }
+
+  /* ---- Marcador de lo que falta ---- */
+  .falta{
+    background:var(--ph-fondo);
+    color:var(--ph);
+    border:1px dashed var(--ph);
+    border-radius:8px;
+    padding:13px 14px;
+    font-size:15.5px;
+    line-height:1.5;
+  }
+  .falta::before{
+    content:"Pendiente";
+    display:block;
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    opacity:.75;
+    margin-bottom:5px;
+  }
+
+  /* ---- Servicios ---- */
+  .servicios{display:flex;flex-direction:column;gap:10px}
+  .srv{
+    background:var(--ficha);
+    border:1px solid var(--regla);
+    border-radius:var(--r);
+    padding:16px 17px;
+    display:flex;
+    flex-direction:column;
+    gap:5px;
+  }
+  .srv h3{
+    font-family:var(--display);
+    font-weight:600;
+    font-size:17.5px;
+    line-height:1.28;
+    margin:0;
+    color:var(--turquesa-h);
+  }
+  .srv p{font-size:15.5px;color:var(--verde-m);line-height:1.5}
+
+  /* ---- Pasos: secuencia real, por eso van numerados ---- */
+  ol.pasos{
+    list-style:none;margin:0;padding:0;
+    display:flex;flex-direction:column;gap:15px;
+    counter-reset:paso;
+  }
+  ol.pasos li{
+    display:grid;
+    grid-template-columns:32px 1fr;
+    gap:13px;
+    align-items:start;
+    counter-increment:paso;
+  }
+  ol.pasos li::before{
+    content:counter(paso,decimal-leading-zero);
+    font-family:var(--mono);
+    font-size:11.5px;
+    font-weight:500;
+    color:var(--hoja-700);
+    background:var(--agua-2);
+    border-radius:6px;
+    padding:6px 0;
+    text-align:center;
+  }
+  ol.pasos b{font-family:var(--display);font-weight:600;font-size:16.5px}
+  ol.pasos span{display:block;color:var(--verde-m);font-size:15.5px}
+
+  /* ---- Cobertura ---- */
+  .cobertura{
+    background:var(--agua-1);
+    border:1px solid var(--regla);
+    border-radius:var(--r);
+    padding:18px 19px;
+    display:flex;
+    flex-direction:column;
+    gap:7px;
+  }
+  .cobertura b{
+    font-family:var(--display);
+    font-weight:700;
+    font-size:20px;
+    line-height:1.2;
+  }
+
+  /* ---- Contacto ---- */
+  .contacto{display:flex;flex-direction:column;gap:10px}
+  .btn{
+    display:flex;align-items:center;justify-content:center;gap:9px;
+    text-decoration:none;
+    font-family:var(--display);
+    font-weight:600;
+    font-size:16.5px;
+    padding:15px;
+    border-radius:var(--r);
+    border:1px solid var(--regla);
+    color:var(--turquesa-h);
+    background:var(--ficha);
+  }
+  .btn-wa{
+    background:var(--agua-700);
+    color:#FFFFFF;
+    border-color:var(--agua-700);
+    box-shadow:0 2px 10px rgba(13,105,97,.26);
+  }
+  .btn svg{flex:none}
+  a:focus-visible{outline:2px solid var(--turquesa-h);outline-offset:3px}
+
+  /* ---- Barra fija ---- */
+  .barra{
+    position:fixed;left:0;right:0;bottom:0;z-index:5;
+    background:rgba(246,251,250,.94);
+    backdrop-filter:blur(8px);
+    border-top:1px solid var(--regla);
+    padding:11px 18px calc(11px + env(safe-area-inset-bottom));
+  }
+  .barra .btn-wa{max-width:600px;margin:0 auto;padding:14px}
+
+  footer{
+    border-top:1px solid var(--regla);
+    padding-block:26px 12px;
+    display:flex;flex-direction:column;gap:7px;
+    font-size:14px;
+    color:var(--verde-m);
+  }
+
+  /* ---- Icono de cada servicio ---- */
+  .srv-cab{display:flex;align-items:center;gap:11px}
+  .ico{
+    width:38px;height:38px;flex:none;
+    border-radius:9px;
+    background:var(--agua-2);
+    color:var(--turquesa-h);
+    display:grid;place-items:center;
+  }
+  .ico svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+
+  /* ---- El servicio principal pesa mas que el resto ---- */
+  .srv.destacado{
+    background:linear-gradient(180deg,var(--agua-100) 0%,var(--ficha) 60%);
+    border-color:var(--turquesa);
+    box-shadow:0 3px 14px rgba(21,156,150,.12);
+  }
+  .srv.destacado .ico{background:var(--turquesa);color:var(--ficha)}
+  .etiqueta{
+    align-self:flex-start;
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--turquesa-h);
+    background:var(--agua-2);
+    border-radius:20px;
+    padding:3px 9px;
+  }
+
+  /* ---- Bloque de color pleno: corta el blanco a mitad de pagina ---- */
+  .seccion-plena{
+    background:linear-gradient(155deg,#0A564F 0%,#0D6961 56%,#15785D 100%);
+    color:var(--ficha);
+    border-radius:14px;
+    padding:30px 24px;
+    margin-block:36px;
+    border-top:0;
+  }
+  .seccion-plena .seccion-tit h2{color:var(--ficha)}
+  .seccion-plena .cruz{color:#9FE7DF}
+  .seccion-plena ol.pasos li::before{
+    background:rgba(255,255,255,.16);
+    color:var(--ficha);
+  }
+  .seccion-plena ol.pasos span{color:#DCF2ED}
+
+  /* ---- Huecos reservados para las fotos ---- */
+  .galeria{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:9px;
+  }
+  .hueco{
+    aspect-ratio:1;
+    max-width:100%;
+    border:1px dashed var(--ph);
+    border-radius:9px;
+    background:var(--ph-fondo);
+    color:var(--ph);
+    display:grid;place-items:center;
+    text-align:center;
+    font-family:var(--mono);
+    font-size:9.5px;
+    line-height:1.35;
+    letter-spacing:.05em;
+    padding:6px;
+  }
+
+  /* ---- Movimiento: minimo, y solo si el visitante no lo rechaza ---- */
+  @media (prefers-reduced-motion:no-preference){
+    .srv{transition:transform .22s ease, box-shadow .22s ease}
+    .srv:hover{transform:translateY(-2px);box-shadow:0 6px 18px rgba(18,53,48,.09)}
+    .btn{transition:transform .18s ease, box-shadow .18s ease}
+    .btn:active{transform:scale(.985)}
+  }
+
+  /* ---- Coreografia de carga: la ficha se arma por partes ---- */
+  @media (prefers-reduced-motion:no-preference){
+    .entra{animation:entra .5s cubic-bezier(.22,.7,.28,1) both}
+    .e1{animation-delay:.04s}
+    .e2{animation-delay:.11s}
+    .e3{animation-delay:.18s}
+    .e4{animation-delay:.25s}
+    @keyframes entra{
+      from{opacity:0;transform:translateY(10px)}
+      to{opacity:1;transform:none}
+    }
+    /* La banda superior se dibuja de izquierda a derecha, como un trazo. */
+    .banda{transform-origin:left center;animation:traza .55s cubic-bezier(.22,.7,.28,1) both}
+    @keyframes traza{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+  }
+
+  /* Estado previo a aparecer. Lo pone y lo saca el script: sin JavaScript
+     esta clase no existe y todo se ve normal desde el primer instante. */
+  @media (prefers-reduced-motion:no-preference){
+    .oculto{
+      opacity:0;
+      transform:translateY(14px);
+      transition:opacity .5s ease, transform .5s ease;
+    }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <div class="ficha">
+      <div class="banda"></div>
+      <div class="ficha-in">
+        <div class="ficha-top">
+          <div>
+            <p class="campo entra e1">Médico Veterinario · Universidad UTE</p>
+            <h1 class="entra e2">Méd. Vet. Daniel Mendoza</h1>
+            <p class="lema entra e3">Medicina preventiva y consulta clínica para perros y gatos, en tu casa.</p>
+          </div>
+          <div class="retrato entra e3">TU FOTO</div>
+        </div>
+
+        <div class="datos entra e4">
+          <div class="dato">
+            <span class="campo">Especies</span>
+            <b>Canino y felino</b>
+          </div>
+          <div class="dato">
+            <span class="campo">Modalidad</span>
+            <b>A domicilio</b>
+          </div>
+          <div class="dato">
+            <span class="campo">Ciudad</span>
+            <b>Santo Domingo de los Tsáchilas</b>
+          </div>
+          <div class="dato">
+            <span class="campo">Agenda</span>
+            <b>Con cita previa<br>Lun a sáb · 08:00–18:00</b>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <section class="seccion">
+    <div class="seccion-tit"><span class="cruz" aria-hidden="true">+</span><h2>Quién te va a atender</h2></div>
+    <p>Soy Daniel Mendoza, Médico Veterinario graduado en la Universidad UTE. Trabajo sobre todo en medicina preventiva y consulta de primer nivel: el chequeo que evita que un problema pequeño se vuelva una urgencia cara.</p>
+    <p>Atiendo a domicilio porque la mayoría de los gatos y muchos perros llegan a la clínica ya estresados, y un animal tenso da signos vitales que no sirven para nada. En casa se dejan revisar, y la consulta rinde.</p>
+    <div class="galeria">
+      <div class="hueco">FOTO<br>ATENDIENDO</div>
+      <div class="hueco">FOTO<br>PACIENTE</div>
+      <div class="hueco">FOTO<br>PACIENTE</div>
+    </div>
+    <p class="falta">Escribime dos líneas tuyas para cerrar esta sección. Por qué elegiste la carrera, o qué tipo de caso te gusta más. Es el párrafo que más conecta y es el único que no puedo escribir por vos. Mandame también tres fotos para estos huecos: vos atendiendo, y dos pacientes reales.</p>
+  </section>
+
+  <section class="seccion">
+    <div class="seccion-tit"><span class="cruz" aria-hidden="true">+</span><h2>Servicios</h2></div>
+    <div class="servicios">
+
+      <article class="srv destacado">
+        <span class="etiqueta">Servicio principal</span>
+        <div class="srv-cab"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.5 3v5.5a4.5 4.5 0 0 0 9 0V3"/><path d="M4 3h3M13 3h3"/><path d="M10 12.5V16a4 4 0 0 0 7.9.8"/><circle cx="19" cy="12" r="2.3"/></svg></span><h3>Consulta clínica a domicilio</h3></div>
+        <p>Examen físico completo: temperatura rectal, frecuencia cardíaca y respiratoria, tiempo de llenado capilar, mucosas, palpación abdominal y condición corporal. Te entrego el registro escrito de la visita.</p>
+      </article>
+
+      <article class="srv">
+        <div class="srv-cab"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 3.5 20.5 9.5"/><path d="M17.5 6.5 8.5 15.5l-3 1 1-3 9-9z"/><path d="M6 18.5 3.5 21"/><path d="M11.5 9.5l3 3"/></svg></span><h3>Vacunación</h3></div>
+        <p>Esquema completo para cachorros y refuerzos anuales: quíntuple o séxtuple canina, triple felina y antirrábica. Carné de vacunación llenado y sellado en cada dosis.</p>
+      </article>
+
+      <article class="srv">
+        <div class="srv-cab"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2s5.6 6.3 5.6 9.9a5.6 5.6 0 1 1-11.2 0C6.4 9.5 12 3.2 12 3.2z"/><path d="M9.6 13.4a2.6 2.6 0 0 0 2.6 2.6"/></svg></span><h3>Desparasitación interna y externa</h3></div>
+        <p>Dosis calculada por peso (mg/kg) y no por talla estimada. Incluye control de pulgas y garrapatas, y el calendario de la siguiente dosis.</p>
+      </article>
+
+      <article class="srv">
+        <div class="srv-cab"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2.5v14a3 3 0 0 0 6 0v-14"/><path d="M7.5 2.5h9"/><path d="M9 11.5c1.6 1.1 4.4 1.1 6 0"/></svg></span><h3>Toma de muestras y exámenes</h3></div>
+        <p>Sangre, orina, raspado cutáneo y citología de oído tomados en casa. Los envío al laboratorio y te explico el resultado en lenguaje claro, no solo el papel con números.</p>
+      </article>
+
+      <article class="srv">
+        <div class="srv-cab"><span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 8.8c0 4.4-8.6 10-8.6 10s-8.6-5.6-8.6-10a4.5 4.5 0 0 1 8.6-1.8 4.5 4.5 0 0 1 8.6 1.8z"/><path d="M5.6 10.6h2.6l1.3-2.2 1.9 4.4 1.4-2.2h3.6"/></svg></span><h3>Control de pacientes crónicos</h3></div>
+        <p>Seguimiento de pacientes geriátricos, renales, cardíacos o diabéticos, con ajuste de dosis y registro de peso visita a visita.</p>
+      </article>
+
+    </div>
+    <p class="falta">Revisá esta lista: decime cuáles saco y cuáles agrego. Si hacés cirugía menor, certificados de viaje, asesoría nutricional o atendés especies no convencionales, va acá.</p>
+    <p style="font-size:14.5px;color:var(--verde-m)">Cada visita se cotiza por WhatsApp según el servicio. Te confirmo el valor total — incluida medicación e insumos de laboratorio si hacen falta — antes de agendar, no después de atender.</p>
+  </section>
+
+  <section class="seccion seccion-plena">
+    <div class="seccion-tit"><span class="cruz" aria-hidden="true">+</span><h2>Cómo se agenda</h2></div>
+    <ol class="pasos">
+      <li><div><b>Me escribís por WhatsApp</b><span>Contame la especie, la edad, el peso aproximado y qué notaste raro.</span></div></li>
+      <li><div><b>Coordinamos día y hora</b><span>Atiendo con cita previa. Te confirmo el valor de la visita antes de ir, y queda agendada.</span></div></li>
+      <li><div><b>Atiendo en tu casa</b><span>Llevo mi equipo. Al terminar te dejo el registro clínico y el plan de seguimiento por escrito.</span></div></li>
+    </ol>
+  </section>
+
+  <section class="seccion">
+    <div class="seccion-tit"><span class="cruz" aria-hidden="true">+</span><h2>Dónde atiendo</h2></div>
+    <div class="cobertura">
+      <span class="campo">Cobertura</span>
+      <b>Santo Domingo de los Tsáchilas</b>
+      <p style="color:var(--verde-m);font-size:15.5px">Toda la ciudad. Voy a tu domicilio dentro del horario de atención, siempre con cita coordinada por WhatsApp.</p>
+    </div>
+  </section>
+
+  <section class="seccion">
+    <div class="seccion-tit"><span class="cruz" aria-hidden="true">+</span><h2>Agendar una visita</h2></div>
+    <div class="contacto">
+      <a class="btn btn-wa" href="https://wa.me/593960147702?text=Hola%20Dr.%20Mendoza%2C%20vi%20su%20p%C3%A1gina%20y%20quiero%20agendar%20una%20consulta%20a%20domicilio%20para%20mi%20mascota.">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91C21.96 6.45 17.5 2 12.04 2Zm5.8 14.04c-.25.7-1.44 1.34-1.98 1.39-.54.05-1.03.24-3.5-.73-2.97-1.17-4.83-4.25-4.98-4.45-.15-.2-1.18-1.57-1.18-3 0-1.42.75-2.12 1.02-2.42.27-.3.58-.37.78-.37.2 0 .4 0 .57.01.19.01.44-.07.68.52.25.6.85 2.07.92 2.22.07.15.12.32.02.52-.1.2-.15.32-.3.5-.15.17-.31.39-.45.52-.15.15-.3.31-.13.61.17.3.76 1.25 1.63 2.03 1.12 1 2.06 1.31 2.36 1.46.3.15.47.12.65-.07.17-.2.75-.87.95-1.17.2-.3.4-.25.67-.15.27.1 1.73.82 2.03.97.3.15.5.22.57.35.07.12.07.72-.18 1.42Z"/></svg>
+        Escribir por WhatsApp
+      </a>
+      <a class="btn" href="tel:+593960147702">Llamar al 096 014 7702</a>
+      <a class="btn" href="mailto:alex-danielmendoza@hotmail.com">Escribir por correo</a>
+    </div>
+  </section>
+
+  <footer>
+    <p>Daniel Alexander Mendoza Chamba · Médico Veterinario</p>
+    <p>Universidad UTE · Santo Domingo de los Tsáchilas</p>
+  </footer>
+
+</div>
+
+<div class="barra">
+  <a class="btn btn-wa" href="https://wa.me/593960147702?text=Hola%20Dr.%20Mendoza%2C%20vi%20su%20p%C3%A1gina%20y%20quiero%20agendar%20una%20consulta%20a%20domicilio%20para%20mi%20mascota.">
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38a9.9 9.9 0 0 0 4.79 1.22h.01c5.46 0 9.91-4.45 9.91-9.91C21.96 6.45 17.5 2 12.04 2Zm5.8 14.04c-.25.7-1.44 1.34-1.98 1.39-.54.05-1.03.24-3.5-.73-2.97-1.17-4.83-4.25-4.98-4.45-.15-.2-1.18-1.57-1.18-3 0-1.42.75-2.12 1.02-2.42.27-.3.58-.37.78-.37.2 0 .4 0 .57.01.19.01.44-.07.68.52.25.6.85 2.07.92 2.22.07.15.12.32.02.52-.1.2-.15.32-.3.5-.15.17-.31.39-.45.52-.15.15-.3.31-.13.61.17.3.76 1.25 1.63 2.03 1.12 1 2.06 1.31 2.36 1.46.3.15.47.12.65-.07.17-.2.75-.87.95-1.17.2-.3.4-.25.67-.15.27.1 1.73.82 2.03.97.3.15.5.22.57.35.07.12.07.72-.18 1.42Z"/></svg>
+    Agendar por WhatsApp
+  </a>
+</div>
+
+<script>
+  (function () {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (!("IntersectionObserver" in window)) return;
+
+    // El vigia se construye ANTES de ocultar nada: si fallara, la pagina
+    // se queda visible en vez de esconder contenido para siempre.
+    var vigia;
+    try {
+      vigia = new IntersectionObserver(function (entradas) {
+        entradas.forEach(function (e) {
+          if (!e.isIntersecting) return;
+          e.target.classList.remove("oculto");
+          vigia.unobserve(e.target);
+        });
+      }, { rootMargin: "0px 0px -8% 0px", threshold: 0.08 });
+    } catch (err) {
+      return;
+    }
+
+    var alto = window.innerHeight;
+    document.querySelectorAll(".seccion, .srv, footer").forEach(function (el) {
+      // Solo lo que todavia no se ve. Lo de la primera pantalla se muestra
+      // de entrada, sin esperar a ningun evento.
+      if (el.getBoundingClientRect().top > alto * 0.92) {
+        el.classList.add("oculto");
+        vigia.observe(el);
+      }
+    });
+  })();
+</script>

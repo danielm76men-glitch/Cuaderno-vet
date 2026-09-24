@@ -9,6 +9,7 @@
 <link rel="apple-touch-icon" href="icon.svg" />
 <meta name="theme-color" id="themeColorMeta" content="#f3f1e7" />
 <link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="mejoras.css" />
 </head>
 <body>
   <!-- Pantalla de arranque. Es la unica visible al cargar: hasta que
@@ -90,6 +91,7 @@
   </div>
 
   <div class="app" id="app" hidden>
+    <button id="sidebarBackdrop" class="sidebar-backdrop" type="button" aria-label="Cerrar menú" hidden></button>
     <aside class="app-sidebar" id="sidebar">
       <div class="sidebar-brand"><img class="brand-mark" src="icon.svg" alt="" width="26" height="26" /> VetDiario</div>
       <nav class="sidebar-nav" id="pageNav">
@@ -110,9 +112,9 @@
 
     <div class="app-main">
       <header class="topbar">
-        <button class="mobile-menu-btn" id="toggleSidebar" type="button" aria-label="Abrir menú">☰</button>
+        <button class="mobile-menu-btn" id="toggleSidebar" type="button" aria-label="Abrir menú" aria-controls="sidebar" aria-expanded="false">☰</button>
         <div class="topbar-search">
-          <input type="search" id="search" placeholder="Buscar en VetDiario…" autocomplete="off" />
+          <input type="search" id="search" placeholder="Buscar paciente, fármaco o apunte…" aria-label="Buscar en todo VetDiario" autocomplete="off" />
         </div>
         <div class="topbar-right">
           <div class="conn-pill" id="connPill">

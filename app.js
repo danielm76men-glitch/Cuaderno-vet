@@ -1,3 +1,4 @@
+import { COLECCIONES_RESPALDO, crearRespaldo, leerRespaldo, planificarRestauracion, decodificar, crearSinReemplazar, valorFirestore } from "./respaldo.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { SEMILLA_FORMULARIO, AMPLIACION_FORMULARIO } from "./semilla-formulario.js";
 import { FICHAS_FARMACO, MOMENTOS, MOMENTO_DE_USO, PENETRACION } from "./fichas-farmaco.js";
@@ -12,6 +13,9 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import {
   getFirestore,
+  getDocsFromServer,
+  waitForPendingWrites,
+  Timestamp,
   collection,
   doc,
   addDoc,
@@ -142,9 +146,12 @@ const state = {
   profile: null,
   page: "dashboard",
   studyTab: "materias",
+  farmacosTab: "catalogo",
+  estadoFilter: "",
   areaFilter: "",
   especieFilter: "",
   formularioEspecieFilter: "",
+  formularioQuery: "",
   activeId: null,
   query: "",
   ready: false
@@ -347,7 +354,7 @@ function scheduleSave(collectionName, entryId, patch, statusEl, opciones) {
         statusEl.parentElement.setAttribute("data-state", "ok");
         statusEl.textContent = "Sincronizado";
       }
-      showToast("Guardado");
+      // El estado junto al editor confirma el guardado sin interrumpir la escritura.
     } catch (err) {
       console.error("Fallo al guardar en " + collectionName + ":", err);
       if (statusEl) {
@@ -3706,8 +3713,10 @@ function buildDoseCalculator(context) {
     /* Si vienes filtrando por una especie, la calculadora arranca en ella.
        Si no, se quedaría en la primera de la lista y tendrías que volver a
        elegirla — justo lo que acabas de decirle a la app. */
-    const filtrada = especieActiva();
-    if (filtrada && especies.includes(filtrada)) speciesSelect.value = filtrada;
+    const filtrada = normalizarBusqueda(ctxCase && ctxCase.especie || especieActiva()).trim();
+    if (filtrada && !especies.includes(filtrada)) {const option=document.createElement('option');option.value=filtrada;option.textContent=filtrada+' — sin pauta disponible';speciesSelect.appendChild(option);}
+    const empty=document.createElement('option');empty.value='';empty.textContent='Elige la especie';speciesSelect.prepend(empty);
+    speciesSelect.value=filtrada || '';
   }
 
   function updateIndicacionField() {
@@ -3748,6 +3757,7 @@ function buildDoseCalculator(context) {
       return;
     }
     presField.hidden = false;
+    const blank=document.createElement('option');blank.value='';blank.textContent='Elige la presentación del producto';presSelect.appendChild(blank);
     pres.forEach((p, i) => {
       const o = document.createElement("option");
       o.value = String(i);
@@ -3776,7 +3786,8 @@ function buildDoseCalculator(context) {
     const max = pauta.dosisMax != null && isFinite(pauta.dosisMax) ? Number(pauta.dosisMax) : min;
     dosisField.hidden = false;
     dosisLabel.textContent = "Dosis a usar (" + (pauta.unidad || "mg/kg") + ")";
-    dosisInput.value = roundNice((min + max) / 2);
+    dosisInput.value = "";
+    dosisInput.placeholder = "Introduce la dosis elegida";
     dosisPista.textContent =
       min === max
         ? "La etiqueta indica " + min + " " + (pauta.unidad || "") + "."
@@ -3785,8 +3796,8 @@ function buildDoseCalculator(context) {
 
   function presentacionElegida() {
     const pres = selectedDrug ? selectedDrug.presentaciones.filter((p) => p.concentracion > 0) : [];
-    if (!pres.length) return null;
-    return pres[Number(presSelect.value) || 0] || pres[0];
+    if (!pres.length || presSelect.value === "") return null;
+    return pres[Number(presSelect.value)] || null;
   }
 
   function showEmpty(text) {
@@ -3846,6 +3857,7 @@ function buildDoseCalculator(context) {
       return;
     }
 
+    if(!speciesSelect.value){showEmpty('Elige la especie del paciente.');if(addBtn)result.appendChild(addBtn);return;}
     const pautas = dosisUtilizables(selectedDrug, speciesSelect.value);
     if (!pautas.length) {
       const conFuente = selectedDrug.dosis.filter((d) => String(d.fuente || "").trim()).length;
@@ -3861,7 +3873,7 @@ function buildDoseCalculator(context) {
     const pauta = pautas[Number(indicacionSelect.value) || 0] || pautas[0];
 
     const weight = parseFloat(weightInput.value);
-    if (!weight || weight <= 0) {
+    if (!Number.isFinite(weight) || weight <= 0) {
       showEmpty("Ingresa el peso del paciente para calcular la dosis.");
       if (addBtn) result.appendChild(addBtn);
       return;
@@ -3872,8 +3884,7 @@ function buildDoseCalculator(context) {
     const dosisMin = Number(pauta.dosisMin);
     const dosisMax = pauta.dosisMax != null && isFinite(pauta.dosisMax) ? Number(pauta.dosisMax) : dosisMin;
 
-    // Se calcula sobre el punto medio del rango; los extremos se muestran
-    // debajo para que se vea el margen con el que se esta trabajando.
+    // Los extremos se muestran como referencia; la dosis debe introducirse explícitamente.
     /* Un rango al revés (mínimo mayor que máximo) no es un caso raro: basta
        un dedazo al teclear en la ficha. Antes se calculaba igual con un
        punto medio sin sentido y se avisaba de "fuera de rango", que apunta
@@ -3895,7 +3906,12 @@ function buildDoseCalculator(context) {
     }
 
     const escrita = parseFloat(dosisInput.value);
-    const dosisUsada = isFinite(escrita) && escrita > 0 ? escrita : (dosisMin + dosisMax) / 2;
+    if (!Number.isFinite(escrita) || escrita <= 0) {
+      showEmpty('Introduce explícitamente una dosis mayor que cero para calcular.');
+      if(addBtn)result.appendChild(addBtn);
+      return;
+    }
+    const dosisUsada = escrita;
     const especieCalc = speciesSelect.value;
     const tipoUnidad = tipoDeUnidad(unidad);
     const totalDose = totalSegunUnidad(dosisUsada, unidad, weight, especieCalc);
@@ -3932,7 +3948,9 @@ function buildDoseCalculator(context) {
     /* El volumen en mL es el resultado que importa: el error clinico real
        ocurre al convertir los mg a la concentracion del frasco. */
     const pres = presentacionElegida();
-    if (pres) {
+    const matchingUnit = pres && normalizarBusqueda((pres.unidadConc||'').split('/')[0].trim()) === normalizarBusqueda(massUnit);
+    const matchingRoute = pres && viasDe(pauta.via).some(v => viasDe(pres.via).some(p => normalizarBusqueda(p) === normalizarBusqueda(v)));
+    if (pres && matchingUnit && matchingRoute) {
       const concUnidad = pres.unidadConc || "";
       const volUnit = concUnidad.includes("/") ? concUnidad.split("/")[1].trim() : "";
       const volume = totalDose / Number(pres.concentracion);
@@ -3953,7 +3971,7 @@ function buildDoseCalculator(context) {
       lastTotalLine += " · Volumen a administrar = " + volText;
     } else {
       addLine(
-        "Sin presentación cargada: no se puede convertir a mL. Agrega la concentración del frasco en la ficha del fármaco.",
+        pres ? "No se convierte a volumen: la unidad o vía de esta presentación no coincide con la pauta. Revisa la ficha." : "Selecciona una presentación compatible para convertir la dosis total a volumen o unidades del producto.",
         "calc-line-suave"
       );
     }
@@ -4002,6 +4020,7 @@ function buildDoseCalculator(context) {
     fuente.textContent = "Fuente: " + pauta.fuente;
     result.appendChild(fuente);
 
+    if (!selectedDrug.verificadoEl) addLine('Pendiente de verificación: comprueba la fuente y la etiqueta del producto.', 'calc-aviso');
     if (verificacionVencida(selectedDrug.verificadoEl)) {
       const viejo = document.createElement("div");
       viejo.className = "calc-aviso";
@@ -5087,6 +5106,7 @@ function openCalculatorOverlay(context) {
   activarPestana(context && context.tab === "fluidos" ? "fluidos" : "dosis");
   backdrop.appendChild(card);
   document.body.appendChild(backdrop);
+  etiquetarControles(card);
   calcOverlayEl = backdrop;
 
   calcOverlayEscHandler = (e) => {
@@ -5099,8 +5119,8 @@ function openCalculatorOverlay(context) {
 
 function updateNavCounts() {
   if (els.countPatients) els.countPatients.textContent = entriesForSection("casos").length;
-  if (els.countFarmacos) els.countFarmacos.textContent = getMedUsageList().length;
-  if (els.countStudy) els.countStudy.textContent = entriesForSection("materias").length + state.formulario.length;
+  if (els.countFarmacos) els.countFarmacos.textContent = state.formulario.length;
+  if (els.countStudy) els.countStudy.textContent = entriesForSection("materias").length;
 }
 
 function setActiveNav() {
@@ -5123,11 +5143,14 @@ function goToPage(page) {
   state.page = page;
   state.activeId = null;
   state.query = "";
+  state.estadoFilter = "";
   state.areaFilter = "";
   state.especieFilter = "";
   state.formularioEspecieFilter = "";
   if (els.search) els.search.value = "";
   els.sidebar.classList.remove("open");
+  document.getElementById("sidebarBackdrop").hidden=true;
+  els.toggleSidebar.setAttribute("aria-expanded","false");
   render();
 }
 
@@ -5237,7 +5260,10 @@ let renderPendiente = false;
    veces seguidas y animarlo seria un parpadeo. */
 let ultimaVista = null;
 
+let respaldoEnCurso = false;
+let ultimoMensajeRespaldo = "";
 function renderDesdeSnapshot() {
+  if(respaldoEnCurso){renderPendiente=true;return;}
   if (detailIsBeingEdited() || isTypingInContent()) {
     renderPendiente = true;
     updateNavCounts();
@@ -5269,7 +5295,7 @@ function render() {
   els.content.innerHTML = "";
 
   const vistaActual =
-    state.page + "/" + (state.studyTab || "") + "/" + (state.activeId || "");
+    state.page + "/" + (state.farmacosTab || "") + "/" + (state.activeId || "") + "/" + Boolean(state.query.trim());
   const cambioDeVista = vistaActual !== ultimaVista;
   ultimaVista = vistaActual;
 
@@ -5282,182 +5308,155 @@ function render() {
     return;
   }
 
-  if (state.page === "patients") renderPatientsPage(inner);
+  if (state.query.trim()) renderGlobalSearch(inner);
+  else if (state.page === "patients") renderPatientsPage(inner);
   else if (state.page === "farmacos") renderFarmacosPage(inner);
   else if (state.page === "study") renderStudyPage(inner);
   else if (state.page === "settings") renderSettingsPage(inner);
   else renderDashboardPage(inner);
+  etiquetarControles(inner);
+  if(cambioDeVista){window.scrollTo(0,0);els.content.scrollTop=0;}
 }
 
 /* ---------- Inicio ---------- */
 
+const ESTADOS_CASO = { abierto: 'Abierto', seguimiento: 'En seguimiento', cerrado: 'Cerrado' };
+function estadoCaso(entry) { return ESTADOS_CASO[entry.estadoCaso] ? entry.estadoCaso : 'abierto'; }
+function abrirDestino(page, id, tab) {
+  state.query = '';
+  els.search.value = '';
+  state.page = page;
+  state.activeId = id || null;
+  if (tab) state.farmacosTab = tab;
+  els.sidebar.classList.remove('open');
+  document.getElementById('sidebarBackdrop').hidden=true;
+  els.toggleSidebar.setAttribute('aria-expanded','false');
+  render();
+  window.scrollTo(0, 0);
+}
+function accion(texto, fn, clase = 'btn-secondary') {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = clase; b.textContent = texto;
+  b.addEventListener('click', fn);
+  return b;
+}
 function renderDashboardPage(root) {
-  root.appendChild(pageHead("Inicio", "Tus últimos casos y las herramientas de consulta."));
-
-  const stats = document.createElement("div");
-  stats.className = "stat-grid";
-  /* Cada tarjeta lleva a donde están las cosas que cuenta. Antes eran
-     números muertos: leías "61 Formulario" y tenías que ir a buscarlo al
-     menú, cuando el sitio obvio para pulsar era el número.
-
-     Las dos de Estudio además dejan abierta la pestaña correcta, porque
-     "Materias" y "Formulario" viven en la misma página. */
-  const statDefs = [
-    ["Casos activos", entriesForSection("casos").length, "patients", null],
-    ["Materias", entriesForSection("materias").length, "study", "materias"],
-    ["Fármacos usados", getMedUsageList().length, "farmacos", null],
-    ["Formulario", state.formulario.length, "formulario_tab", "formulario"]
+  const head = pageHead('Tu cuaderno, al día', 'Casos, controles y conocimiento en un mismo lugar.');
+  head.appendChild(accion('+ Nuevo caso', createCase, 'btn-primary'));
+  root.appendChild(head);
+  const casos = entriesForSection('casos');
+  const activos = casos.filter(e => estadoCaso(e) !== 'cerrado');
+  const controles = activos.filter(e => /^\d{4}-\d{2}-\d{2}$/.test(e.proximoControl || '')).sort((a,b) => a.proximoControl.localeCompare(b.proximoControl));
+  const pendientes = controles.filter(e => e.proximoControl <= todayISO());
+  const stats = document.createElement('div'); stats.className = 'stat-grid';
+  const defs = [
+    ['Casos abiertos', activos.length, () => {state.estadoFilter='activos'; abrirDestino('patients');}],
+    ['Controles hasta hoy', pendientes.length, () => { document.getElementById('controles-inicio').scrollIntoView({block:'start'}); }],
+    ['Fármacos en catálogo', state.formulario.length, () => abrirDestino('farmacos', null, 'catalogo')],
+    ['Apuntes de estudio', entriesForSection('materias').length, () => abrirDestino('study')]
   ];
-  statDefs.forEach(([l, n, destino, pestana]) => {
-    // Botón y no div: se enfoca con el teclado y se activa con Enter sin
-    // tener que reimplementar nada de eso a mano.
-    const c = document.createElement("button");
-    c.type = "button";
-    c.className = "stat-card";
-    c.innerHTML = '<span class="n">' + n + '</span><span class="l">' + l + "</span>";
-    c.setAttribute("aria-label", l + ": " + n + ". Ver.");
-    c.addEventListener("click", () => {
-      // goToPage limpia búsqueda y filtros, así que la pestaña se fija
-      // después: si no, la borraría al pasar.
-      goToPage(destino === "formulario_tab" ? "study" : destino);
-      if (pestana) {
-        state.studyTab = pestana;
-        render();
-      }
-    });
-    stats.appendChild(c);
+  defs.forEach(([label, n, fn]) => {
+    const b = accion('', fn, 'stat-card');
+    const num = document.createElement('span'); num.className='n'; num.textContent=n;
+    const txt = document.createElement('span'); txt.className='l'; txt.textContent=label;
+    b.append(num,txt); b.setAttribute('aria-label', label+': '+n+'. Ver.'); stats.appendChild(b);
   });
   root.appendChild(stats);
-
-  const overviewCard = document.createElement("div");
-  overviewCard.className = "card";
-  const overviewHead = document.createElement("div");
-  overviewHead.className = "card-head";
-  const overviewTitle = document.createElement("h2");
-  overviewTitle.textContent = "Pacientes y casos clínicos";
-  const newCaseBtn = document.createElement("button");
-  newCaseBtn.type = "button";
-  newCaseBtn.className = "btn-primary";
-  newCaseBtn.textContent = "+ Nuevo caso";
-  newCaseBtn.addEventListener("click", () => createCase());
-  overviewHead.appendChild(overviewTitle);
-  overviewHead.appendChild(newCaseBtn);
-  overviewCard.appendChild(overviewHead);
-
-  const casos = entriesForSection("casos").sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0)).slice(0, 6);
-  overviewCard.appendChild(buildPatientsTable(casos, true));
-  root.appendChild(overviewCard);
-
-  /* Rejilla propia y NO .detail-grid: aquella es 320px + resto, pensada
-     para una barra lateral estrecha junto al contenido. Aqui los papeles
-     estan al reves — la tabla es el contenido y la calculadora es una
-     tarjeta con un boton — asi que reutilizarla dejaba la tabla apretada
-     en 320 px y media pantalla vacia al lado. */
-  const toolsRow = document.createElement("div");
-  toolsRow.className = "tools-grid";
-  toolsRow.style.marginTop = "18px";
-
-  const drugCard = document.createElement("div");
-  drugCard.className = "card";
-  const drugHead = document.createElement("div");
-  drugHead.className = "card-head";
-  const drugTitle = document.createElement("h2");
-  drugTitle.textContent = "Tabla de referencia de fármacos";
-  drugHead.appendChild(drugTitle);
-  drugCard.appendChild(drugHead);
-  const drugTablePad = document.createElement("div");
-  drugTablePad.className = "card-pad";
-
-  /* Buscador propio y no el de la barra de arriba: aquel busca casos y
-     pacientes por todo el cuaderno. Este busca UN farmaco en el formulario,
-     por su nombre o por su familia. */
-  const buscarFila = document.createElement("div");
-  buscarFila.className = "tabla-buscar";
-  const buscarInput = document.createElement("input");
-  buscarInput.type = "search";
-  buscarInput.className = "tabla-buscar-input";
-  buscarInput.placeholder = "Buscar un fármaco por nombre o familia…";
-  buscarInput.setAttribute("aria-label", "Buscar un fármaco en el formulario");
-  const buscarCuenta = document.createElement("span");
-  buscarCuenta.className = "tabla-buscar-cuenta";
-  buscarFila.appendChild(buscarInput);
-  buscarFila.appendChild(buscarCuenta);
-  drugTablePad.appendChild(buscarFila);
-
-  const drugTablaCaja = document.createElement("div");
-  drugTablePad.appendChild(drugTablaCaja);
-  drugCard.appendChild(drugTablePad);
-
-  function pintarTablaFarmacos() {
-    const q = normalizarBusqueda(String(buscarInput.value || "").trim());
-    /* Se ordena por nombreGenerico, que es el campo real. Antes se ordenaba
-       por "nombre": como no existe, comparaba undefined con undefined, daba
-       0 siempre y la lista se quedaba en el orden en que llego. */
-    const todos = state.formulario
-      .map(function (crudo) { return { crudo: crudo, far: farmacoNormalizado(crudo) }; })
-      .filter(function (p) { return p.far; })
-      .sort(function (a, b) {
-        return (a.far.nombreGenerico || "").localeCompare(b.far.nombreGenerico || "", "es");
-      });
-    const encontrados = q
-      ? todos.filter(function (p) {
-          return (
-            incluyeNormalizado(p.far.nombreGenerico, q) ||
-            incluyeNormalizado(p.far.familia, q) ||
-            incluyeNormalizado(p.far.grupo, q)
-          );
-        })
-      : todos;
-    /* Sin busqueda van TODOS, pero con los grupos plegados. Antes se
-       cortaba a ocho: con la tabla agrupada eso ademas mentia en las
-       cabeceras —"2 farmacos" era 2 del recorte, no 2 de verdad—. Plegada,
-       lo que se ve son las familias y las abre Daniel. */
-    const visibles = encontrados.map(function (p) { return p.crudo; });
-
-    drugTablaCaja.innerHTML = "";
-    /* Los grupos se abren solo si hay busqueda: sin abrirlos, los
-       resultados quedarian escondidos detras de las cabeceras. Sin buscar
-       nace plegada y la despliega Daniel. */
-    drugTablaCaja.appendChild(buildFormularioTable(visibles, false, !!q));
-
-    const total = todos.length;
-    if (q) {
-      buscarCuenta.textContent = encontrados.length
-        ? encontrados.length + (encontrados.length === 1 ? " fármaco" : " fármacos") + " de " + total
-        : "Ningún fármaco con ese nombre";
-    } else {
-      buscarCuenta.textContent =
-        total + (total === 1 ? " fármaco" : " fármacos") +
-        " — abre una familia o escribe para buscar";
-    }
+  const grid = document.createElement('div'); grid.className='home-grid';
+  const recent = document.createElement('section'); recent.className='card';
+  const rh=document.createElement('div'); rh.className='card-head';
+  const title=document.createElement('h2'); title.textContent='Continuar un caso';
+  rh.append(title,accion('Ver todos →',()=>{state.estadoFilter=''; abrirDestino('patients');})); recent.appendChild(rh);
+  recent.appendChild(buildPatientsTable(casos.slice().sort((a,b)=>(b._sortKey||0)-(a._sortKey||0)).slice(0,5),true));
+  grid.appendChild(recent);
+  const follow=document.createElement('section'); follow.className='card card-pad'; follow.id='controles-inicio';
+  const fh=document.createElement('h2'); fh.textContent='Próximos controles'; follow.appendChild(fh);
+  if (!controles.length) {
+    const p=document.createElement('p'); p.className='quiet-copy'; p.textContent='Programa el próximo control dentro de una ficha. Aparecerá aquí para que puedas retomarlo.'; follow.appendChild(p);
   }
+  controles.slice(0,6).forEach(e=>{
+    const row=accion('',()=>abrirDestino('patients',e.id),'control-item');
+    const name=document.createElement('strong'); name.textContent=e.meta||e.title||'Caso sin nombre';
+    const date=document.createElement('span'); date.textContent=(e.proximoControl < todayISO() ? 'Pendiente · ' : e.proximoControl===todayISO() ? 'Hoy · ' : '')+formatDate(e.proximoControl);
+    if(e.proximoControl<=todayISO()) row.classList.add('control-due'); row.append(name,date); follow.appendChild(row);
+  });
+  if(controles.length>6) follow.appendChild(accion('Ver todos los controles →',()=>{state.estadoFilter='controles';abrirDestino('patients');}));
+  grid.appendChild(follow); root.appendChild(grid);
+  const tools=document.createElement('section'); tools.className='quick-tools card card-pad';
+  const intro=document.createElement('div'); const th=document.createElement('h2'); th.textContent='Consulta rápida';
+  const tp=document.createElement('p'); tp.className='quiet-copy'; tp.textContent='Consulta una ficha o calcula a partir de una pauta registrada.'; intro.append(th,tp);
+  const buttons=document.createElement('div'); buttons.className='quick-actions';
+  buttons.append(accion('Consultar fármacos',()=>abrirDestino('farmacos',null,'catalogo')),accion('Calculadora de dosis',()=>openCalculatorOverlay(), 'btn-primary'));
+  tools.append(intro,buttons); root.appendChild(tools);
+}
 
-  buscarInput.addEventListener("input", pintarTablaFarmacos);
-  pintarTablaFarmacos();
+function renderFarmacosPage(root) {
+  if(state.activeId) {
+    const item=state.farmacosTab==='historial' ? getMedUsageList().find(f=>f.id===state.activeId) : state.formulario.find(f=>f.id===state.activeId);
+    if(item) { if(state.farmacosTab==='historial') renderFarmacoDetail(root,item); else renderFormularioDetail(root,item); return; }
+  }
+  root.appendChild(pageHead('Fármacos','Consulta el catálogo o revisa lo registrado en tus casos.'));
+  const tabs=document.createElement('div'); tabs.className='subtabs'; tabs.setAttribute('aria-label','Vistas de fármacos');
+  [['catalogo','Catálogo'],['historial','Historial de uso']].forEach(([id,label])=>{
+    const b=accion(label,()=>{state.farmacosTab=id;state.activeId=null;render();},'subtab');
+    b.setAttribute('aria-pressed',String(state.farmacosTab===id)); b.setAttribute('aria-selected',String(state.farmacosTab===id)); tabs.appendChild(b);
+  }); root.appendChild(tabs);
+  if(state.farmacosTab==='historial') renderHistorialFarmacos(root); else renderFormularioTab(root);
+}
 
-  const calcCard = document.createElement("div");
-  calcCard.className = "card card-pad";
-  const calcHead = document.createElement("h2");
-  calcHead.textContent = "Calculadora de dosis";
-  calcHead.style.margin = "0 0 10px";
-  calcHead.style.fontSize = "0.95rem";
-  const calcBody = document.createElement("p");
-  calcBody.style.color = "var(--muted)";
-  calcBody.style.fontSize = "0.85rem";
-  calcBody.style.margin = "0 0 14px";
-  calcBody.textContent = "Calcula la dosis de un fármaco del formulario por el peso del paciente.";
-  const calcOpenBtn = document.createElement("button");
-  calcOpenBtn.type = "button";
-  calcOpenBtn.className = "btn-primary";
-  calcOpenBtn.textContent = "🧮 Abrir calculadora";
-  calcOpenBtn.addEventListener("click", () => openCalculatorOverlay());
-  calcCard.appendChild(calcHead);
-  calcCard.appendChild(calcBody);
-  calcCard.appendChild(calcOpenBtn);
+function renderGlobalSearch(root) {
+  root.appendChild(pageHead('Resultados de búsqueda','Coincidencias en pacientes, fármacos y apuntes.'));
+  root.appendChild(accion('← Volver a la vista anterior',()=>{state.query='';els.search.value='';render();}));
+  const q=normalizarBusqueda(state.query.trim());
+  const groups=[
+    ['Pacientes y casos',entriesForSection('casos').filter(e=>matchesQuery(e,q)), e=>e.meta||e.title||'Sin nombre', e=>[e.especie,e.title,ESTADOS_CASO[estadoCaso(e)]].filter(Boolean).join(' · '),e=>abrirDestino('patients',e.id)],
+    ['Fármacos',state.formulario.filter(f=>matchesFormularioQuery(f,q)),f=>farmacoNormalizado(f).nombreGenerico||'Sin nombre',f=>farmacoNormalizado(f).familia||'Sin familia',f=>abrirDestino('farmacos',f.id,'catalogo')],
+    ['Apuntes',entriesForSection('materias').filter(e=>incluyeNormalizado([e.title,e.body].join(' '),q)),e=>e.title||'Sin título',e=>(e.body||'').slice(0,140),e=>abrirDestino('study',e.id)]
+  ];
+  let total=0;
+  groups.forEach(([label,items,title,sub,open])=>{
+    if(!items.length)return; total+=items.length;
+    const card=document.createElement('section'); card.className='card search-group';
+    const h=document.createElement('h2');h.textContent=label+' · '+items.length;card.appendChild(h);
+    items.forEach(e=>{const b=accion('',()=>open(e),'search-result');const name=document.createElement('strong');name.textContent=title(e);const desc=document.createElement('span');desc.textContent=sub(e);b.append(name,desc);card.appendChild(b);}); root.appendChild(card);
+  });
+  if(!total)root.appendChild(emptyState('⌕','No encontramos coincidencias','Prueba con el nombre del paciente, tutor, fármaco o una palabra del apunte.'));
+}
 
-  toolsRow.appendChild(drugCard);
-  toolsRow.appendChild(calcCard);
-  root.appendChild(toolsRow);
+function buildCaseSummary(entry,save) {
+  const card=document.createElement('section');card.className='card card-pad case-summary';card.id='caso-resumen';
+  const head=document.createElement('h2');head.textContent='Seguimiento del caso';card.appendChild(head);
+  const row=document.createElement('div');row.className='field-row';
+  function field(label,key,type,placeholder) {
+    const box=document.createElement('div');box.className='field-group';
+    const l=document.createElement('label');l.textContent=label;
+    const input=document.createElement(type==='select'?'select':'input');input.id='case-'+key;l.htmlFor=input.id;
+    if(type==='select')Object.entries(ESTADOS_CASO).forEach(([value,text])=>{const o=document.createElement('option');o.value=value;o.textContent=text;input.appendChild(o);});else input.type=type;
+    input.value=type==='select'?estadoCaso(entry):(entry[key]||'');if(placeholder)input.placeholder=placeholder;
+    input.addEventListener(type==='text'?'input':'change',()=>{entry[key]=input.value;save(key,input.value);});
+    box.append(l,input);row.appendChild(box);
+  }
+  field('Estado','estadoCaso','select');field('Próximo control','proximoControl','date');
+  field('Alergias o reacciones registradas','alergias','text','Sin información registrada');
+  card.appendChild(row);return card;
+}
+function buildCaseSections() {
+  const nav=document.createElement('nav');nav.className='case-sections';nav.setAttribute('aria-label','Apartados del caso');
+  [['caso-resumen','Resumen'],['caso-constantes','Constantes'],['caso-anamnesis','Historia'],['caso-examenes','Exámenes'],['caso-diagnostico','Diagnóstico'],['caso-tratamiento','Tratamiento'],['caso-evolucion','Evolución']].forEach(([id,label])=>{
+    nav.appendChild(accion(label,()=>{const target=document.getElementById(id);if(target){target.scrollIntoView({block:'start'});target.tabIndex=-1;target.focus({preventScroll:true});}},'section-link'));
+  });return nav;
+}
+
+let siguienteControl = 0;
+function etiquetarControles(root) {
+  root.querySelectorAll('label').forEach(label=>{
+    if(label.htmlFor||label.querySelector('input,select,textarea'))return;
+    const parent=label.parentElement;
+    const control=parent.querySelector(':scope > input, :scope > select, :scope > textarea');
+    if(!control)return;
+    if(!control.id)control.id='vd-campo-'+(++siguienteControl);
+    label.htmlFor=control.id;
+  });
 }
 
 /* ---------- Pacientes (casos clínicos) ---------- */
@@ -5583,7 +5582,7 @@ function buildPatientsTable(list, compact, grouped) {
   }
 
   const table = document.createElement("table");
-  table.className = "data-table";
+  table.className = "data-table patients-table";
   const thead = document.createElement("thead");
   const cols = compact
     ? ["Paciente", "Especie", "Área", "Ingreso", "Evoluciones"]
@@ -5689,6 +5688,7 @@ function buildPatientsTable(list, compact, grouped) {
 function buildPatientRow(entry, compact) {
   {
     const tr = document.createElement("tr");
+    tr.className = "patient-row";
     tr.addEventListener("click", () => {
       state.page = "patients";
       state.activeId = entry.id;
@@ -5696,10 +5696,13 @@ function buildPatientRow(entry, compact) {
     });
 
     const nameTd = document.createElement("td");
-    const nameStrong = document.createElement("div");
-    nameStrong.className = "cell-title";
+    const nameStrong = document.createElement("button");
+    nameStrong.type = "button";
+    nameStrong.className = "cell-title row-open";
     nameStrong.textContent = entry.meta || "(sin nombre)";
     nameTd.appendChild(nameStrong);
+    const caseBadge=document.createElement('span');caseBadge.className='case-badge case-'+estadoCaso(entry);caseBadge.textContent=ESTADOS_CASO[estadoCaso(entry)];nameTd.appendChild(caseBadge);
+    if(entry.proximoControl){const next=document.createElement('div');next.className='cell-muted';next.textContent='Control: '+formatDate(entry.proximoControl);nameTd.appendChild(next);}
     // Bajo el nombre del paciente va el tutor, no el motivo de consulta:
     // en la lista sirve mas para identificar de quien es el animal. Si no
     // hay tutor cargado, no se dibuja la linea (mejor vacio que un guion).
@@ -5766,6 +5769,8 @@ function buildPatientRow(entry, compact) {
       tr.appendChild(delTd);
     }
 
+    const labels=compact?['Paciente','Especie','Área','Ingreso','Evoluciones']:['Paciente','Especie','Ingreso','Área','Tutor','Evoluciones','Acciones'];
+    Array.from(tr.children).forEach((cell,i)=>cell.setAttribute('data-label',labels[i]||''));
     return tr;
   }
 }
@@ -5787,6 +5792,7 @@ function renderPatientsPage(root) {
   root.appendChild(head);
 
   const filterRow = document.createElement("div");
+  filterRow.className = "patient-filters";
   filterRow.style.display = "flex";
   filterRow.style.gap = "10px";
   filterRow.style.marginBottom = "14px";
@@ -5833,10 +5839,15 @@ function renderPatientsPage(root) {
     render();
   });
   filterRow.appendChild(especieSelect);
+  areaSelect.setAttribute('aria-label','Filtrar por área');especieSelect.setAttribute('aria-label','Filtrar por especie');
+  const statusSelect=document.createElement('select');statusSelect.className='btn-secondary';statusSelect.setAttribute('aria-label','Filtrar por estado');
+  [['','Todos los estados'],['activos','Abiertos y en seguimiento'],['controles','Con control programado'],...Object.entries(ESTADOS_CASO)].forEach(([value,label])=>{const o=document.createElement('option');o.value=value;o.textContent=label;statusSelect.appendChild(o);});
+  statusSelect.value=state.estadoFilter;statusSelect.addEventListener('change',()=>{state.estadoFilter=statusSelect.value;render();});filterRow.appendChild(statusSelect);
   root.appendChild(filterRow);
 
   const list = entriesForSection("casos")
     .filter((e) => matchesQuery(e, state.query))
+    .filter((e) => !state.estadoFilter || (state.estadoFilter==='activos' ? estadoCaso(e)!=='cerrado' : state.estadoFilter==='controles' ? estadoCaso(e)!=='cerrado' && !!e.proximoControl : estadoCaso(e)===state.estadoFilter))
     .filter((e) => !state.areaFilter || e.area === state.areaFilter)
     .filter((e) => {
       if (!state.especieFilter) return true;
@@ -5910,6 +5921,9 @@ function buildPrintableCase(entry, fotos) {
   datos.appendChild(campoImpreso("Peso", caso.peso));
   datos.appendChild(campoImpreso("Fecha de ingreso", formatDate(caso.date)));
   datos.appendChild(campoImpreso("Área", caso.area));
+  datos.appendChild(campoImpreso('Estado', ESTADOS_CASO[estadoCaso(caso)]));
+  datos.appendChild(campoImpreso('Próximo control', formatDate(caso.proximoControl)));
+  datos.appendChild(campoImpreso('Alergias o reacciones registradas', caso.alergias));
   root.appendChild(datos);
 
   const tutor = bloqueImpreso("Datos del tutor");
@@ -6165,6 +6179,7 @@ function renderPatientDetail(root, entry) {
   const statusText = status.querySelector(".statusText");
 
   function save(field, value) {
+    entry[field] = value;
     scheduleSave("entries", entry.id, { [field]: value }, statusText);
   }
 
@@ -6261,6 +6276,8 @@ function renderPatientDetail(root, entry) {
   titleGroup.appendChild(titleLabel);
   titleGroup.appendChild(titleInput);
   root.appendChild(titleGroup);
+  root.appendChild(buildCaseSections());
+  root.appendChild(buildCaseSummary(entry, save));
 
   /* La ficha ya no son dos columnas. Con la historia clínica a la
      derecha y los datos del paciente a la izquierda, para escribir el
@@ -6631,6 +6648,7 @@ function renderPatientDetail(root, entry) {
      columna de al lado los rangos ya salen bien al abrir la ficha. */
   const constCard = document.createElement("div");
   constCard.className = "card card-pad";
+  constCard.id = "caso-constantes";
   constantesNodo = buildConstantesSection(entry, save);
   constCard.appendChild(constantesNodo);
   pila.appendChild(constCard);
@@ -6657,6 +6675,7 @@ function renderPatientDetail(root, entry) {
   CASO_APARTADOS.forEach(function (ap) {
     const bloque = document.createElement("div");
     bloque.className = "apartado";
+    bloque.id = "caso-" + ap.clave;
 
     const cabeza = document.createElement("div");
     cabeza.className = "apartado-head";
@@ -6733,6 +6752,7 @@ function renderPatientDetail(root, entry) {
 
       const bloqueEx = document.createElement("div");
       bloqueEx.className = "apartado apartado-examenes";
+      bloqueEx.id = "caso-examenes";
       examenesNodo = buildExamenesSection(entry, statusText, adjuntos);
       bloqueEx.appendChild(examenesNodo);
       notesCard.appendChild(bloqueEx);
@@ -6760,6 +6780,7 @@ function renderPatientDetail(root, entry) {
 
   const evolCard = document.createElement("div");
   evolCard.className = "card card-pad";
+  evolCard.id = "caso-evolucion";
   evolCard.appendChild(buildEvolucionesSection(entry, statusText));
   pila.appendChild(evolCard);
 
@@ -6785,7 +6806,7 @@ function renderPatientDetail(root, entry) {
 
 /* ---------- Fármacos (historial derivado) ---------- */
 
-function renderFarmacosPage(root) {
+function renderHistorialFarmacos(root) {
   const list = getMedUsageList();
   const active = state.activeId ? list.find((m) => m.id === state.activeId) : null;
   if (active) {
@@ -6793,7 +6814,7 @@ function renderFarmacosPage(root) {
     return;
   }
 
-  root.appendChild(pageHead("Fármacos", "Historial de fármacos usados en tus casos clínicos."));
+  // La cabecera y las pestañas se dibujan en renderFarmacosPage.
 
   const filtered = list.filter((m) => matchesMedQuery(m, state.query)).sort((a, b) => (b._sortKey || 0) - (a._sortKey || 0));
 
@@ -6905,54 +6926,12 @@ function renderFarmacoDetail(root, item) {
 /* ---------- Estudio (Materias + Formulario) ---------- */
 
 function renderStudyPage(root) {
-  const active = state.activeId
-    ? state.studyTab === "materias"
-      ? entriesForSection("materias").find((e) => e.id === state.activeId)
-      : state.formulario.find((f) => f.id === state.activeId)
-    : null;
-
-  if (active) {
-    if (state.studyTab === "materias") renderMateriaDetail(root, active);
-    else renderFormularioDetail(root, active);
-    return;
-  }
-
-  root.appendChild(pageHead("Centro de estudio", "Material de referencia y datos farmacológicos."));
-
-  const subtabs = document.createElement("div");
-  subtabs.className = "subtabs";
-  const tabMaterias = document.createElement("button");
-  tabMaterias.type = "button";
-  tabMaterias.className = "subtab";
-  tabMaterias.textContent = "Biblioteca de Materias";
-  tabMaterias.setAttribute("aria-selected", state.studyTab === "materias" ? "true" : "false");
-  tabMaterias.addEventListener("click", () => {
-    state.studyTab = "materias";
-    state.query = "";
-    if (els.search) els.search.value = "";
-    render();
-  });
-  const tabFormulario = document.createElement("button");
-  tabFormulario.type = "button";
-  tabFormulario.className = "subtab";
-  tabFormulario.textContent = "Formulario de Fármacos";
-  tabFormulario.setAttribute("aria-selected", state.studyTab === "formulario" ? "true" : "false");
-  tabFormulario.addEventListener("click", () => {
-    state.studyTab = "formulario";
-    state.query = "";
-    if (els.search) els.search.value = "";
-    render();
-  });
-  subtabs.appendChild(tabMaterias);
-  subtabs.appendChild(tabFormulario);
-  root.appendChild(subtabs);
-
-  if (state.studyTab === "materias") renderMateriasTab(root);
-  else renderFormularioTab(root);
+  const active = state.activeId ? entriesForSection('materias').find(e => e.id === state.activeId) : null;
+  if(active){renderMateriaDetail(root, active);return;}
+  root.appendChild(pageHead('Estudio', 'Tus materias, apuntes y aprendizajes.'));
+  renderMateriasTab(root);
 }
 
-// Mismo motivo que en createCase: el id se genera en local y la ficha
-// se abre sin esperar a la red.
 function createMateria() {
   const ref = doc(collection(db, "entries"));
   setDoc(ref, {
@@ -7211,6 +7190,11 @@ function fechaDeVerificacion(valor) {
   // Firestore devuelve Timestamp; la semilla y el <input type="date">
   // devuelven texto "AAAA-MM-DD".
   if (typeof valor.toDate === "function") return valor.toDate();
+  const match = typeof valor === 'string' && /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(valor);
+  if (match) {
+    const local = new Date(Number(match[1]), Number(match[2])-1, Number(match[3]));
+    return local.getFullYear()===Number(match[1]) && local.getMonth()===Number(match[2])-1 && local.getDate()===Number(match[3]) ? local : null;
+  }
   const d = new Date(valor);
   return isFinite(d.getTime()) ? d : null;
 }
@@ -8374,8 +8358,8 @@ function buildFormularioTable(list, withActions, forzarAbierto) {
        estas en Estudio todavia. */
     tr.addEventListener("click", (e) => {
       if (e.target.closest(".row-actions")) return;
-      state.page = "study";
-      state.studyTab = "formulario";
+      state.page = "farmacos";
+      state.farmacosTab = "catalogo";
       state.activeId = far.id;
       render();
     });
@@ -8383,6 +8367,9 @@ function buildFormularioTable(list, withActions, forzarAbierto) {
     const nameTd = document.createElement("td");
     nameTd.className = "cell-title";
     nameTd.textContent = far.nombreGenerico || "(sin nombre)";
+    const verification=document.createElement('span');verification.className='verification-tag';
+    verification.textContent=!far.verificadoEl?'Pendiente de verificar':verificacionVencida(far.verificadoEl)?'Revisar fuente':'Verificado · '+fechaCorta(far.verificadoEl);
+    nameTd.appendChild(verification);
     /* Una prohibicion absoluta tiene que verse ya en la lista, no solo al
        abrir la ficha.
 
@@ -8446,7 +8433,7 @@ function buildFormularioTable(list, withActions, forzarAbierto) {
       editBtn.textContent = "✎";
       editBtn.setAttribute("aria-label", "Editar");
       editBtn.addEventListener("click", () => {
-        state.studyTab = "formulario";
+        state.page = "farmacos"; state.farmacosTab = "catalogo";
         state.activeId = far.id;
         render();
       });
@@ -8744,7 +8731,7 @@ function createFormularioEntry(grupo) {
     state.formulario = state.formulario.concat([
       { id: ref.id, uid: currentUid, nombreGenerico: "", familia: "", grupo: grupo || "", presentaciones: [], dosis: [], retiro: [], contraindicaciones: [], alertas: [], verificadoEl: null, esquemaFormulario: 2, _pending: true }
     ]);
-    state.studyTab = "formulario";
+    state.page = "farmacos"; state.farmacosTab = "catalogo";
     state.activeId = ref.id;
     render();
   }
@@ -8912,7 +8899,7 @@ function renderFormularioTab(root) {
   const cardHead = document.createElement("div");
   cardHead.className = "card-head";
   const cardTitle = document.createElement("h2");
-  cardTitle.textContent = "Formulario de Fármacos";
+  cardTitle.textContent = "Catálogo de fármacos";
   const addBtn = document.createElement("button");
   addBtn.type = "button";
   addBtn.className = "btn-primary";
@@ -8935,9 +8922,12 @@ function renderFormularioTab(root) {
 
   const filterRow = document.createElement("div");
   filterRow.className = "form-filtros";
+  const localSearch=document.createElement('input');localSearch.type='search';localSearch.className='catalog-search';localSearch.placeholder='Buscar dentro del catálogo…';localSearch.setAttribute('aria-label','Buscar dentro del catálogo');localSearch.value=state.formularioQuery;
+  localSearch.addEventListener('input',()=>{state.formularioQuery=localSearch.value;pintarLista();});filterRow.appendChild(localSearch);
 
   const especieSelect = selectDe(especiesDelFormulario(), state.formularioEspecieFilter, "Todas las especies");
   especieSelect.className = "btn-secondary";
+  especieSelect.setAttribute("aria-label", "Especie del catálogo");
   especieSelect.addEventListener("change", () => {
     state.formularioEspecieFilter = especieSelect.value;
     render();
@@ -8995,11 +8985,11 @@ function renderFormularioTab(root) {
       (modoActual === "momento" && ESPECIES_DE_COMPANIA.indexOf(normalizarBusqueda(espPista)) >= 0
         ? " El cajón de hato y producción no se muestra con esta especie."
         : "")
-    : state.query
-      ? 'Filtrando por “' + state.query + '” (nombre genérico, familia, vía o indicación).'
+    : state.formularioQuery
+      ? 'Filtrando por “' + state.formularioQuery + '” (nombre genérico, familia, vía o indicación).'
       : modoActual === "momento"
         ? "Por momento de uso. Un fármaco puede salir en dos cajones: la ketamina es de anestesia y de urgencias."
-        : "Usa el buscador de arriba para filtrar por nombre genérico, familia, vía o indicación.";
+        : "Busca por nombre genérico, familia, vía o indicación.";
   if (espPista) pista.classList.add("form-pista-activa");
   filterRow.appendChild(pista);
   card.appendChild(filterRow);
@@ -9008,14 +8998,17 @@ function renderFormularioTab(root) {
   listWrap.style.padding = "14px 0 4px";
   // Si escribiste una especie, filtra como si la hubieras elegido en el
   // desplegable: es lo que esperas al escribir "canino".
+  function pintarLista(){
   const filtro = especieActiva();
   const list = state.formulario
-    .filter((f) => matchesFormularioQuery(f, state.query))
+    .filter((f) => matchesFormularioQuery(f, state.formularioQuery))
     .filter((f) => !filtro || especiesDe(farmacoNormalizado(f)).includes(filtro))
     .sort((a, b) =>
       (farmacoNormalizado(a).nombreGenerico || "").localeCompare(farmacoNormalizado(b).nombreGenerico || "")
     );
-  listWrap.appendChild(buildFormularioTable(list, true));
+  listWrap.replaceChildren(buildFormularioTable(list, true, !!state.formularioQuery.trim()));
+  }
+  pintarLista();
   card.appendChild(listWrap);
   root.appendChild(card);
 
@@ -9231,7 +9224,7 @@ function renderFormularioDetail(root, item) {
   const far = farmacoNormalizado(item);
 
   root.appendChild(
-    backLink("Centro de estudio", () => {
+    backLink("Catálogo de fármacos", () => {
       state.activeId = null;
       render();
     })
@@ -10121,132 +10114,66 @@ function renderSettingsPage(root) {
   accountRow.appendChild(signOutBtn2);
   list.appendChild(accountRow);
 
-  // Backup
-  const backupCard = document.createElement("div");
-  backupCard.className = "settings-row";
-  backupCard.style.flexDirection = "column";
-  backupCard.style.alignItems = "stretch";
-  const backupLbl = document.createElement("div");
-  backupLbl.className = "lbl";
-  backupLbl.textContent = "Copia de respaldo";
-  const backupDesc = document.createElement("div");
-  backupDesc.className = "desc";
-  backupDesc.style.marginBottom = "10px";
-  backupDesc.textContent = "Descarga o importa un respaldo manual de Materias y Casos clínicos.";
-  const backupBtns = document.createElement("div");
-  backupBtns.style.display = "flex";
-  backupBtns.style.gap = "8px";
-  const exportBtn = document.createElement("button");
-  exportBtn.type = "button";
-  exportBtn.className = "btn-secondary";
-  exportBtn.textContent = "↓ Descargar copia";
-  const importBtn = document.createElement("button");
-  importBtn.type = "button";
-  importBtn.className = "btn-secondary";
-  importBtn.textContent = "↑ Importar copia antigua";
-  const importFile = document.createElement("input");
-  importFile.type = "file";
-  importFile.accept = "application/json,.json";
-  importFile.style.display = "none";
-  const backupMsg = document.createElement("div");
-  backupMsg.className = "settings-msg";
-
-  function showBackupMsg(text, isError) {
-    backupMsg.textContent = text;
-    backupMsg.classList.toggle("error", !!isError);
+  const backupCard = document.createElement('div');
+  backupCard.className = 'settings-row backup-panel';
+  const backupLbl = document.createElement('h2'); backupLbl.textContent='Respaldo completo';
+  const backupDesc = document.createElement('p'); backupDesc.className='quiet-copy';
+  backupDesc.textContent='Conserva casos, apuntes, perfil, catálogo de fármacos, fotos y exámenes. La restauración agrega los registros que faltan y conserva los que ya existen.';
+  const backupBtns=document.createElement('div');backupBtns.className='quick-actions';
+  const exportBtn=accion('Descargar respaldo completo',exportarTodo,'btn-primary');
+  const importFile=document.createElement('input');importFile.type='file';importFile.accept='.json,application/json';importFile.hidden=true;
+  const importBtn=accion('Restaurar respaldo',()=>{importFile.value='';importFile.click();});
+  const backupMsg=document.createElement('p');backupMsg.className='settings-msg';backupMsg.setAttribute('role','status');backupMsg.setAttribute('aria-live','polite');
+  const last=document.createElement('p');last.className='quiet-copy';
+  const backupKey='vetdiario.backup.'+currentUid;
+  function showLast(){const value=localStorage.getItem(backupKey);last.textContent=value?'Último respaldo descargado en este dispositivo: '+new Date(value).toLocaleString('es-EC'):'Todavía no se ha descargado un respaldo completo en este dispositivo.';}
+  showLast();
+  function busy(value){respaldoEnCurso=value;exportBtn.disabled=value;importBtn.disabled=value;}
+  backupMsg.textContent=ultimoMensajeRespaldo;
+  function message(text,error=false){ultimoMensajeRespaldo=text;backupMsg.textContent=text;backupMsg.classList.toggle('error',error);}
+  function assertSession(uid){if(!uid||uid!==currentUid)throw new Error('La sesión cambió. Vuelve a iniciar sesión antes de continuar.');}
+  async function limitada(promise){let timer;try{return await Promise.race([promise,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('La conexión tardó demasiado. Puedes volver a intentarlo; los registros existentes se conservan.')),30000);})]);}finally{clearTimeout(timer);}}
+  async function exportarTodo(){
+    if(!navigator.onLine){message('Conéctate a internet para incluir también todos los adjuntos guardados en la nube.',true);return;}
+    if(saveTimers.size){message('Espera a que terminen de guardarse los últimos cambios y vuelve a descargar.',true);return;}
+    const uid=currentUid;busy(true);message('Sincronizando y reuniendo tus datos…');
+    try{
+      await limitada(waitForPendingWrites(db));assertSession(uid);
+      const snapshots=await limitada(Promise.all(COLECCIONES_RESPALDO.map(c=>getDocsFromServer(query(collection(db,c),where('uid','==',uid))))));
+      assertSession(uid);
+      const collections=Object.fromEntries(COLECCIONES_RESPALDO.map((c,i)=>[c,snapshots[i].docs.map(d=>({...d.data(),id:d.id}))]));
+      const data=crearRespaldo(collections,uid);
+      // Validar relaciones antes de afirmar que la copia está completa.
+      leerRespaldo(JSON.stringify(data));
+      const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='vetdiario-completo-'+todayISO()+'.json';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),10000);
+      localStorage.setItem(backupKey,new Date().toISOString());showLast();
+      message('Respaldo descargado: '+collections.entries.length+' entradas, '+collections.formulario.length+' fármacos y '+collections.fotos.length+' adjuntos.');
+    }catch(err){message('No se pudo completar el respaldo. '+(err.message||'Revisa tu conexión.'),true);}finally{busy(false);}
   }
-
-  exportBtn.addEventListener("click", () => {
-    const payload = JSON.stringify({ entries: state.entries, exportedAt: new Date().toISOString() }, null, 2);
-    const blob = new Blob([payload], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "vetdiario-" + todayISO() + ".json";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    showBackupMsg("Copia descargada.");
-  });
-
-  importBtn.addEventListener("click", () => {
-    importFile.value = "";
-    importFile.click();
-  });
-
-  importFile.addEventListener("change", () => {
-    const file = importFile.files && importFile.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      let incoming;
-      try {
-        const parsed = JSON.parse(String(reader.result));
-        incoming = Array.isArray(parsed) ? parsed : parsed.entries;
-      } catch (e) {
-        showBackupMsg("Ese archivo no es una copia válida.", true);
-        return;
+  importFile.addEventListener('change',async()=>{
+    const file=importFile.files[0];if(!file)return;
+    if(!navigator.onLine){message('Conéctate a internet para restaurar y comprobar qué registros ya existen.',true);return;}
+    const uid=currentUid;busy(true);let created=0,skipped=0;
+    try{
+      if(file.size>200*1024*1024)throw new Error('El archivo supera 200 MB. Divide el respaldo antes de importarlo.');
+      const parsed=leerRespaldo(await file.text());
+      const plan=await planificarRestauracion(parsed,uid);assertSession(uid);
+      // Validar y convertir todo antes de escribir el primer registro.
+      for(const item of plan){item.data=decodificar(item.data,(s,n)=>new Timestamp(s,n));for(const key of Object.keys(item.data)){if(/html$/i.test(key)&&typeof item.data[key]==='string')item.data[key]=limpiarHtmlApunte(item.data[key]);}valorFirestore(item.data);}
+      const description=parsed.entries.length+' entradas, '+parsed.formulario.length+' fármacos y '+parsed.fotos.length+' adjuntos.';
+      if(!plan.length){message('El respaldo está vacío.');return;}
+      const ok=await askConfirm({title:'Restaurar respaldo',message:description+' Se agregarán solo los registros que faltan; no se reemplazará ni borrará lo existente.'+(parsed.legacy?' Es una copia antigua: solo se puede recuperar la información que contiene.':''),confirmLabel:'Restaurar',danger:false});
+      if(!ok){message('Restauración cancelada.');return;}
+      for(const item of plan){
+        assertSession(uid);message('Restaurando '+(created+skipped+1)+' de '+plan.length+'…');
+        const added=await crearSinReemplazar({projectId:firebaseConfig.projectId,uid,user:auth.currentUser,item:{...item,data:{...item.data,createdAt:item.data.createdAt||Timestamp.now(),updatedAt:item.data.updatedAt||Timestamp.now()}}});
+        if(added)created++;else skipped++;
       }
-      if (!Array.isArray(incoming) || incoming.length === 0) {
-        showBackupMsg("Ese archivo no tiene entradas para importar.", true);
-        return;
-      }
-      const confirmado = await askConfirm({
-        title: "¿Importar esta copia?",
-        message: "Se agregarán " + incoming.length + " entrada(s) al cuaderno. Las que ya existan se omiten.",
-        confirmLabel: "Importar",
-        danger: false
-      });
-      if (!confirmado) return;
-      showBackupMsg("Importando…");
-
-      const validSections = { materias: true, casos: true };
-      const dupKey = (e) => (e.section || "") + "␟" + (e.title || "") + "␟" + (e.date || "");
-      const seenIds = new Set(state.entries.map((e) => e.id).filter(Boolean));
-      const seenKeys = new Set(state.entries.map(dupKey));
-
-      let ok = 0;
-      let skipped = 0;
-      for (const inc of incoming) {
-        if (!inc || !inc.section || !validSections[inc.section]) continue;
-        const isDup = (inc.id && seenIds.has(inc.id)) || seenKeys.has(dupKey(inc));
-        if (isDup) {
-          skipped++;
-          continue;
-        }
-        try {
-          await addDoc(collection(db, "entries"), {
-            uid: currentUid,
-            section: inc.section,
-            title: inc.title || "",
-            meta: inc.meta || "",
-            date: inc.date || todayISO(),
-            body: inc.body || "",
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          });
-          seenKeys.add(dupKey(inc));
-          if (inc.id) seenIds.add(inc.id);
-          ok++;
-        } catch (err) {
-          break;
-        }
-      }
-      showBackupMsg("Se importaron " + ok + " de " + incoming.length + " entrada(s)." + (skipped ? " " + skipped + " omitida(s) por ya existir." : ""));
-    };
-    reader.onerror = () => showBackupMsg("No se pudo leer el archivo.", true);
-    reader.readAsText(file);
+      message('Restauración terminada. '+created+' registros agregados y '+skipped+' conservados porque ya existían.');
+    }catch(err){message('Restauración detenida. '+created+' registros agregados y '+skipped+' existentes conservados. '+(err.message||'Revisa la conexión.')+' Puedes reintentar con el mismo archivo.',true);}finally{busy(false);}
   });
-
-  backupBtns.appendChild(exportBtn);
-  backupBtns.appendChild(importBtn);
-  backupCard.appendChild(backupLbl);
-  backupCard.appendChild(backupDesc);
-  backupCard.appendChild(backupBtns);
-  backupCard.appendChild(importFile);
-  backupCard.appendChild(backupMsg);
-  list.appendChild(backupCard);
+  backupBtns.append(exportBtn,importBtn);backupCard.append(backupLbl,backupDesc,backupBtns,importFile,backupMsg,last);list.appendChild(backupCard);
 
   root.appendChild(list);
 }
@@ -10257,13 +10184,16 @@ els.pageNav.forEach((btn) => {
   btn.addEventListener("click", () => goToPage(btn.getAttribute("data-page")));
 });
 
+els.search.addEventListener("keydown", (e) => { if(e.key === "Escape"){els.search.value="";state.query="";render();} });
 els.search.addEventListener("input", () => {
   state.query = els.search.value;
   render();
 });
 
 els.toggleSidebar.addEventListener("click", () => {
-  els.sidebar.classList.toggle("open");
+  const open = els.sidebar.classList.toggle("open");
+  els.toggleSidebar.setAttribute('aria-expanded', String(open));
+  document.getElementById('sidebarBackdrop').hidden = !open;
 });
 
 /* ---------- Tema claro / oscuro ---------- */
@@ -10637,3 +10567,9 @@ if ("serviceWorker" in navigator) {
     });
   });
 }
+
+function cerrarMenuMovil(){els.sidebar.classList.remove('open');document.getElementById('sidebarBackdrop').hidden=true;els.toggleSidebar.setAttribute('aria-expanded','false');}
+document.getElementById('sidebarBackdrop').addEventListener('click',cerrarMenuMovil);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')cerrarMenuMovil();});
+
+

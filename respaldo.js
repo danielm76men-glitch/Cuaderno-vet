@@ -47,9 +47,11 @@ export function leerRespaldo(texto) {
     });
   }
   const entries = new Set(result.entries.map(e => e.id));
+  const productos = result.formulario.filter(f => f.tipoRegistro === 'productoComercial');
+  const padresFotos = new Set([...entries, ...result.formulario.map(f => f.id), ...productos.map(p => p.origenFarmacoId).filter(Boolean)]);
   const examenes = new Set(result.fotos.filter(f => f.clase === 'examen').map(f => f.id));
   for (const foto of result.fotos) {
-    if (!entries.has(foto.entryId)) throw new Error('Hay un adjunto sin su caso o apunte: ' + foto.id);
+    if (!padresFotos.has(foto.entryId)) throw new Error('Hay un adjunto sin su caso, apunte o producto: ' + foto.id);
     if (foto.clase === 'pagina' && !examenes.has(foto.examenId)) throw new Error('Hay una página sin su examen: ' + foto.id);
     if (foto.clase === 'pagina' && result.fotos.find(f => f.id === foto.examenId).entryId !== foto.entryId) throw new Error('La página y su examen pertenecen a entradas distintas.');
   }
@@ -73,15 +75,28 @@ export async function planificarRestauracion(respaldo, uid) {
       mapas[nombre].set(fila.id, id);
     }
   }
+  // Un producto puede conservar fotos de su ficha anterior, incluso si esa
+  // ficha fue eliminada. Mantener esa identidad también al cambiar de cuenta.
+  for (const fila of respaldo.formulario) {
+    if (fila.tipoRegistro !== 'productoComercial' || !fila.origenFarmacoId || mapas.formulario.has(fila.origenFarmacoId)) continue;
+    const origen = fila.uid || respaldo.sourceUid;
+    const id = origen === uid ? fila.origenFarmacoId : uid + '__r_' + (await huella('formulario|' + (origen || JSON.stringify(fila)) + '|' + fila.origenFarmacoId)).slice(0, 40);
+    mapas.formulario.set(fila.origenFarmacoId, id);
+  }
   const plan = [];
   for (const nombre of COLECCIONES_RESPALDO) {
     for (const fila of respaldo[nombre]) {
       const data = Object.fromEntries(Object.entries(fila).filter(([k]) => !OMITIR.has(k)));
       data.uid = uid;
       if (nombre === 'fotos') {
-        data.entryId = mapas.entries.get(fila.entryId);
+        data.entryId = mapas.entries.get(fila.entryId) || mapas.formulario.get(fila.entryId);
         data.uidEntrada = uid + '__' + data.entryId;
         if (fila.examenId) data.examenId = mapas.fotos.get(fila.examenId);
+        if (fila.productoId) data.productoId = mapas.formulario.get(fila.productoId) || fila.productoId;
+      }
+      if (nombre === 'formulario' && fila.tipoRegistro === 'productoComercial') {
+        if (fila.farmacoId) data.farmacoId = mapas.formulario.get(fila.farmacoId) || '';
+        if (fila.origenFarmacoId) data.origenFarmacoId = mapas.formulario.get(fila.origenFarmacoId);
       }
       if (nombre === 'entries') {
         for (const key of Object.keys(data)) {

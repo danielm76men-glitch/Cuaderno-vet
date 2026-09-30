@@ -1,85 +1,100 @@
+/* Paleta VetDiario: azul intenso, turquesa y coral. */
 :root {
-  --paper: #f3f1e7;
-  --paper-alt: #ece7d7;
-  --paper-raised: #fbfaf4;
-  --ink: #242920;
-  --muted: #6e6858;
-  --line: #d9d2be;
-  --line-soft: #e6e0cd;
-  --teal: #2e6659;
-  --teal-ink: #1d453b;
-  --teal-soft: #e2ece6;
-  --rust: #b14f2c;
-  --rust-ink: #8a3d22;
-  --rust-soft: #f3e2d7;
-  --amber: #a1780f;
-  --amber-soft: #f2e8d3;
-  --amber-ink: #84620c;
+  --paper: #fbf8f2;
+  --paper-alt: #f0eee8;
+  --paper-raised: #ffffff;
+  --ink: #202d50;
+  --muted: #62677a;
+  --line: #dcdfe9;
+  --line-soft: #ebeaf0;
+  --teal: #3455cc;
+  --teal-ink: #2441a6;
+  --teal-soft: #e8edff;
+  --rust: #b83f35;
+  --rust-ink: #973229;
+  --rust-soft: #ffebe7;
+  --amber: #916300;
+  --amber-soft: #fff3cc;
+  --amber-ink: #795200;
   --velo-contador: rgba(0, 0, 0, 0.18);
-  /* Le dice al sistema de que color es esta pagina. Sin esto, los controles
-     que dibuja el navegador —el menu de un desplegable, el calendario de
-     una fecha, las barras de desplazamiento— salen en tema claro aunque el
-     cuaderno este en oscuro. */
+  --fila-grupo: #d4ddff;
+  --fila-subgrupo: #eaf4f2;
+  --shadow: 0 2px 4px rgba(17,45,66,.04), 0 10px 28px rgba(17,45,66,.08);
   color-scheme: light;
-  --shadow: 0 1px 2px rgba(36, 41, 32, 0.06), 0 6px 20px rgba(36, 41, 32, 0.06);
-  --fila-grupo: #bcd4c6;
-  --fila-subgrupo: #e2dcc9;
   --serif: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", monospace;
 }
-
-/* Modo oscuro: grises neutros/fríos. Los valores anteriores (#171813,
-   #9c9686, #38362c) tenían matiz oliva y teñían toda la pantalla de
-   amarillo-verdoso. El modo claro NO se toca: ese ya quedó bien. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --paper: #15161a;
-    --paper-alt: #1b1c21;
-    --paper-raised: #202126;
-    --ink: #ece7d6;
-    --muted: #8f95a3;
-    --line: #2b2d33;
-    --line-soft: #24262b;
-    --teal: #948d78;
-    --teal-ink: #dcd7c7;
-    --teal-soft: #2b2a22;
-    --rust: #e38a5c;
-    --rust-ink: #eeab84;
-    --rust-soft: #3a281d;
-    --amber: #dcb24b;
-    --amber-soft: #362c17;
-    --amber-ink: #dcb24b;
-    --velo-contador: rgba(255, 255, 255, 0.16);
-    color-scheme: dark;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
-    --fila-grupo: #37342b;
-    --fila-subgrupo: #26241f;
+  --paper: #0b1626;
+  --paper-alt: #112136;
+  --paper-raised: #172b42;
+  --ink: #edf6ff;
+  --muted: #afc3d6;
+  --line: #36516b;
+  --line-soft: #263f58;
+  --teal: #91acff;
+  --teal-ink: #c4d1ff;
+  --teal-soft: #25365b;
+  --rust: #ff9a88;
+  --rust-ink: #ffc0b4;
+  --rust-soft: #482c31;
+  --amber: #f8cc65;
+  --amber-soft: #3c3421;
+  --amber-ink: #ffdf94;
+  --velo-contador: rgba(255,255,255,.16);
+  --fila-grupo: #194b43;
+  --fila-subgrupo: #20394f;
+  --shadow: 0 2px 4px rgba(0,0,0,.2), 0 10px 28px rgba(0,0,0,.25);
+  color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
-  --paper: #15161a; --paper-alt: #1b1c21; --paper-raised: #202126;
-  --ink: #ece7d6; --muted: #8f95a3;
-  --line: #2b2d33; --line-soft: #24262b;
-  --teal: #948d78; --teal-ink: #dcd7c7; --teal-soft: #2b2a22;
-  --rust: #e38a5c; --rust-ink: #eeab84; --rust-soft: #3a281d;
-  --amber: #dcb24b; --amber-soft: #362c17; --amber-ink: #dcb24b;
-  --velo-contador: rgba(255, 255, 255, 0.16);
+  --paper: #0b1626;
+  --paper-alt: #112136;
+  --paper-raised: #172b42;
+  --ink: #edf6ff;
+  --muted: #afc3d6;
+  --line: #36516b;
+  --line-soft: #263f58;
+  --teal: #91acff;
+  --teal-ink: #c4d1ff;
+  --teal-soft: #25365b;
+  --rust: #ff9a88;
+  --rust-ink: #ffc0b4;
+  --rust-soft: #482c31;
+  --amber: #f8cc65;
+  --amber-soft: #3c3421;
+  --amber-ink: #ffdf94;
+  --velo-contador: rgba(255,255,255,.16);
+  --fila-grupo: #194b43;
+  --fila-subgrupo: #20394f;
+  --shadow: 0 2px 4px rgba(0,0,0,.2), 0 10px 28px rgba(0,0,0,.25);
   color-scheme: dark;
-  --fila-grupo: #37342b; --fila-subgrupo: #26241f;
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
 }
 :root[data-theme="light"] {
-  --paper: #f3f1e7; --paper-alt: #ece7d7; --paper-raised: #fbfaf4;
-  --ink: #242920; --muted: #6e6858;
-  --line: #d9d2be; --line-soft: #e6e0cd;
-  --teal: #2e6659; --teal-ink: #1d453b; --teal-soft: #e2ece6;
-  --rust: #b14f2c; --rust-ink: #8a3d22; --rust-soft: #f3e2d7;
-  --amber: #a1780f; --amber-soft: #f2e8d3; --amber-ink: #84620c;
+  --paper: #fbf8f2;
+  --paper-alt: #f0eee8;
+  --paper-raised: #ffffff;
+  --ink: #202d50;
+  --muted: #62677a;
+  --line: #dcdfe9;
+  --line-soft: #ebeaf0;
+  --teal: #3455cc;
+  --teal-ink: #2441a6;
+  --teal-soft: #e8edff;
+  --rust: #b83f35;
+  --rust-ink: #973229;
+  --rust-soft: #ffebe7;
+  --amber: #916300;
+  --amber-soft: #fff3cc;
+  --amber-ink: #795200;
   --velo-contador: rgba(0, 0, 0, 0.18);
+  --fila-grupo: #d4ddff;
+  --fila-subgrupo: #eaf4f2;
+  --shadow: 0 2px 4px rgba(17,45,66,.04), 0 10px 28px rgba(17,45,66,.08);
   color-scheme: light;
-  --fila-grupo: #bcd4c6; --fila-subgrupo: #e2dcc9;
-  --shadow: 0 1px 2px rgba(36, 41, 32, 0.06), 0 6px 20px rgba(36, 41, 32, 0.06);
 }
 
 * { box-sizing: border-box; }
@@ -206,9 +221,7 @@ button, input, select, textarea { font-family: inherit; }
 }
 .sidebar-brand .glyph { font-size: 1.2rem; }
 
-/* Logo. Va como <img> del mismo icon.svg que usa la PWA, para no tener dos
-   dibujos que mantener en paralelo. El disco verde ya trae su propio fondo,
-   asi que se ve igual en modo claro y en oscuro. */
+/* Dimensiones base de la marca; identidad.css completa su presentación. */
 .brand-mark { display: block; width: 30px; height: 30px; flex: 0 0 auto; border-radius: 50%; }
 .brand-mark-lg { width: 44px; height: 44px; }
 .auth-card h1 { display: flex; align-items: center; justify-content: center; gap: 10px; }
@@ -2312,21 +2325,41 @@ select optgroup { font-style: normal; font-weight: 700; color: var(--muted); }
   .form-fila.form-fila-contra textarea { font-size: 0.92rem; padding: 8px 9px; }
 }
 
-/* La foto del producto, a la izquierda de sus presentaciones y dentro de la
-   misma tarjeta. minmax(0, 1fr) en la columna de datos: sin eso, una fila
-   de presentación ancha empuja la rejilla y estrecha la foto hasta hacerla
-   inútil. */
-.pres-fila {
+/* Cada foto y sus datos ocupan la misma tarjeta y la misma fila visual. */
+.pres-bloque {
   display: grid; grid-template-columns: 168px minmax(0, 1fr);
-  gap: 18px; align-items: start;
+  column-gap: 18px; align-items: start;
 }
-/* La rejilla de fotos aquí es una columna estrecha: sin esto intentaría
-   meter dos miniaturas de 76 px por fila y quedarían diminutas. */
-.pres-foto .photos-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
-
+.pres-bloque-titulo {
+  grid-column: 1 / -1; color: var(--teal-ink); font-weight: 700;
+  font-size: 0.83rem; margin-bottom: 8px;
+}
+.pres-galeria { grid-column: 1; min-width: 0; }
+.pres-galeria .photos-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+.pres-galeria .photo-add { width: 100%; min-height: 72px; margin-top: 8px; }
+.pres-campos { grid-column: 2; min-width: 0; }
+.pres-bloque > button:last-child { grid-column: 2; justify-self: start; }
+.pres-sin-asignar-lista { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+.pres-sin-asignar-item { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pres-sin-asignar-item img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; cursor: zoom-in; }
+.pres-sin-asignar-item select { max-width: 230px; min-width: 0; }
+.catalogo-productos { margin-top: 18px; }
+.catalogo-producto-nombre { border: 0; padding: 0; background: none; color: var(--teal-ink); font: inherit; font-size: 1.05rem; font-weight: 700; text-align: left; cursor: pointer; }
+.catalogo-composicion { line-height: 1.5; overflow-wrap: anywhere; }
+.catalogo-composicion-editor { grid-column: 2; min-width: 0; }
+.catalogo-componente { padding: 10px 0; border-bottom: 1px solid var(--line-soft); align-items: end; }
+.catalogo-composicion-editor > .field-group { margin-top: 18px; }
+.catalogo-enlace-producto { display: block; width: 100%; text-align: left; padding: 12px; margin-bottom: 8px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--paper-alt); color: var(--ink); font: inherit; cursor: pointer; }
+.catalogo-fotos-anteriores { margin-top: 16px; }
+.catalogo-foto-anterior img { display: block; width: 100%; max-height: 170px; object-fit: contain; cursor: zoom-in; }
+.catalogo-foto-anterior button { width: 100%; margin: 6px 0 12px; font-size: 0.75rem; }
+.catalogo-producto .quick-actions { margin-top: 12px; }
 @media (max-width: 700px) {
-  .pres-fila { grid-template-columns: 1fr; gap: 14px; }
-  .pres-foto .photos-grid { grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); }
+  .pres-bloque { grid-template-columns: 1fr; }
+  .pres-galeria, .pres-campos, .pres-bloque > button:last-child { grid-column: 1; }
+  .catalogo-composicion-editor { grid-column: 1; }
+  .pres-galeria { margin-bottom: 12px; }
+  .pres-galeria .photo-add { max-width: 90px; }
 }
 
 /* ---------- Imagen del apunte: se agarra y se mueve ----------

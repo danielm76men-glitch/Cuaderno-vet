@@ -1,0 +1,74 @@
+/* Cuaderno ilustrado: papel cálido, tinta verde y detalles de cobre. */
+:root, :root[data-theme="light"] {
+ --paper:#f7f3ea; --paper-alt:#eee7d9; --paper-raised:#fffdf7;
+ --ink:#263d37; --muted:#666c60; --line:#d4cdbd; --line-soft:#e8e1d4;
+ --teal:#256451; --teal-ink:#174936; --teal-soft:#e1eee4;
+ --rust:#b24d35; --rust-ink:#963b27; --rust-soft:#f9e8dc;
+ --amber:#8b681d; --amber-ink:#775718; --amber-soft:#f5ebcc;
+ --fila-grupo:#d4e5d7; --fila-subgrupo:#eee4d0;
+ --paper-grain:rgba(100,76,37,.07); --watermark-opacity:.12;
+ --shadow:0 2px 2px rgba(64,48,26,.06),0 9px 22px rgba(64,48,26,.09);
+}
+@media(prefers-color-scheme:dark) {
+ :root:not([data-theme="light"]) {
+ --paper:#172520; --paper-alt:#20332c; --paper-raised:#283c33;
+ --ink:#f3ecda; --muted:#bdc6b7; --line:#506257; --line-soft:#3a4e43;
+ --teal:#a5d8b3; --teal-ink:#d1efd8; --teal-soft:#344e3d;
+ --rust:#efab87; --rust-ink:#f7c6aa; --rust-soft:#513c31;
+ --amber:#ebd294; --amber-ink:#ebd294; --amber-soft:#49412e;
+ --paper-grain:rgba(231,217,183,.06); --watermark-opacity:.13;
+ --fila-grupo:#385343; --fila-subgrupo:#494535;
+ }
+}
+:root[data-theme="dark"] {
+ --paper:#172520; --paper-alt:#20332c; --paper-raised:#283c33;
+ --ink:#f3ecda; --muted:#bdc6b7; --line:#506257; --line-soft:#3a4e43;
+ --teal:#a5d8b3; --teal-ink:#d1efd8; --teal-soft:#344e3d;
+ --rust:#efab87; --rust-ink:#f7c6aa; --rust-soft:#513c31;
+ --amber:#ebd294; --amber-ink:#ebd294; --amber-soft:#49412e;
+ --paper-grain:rgba(231,217,183,.06); --watermark-opacity:.13;
+ --fila-grupo:#385343; --fila-subgrupo:#494535;
+}
+body, .content, .auth-gate { background-color:var(--paper); background-image:radial-gradient(var(--paper-grain) .65px,transparent .8px), repeating-linear-gradient(0deg,transparent 0 5px,var(--paper-grain) 5px 5.2px); background-size:5px 5px,100% 7px; }
+.app-sidebar { background:#1e483d; border-right:1px solid #14372f; box-shadow:4px 0 15px rgba(18,46,37,.12); }
+.sidebar-brand { color:#fff8e9; min-height:76px; border-bottom-color:#446659; letter-spacing:.01em; }
+.app { --franja-sup:76px; }
+.app-sidebar .nav-item { color:#e5eadc; margin:3px 0; }
+.app-sidebar .nav-item:hover { background:#315b4c; }
+.app-sidebar .nav-item[aria-current="true"] { background:#ede4ce; color:#204739; box-shadow:inset 0 1px 0 #fff7e6,0 3px 7px #102a2850; }
+.app-sidebar .nav-item[aria-current="true"]::before { background:#b27845; }
+.app-sidebar .nav-item .count { background:#315b4c; border-color:#537567; color:#f4eddd; }
+.app-sidebar .nav-item[aria-current="true"] .count { background:#ded4bc; color:#204739; }
+.sidebar-foot { border-top-color:#446659; }
+.sidebar-user,.sidebar-identity .sid-title { color:#d3dfd1; }
+.nav-item .ico { display:inline-flex; width:24px; height:24px; align-items:center; }
+.nav-item .ico svg { width:24px; height:24px; }
+.card,.stat-card { border-radius:14px; box-shadow:inset 0 1px 0 #ffffff25,var(--shadow); }
+.stat-card { background:var(--paper-raised); border-top-color:var(--teal); }
+.stat-card:nth-child(2),.stat-card:nth-child(4) { background:var(--paper-raised); border-top-color:#b77d4d; }
+.stat-card:nth-child(3) { border-top-color:#66896b; }
+.stat-card .n { color:var(--teal-ink); }
+.quick-tools { border-left-color:#b77d4d; }
+.auth-card { border-top-color:#b77d4d; }
+.brand-mark { border-radius:12px; box-shadow:0 2px 6px #0b2e2926; }
+.case-notebook { --animal-x:0%; --animal-y:0%; --animal-size:300% 300%; --animal-art:url('animales-grabado.png'); }
+.case-notebook[data-watermark="general"] { --animal-size:100% 100%; --animal-art:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='black' stroke-width='2'%3E%3Cellipse cx='22' cy='37' rx='9' ry='13' transform='rotate(-25 22 37)'/%3E%3Cellipse cx='40' cy='24' rx='9' ry='13'/%3E%3Cellipse cx='62' cy='24' rx='9' ry='13'/%3E%3Cellipse cx='80' cy='37' rx='9' ry='13' transform='rotate(25 80 37)'/%3E%3Cpath d='M30 59c12-27 28-27 41 0 17 24-2 27-20 20-21 9-39 2-21-20Z'/%3E%3C/g%3E%3C/svg%3E"); }
+.species-engraving,.case-notebook .patient-head::after,.case-notebook .caso-cabecera > .card::after { background-image:var(--animal-art); background-size:var(--animal-size); background-position:var(--animal-x) var(--animal-y); background-repeat:no-repeat; mix-blend-mode:multiply; }
+.case-notebook .patient-head { position:relative; isolation:isolate; padding:24px; min-height:170px; border:1px solid var(--line); border-bottom:3px solid #b77d4d; border-radius:14px; background:var(--paper-raised); box-shadow:var(--shadow); overflow:hidden; }
+.case-notebook .patient-head::after { content:''; position:absolute; width:260px; height:260px; right:7%; top:-45px; opacity:var(--watermark-opacity); z-index:-1; pointer-events:none; }
+.case-notebook .caso-cabecera > .card { position:relative; isolation:isolate; }
+.case-notebook .caso-cabecera > .card::after { content:''; position:absolute; width:min(360px,75%); aspect-ratio:1; right:20px; bottom:10px; opacity:var(--watermark-opacity); z-index:-1; pointer-events:none; }
+.case-notebook .patient-avatar { background:var(--teal-soft); border:1px solid var(--line); border-radius:16px; width:78px; height:78px; flex:0 0 78px; box-shadow:inset 0 2px 4px #173b2520; }
+.species-engraving { display:block; width:70px; height:70px; }
+.case-notebook input,.case-notebook select,.case-notebook textarea { background-color:var(--paper-raised); }
+.case-notebook .field-title { background:transparent; }
+@media(max-width:600px) { .case-notebook .patient-head { padding:16px; } .case-notebook .patient-head::after { right:-20px; width:210px; height:210px; } }
+@media print { body,.content { background:#fff!important; } .case-notebook .patient-head::after,.case-notebook .caso-cabecera > .card::after { display:none; } }
+
+
+:root[data-theme="dark"] .species-engraving, :root[data-theme="dark"] .case-notebook .patient-head::after, :root[data-theme="dark"] .case-notebook .caso-cabecera > .card::after { filter:invert(1); mix-blend-mode:screen; }
+.case-notebook .caso-cabecera > .card { overflow:hidden; }
+
+.species-engraving { height:auto; aspect-ratio:var(--animal-ratio,1); max-height:70px; }
+.case-notebook .patient-head::after { height:auto; aspect-ratio:var(--animal-ratio,1); top:0; }
+.case-notebook .caso-cabecera > .card::after { aspect-ratio:var(--animal-ratio,1); }

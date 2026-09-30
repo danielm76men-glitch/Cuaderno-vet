@@ -77,3 +77,14 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 }
 @media print { .sidebar-backdrop { display:none !important; } }
 .catalog-search { flex: 1 1 250px; min-width: 160px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--paper-raised); color: var(--ink); font: inherit; }
+
+/* Identidad visual: el emblema original conserva sus colores y transparencia. */
+.brand-mark { width: 44px; height: 44px; padding: 3px; object-fit: contain; border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px var(--line-soft); }
+.brand-mark-lg { width: 76px; height: 76px; padding: 6px; border-radius: 16px; }
+.boot-gate .brand-mark-boot { width: 124px; height: 124px; padding: 10px; border-radius: 24px; }
+.auth-card { border-radius: 20px; border-top: 4px solid var(--teal); }
+.auth-card h1 { flex-direction: column; gap: 12px; margin-bottom: 10px; }
+.auth-gate, .boot-gate { background: radial-gradient(ellipse at top, var(--teal-soft), transparent 65%), var(--paper); }
+.sidebar-brand { gap: 12px; }
+::selection { background: var(--teal-soft); color: var(--teal-ink); }
+

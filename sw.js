@@ -17,7 +17,7 @@
 
    IMPORTANTE: sube VERSION en cada despliegue. Es la unica linea que hay
    que tocar aqui. */
-const VERSION = "85";
+const VERSION = "89";
 
 const CACHE_SHELL = "vetdiario-shell-v" + VERSION;
 
@@ -40,6 +40,8 @@ const APP_SHELL = [
   "./",
   "./index.html",
   "./app.js",
+  "./catalogo.js",
+  "./catalogo-ui.js",
   "./semilla-formulario.js",
   "./fichas-farmaco.js",
   "./styles.css",
@@ -47,7 +49,11 @@ const APP_SHELL = [
   "./respaldo.js",
   "./firebase-config.js",
   "./manifest.json",
-  "./icon.svg"
+  "./icon.svg",
+  "./logo-vetdiario.png",
+  "./identidad.js",
+  "./identidad.css",
+  "./animales-grabado.png"
 ];
 
 const ORIGEN_LIBS = "https://www.gstatic.com/firebasejs/";
@@ -155,7 +161,7 @@ self.addEventListener("fetch", (event) => {
   const ruta = url.pathname.split("/").pop();
   const esDelShell =
     esNavegacion ||
-    ["", "index.html", "app.js", "semilla-formulario.js", "styles.css", "firebase-config.js", "manifest.json", "icon.svg"].includes(ruta);
+    APP_SHELL.some((asset) => asset === "./" + ruta);
 
   if (!esDelShell) return;
 

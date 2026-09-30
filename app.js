@@ -1,3 +1,6 @@
+import { actualizarMarcaEspecie } from "./identidad.js";
+import { esCombinacion, principiosDe, productosDelCatalogo, resumenComposicion, concentracionParaPauta, termino } from "./catalogo.js";
+import { renderCatalogoComercial, renderProductoComercial } from "./catalogo-ui.js";
 import { COLECCIONES_RESPALDO, crearRespaldo, leerRespaldo, planificarRestauracion, decodificar, crearSinReemplazar, valorFirestore } from "./respaldo.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { SEMILLA_FORMULARIO, AMPLIACION_FORMULARIO } from "./semilla-formulario.js";
@@ -143,6 +146,9 @@ const TITULO_POR_DEFECTO = "Médico Veterinario";
 const state = {
   entries: [],
   formulario: [],
+  catalogo: [],
+  catalogoQuery: "",
+  historialTratamientos: false,
   profile: null,
   page: "dashboard",
   studyTab: "materias",
@@ -675,7 +681,7 @@ async function borrarFotosDeEntrada(entryId) {
   return fotos.length;
 }
 
-async function guardarFoto(entryId, file) {
+async function guardarFoto(entryId, file, datosExtra) {
   const datos = await prepararFotoParaFirestore(file);
   /* Sin esperar al servidor: addDoc no resuelve hasta que la escritura
      se confirma, y sin conexion no resuelve NUNCA. Con await, la miniatura
@@ -689,11 +695,12 @@ async function guardarFoto(entryId, file) {
     nombre: file.name || "foto.jpg",
     datos,
     orden: Date.now(),
+    ...(datosExtra || {}),
     createdAt: serverTimestamp()
   }).catch(function (err) {
     logFoto("no se pudo guardar la foto: " + ((err && err.code) || err));
   });
-  return { id: ref.id, nombre: file.name || "foto.jpg", datos };
+  return { id: ref.id, nombre: file.name || "foto.jpg", datos, ...(datosExtra || {}) };
 }
 
 /* Rescate de la cola vieja. Las fotos que quedaron atrapadas intentando
@@ -3097,7 +3104,8 @@ function buildExamenesSection(entry, statusText, cargarAdjuntos) {
   return wrap;
 }
 
-function buildPhotosSection(entry, statusText, etiqueta, cargarAdjuntos) {
+function buildPhotosSection(entry, statusText, etiqueta, cargarAdjuntos, opciones) {
+  const opts = opciones || {};
   const wrap = document.createElement("div");
   wrap.className = "photos";
 
@@ -3239,7 +3247,8 @@ function buildPhotosSection(entry, statusText, etiqueta, cargarAdjuntos) {
       renderGrid();
 
       try {
-        const guardada = await guardarFoto(entry.id, file);
+        if (opts.antesDeGuardar) opts.antesDeGuardar();
+        const guardada = await guardarFoto(entry.id, file, opts.datosExtra);
         URL.revokeObjectURL(provisional.datos);
         const i = fotos.indexOf(provisional);
         // _pending: sin conexion, Firestore la guarda local y la sincroniza
@@ -3264,6 +3273,7 @@ function buildPhotosSection(entry, statusText, etiqueta, cargarAdjuntos) {
     }
   });
 
+  wrap.agregarFotoExistente = (foto) => { fotos.push(foto); renderGrid(); };
   return wrap;
 }
 
@@ -3572,11 +3582,13 @@ function buildDoseCalculator(context) {
   wrap.className = "calc";
 
   const farmacos = farmacosNormalizados();
+  const productos = catalogoActual();
+  const productosPorNombre = new Map();
 
   const nameField = document.createElement("div");
   nameField.className = "calc-field";
   const nameLabel = document.createElement("label");
-  nameLabel.textContent = "Fármaco";
+  nameLabel.textContent = "Fármaco o producto comercial";
   const nameInput = document.createElement("input");
   nameInput.setAttribute("list", "calcFarmacoList");
   nameInput.placeholder = "Escribe el nombre…";
@@ -3587,6 +3599,13 @@ function buildDoseCalculator(context) {
     const opt = document.createElement("option");
     opt.value = f.nombreGenerico;
     datalist.appendChild(opt);
+  });
+  productos.forEach((p, i) => {
+    const etiqueta = 'Producto: ' + (p.nombreComercial || 'Sin nombre') + ' · ' + resumenComposicion(p) +
+      [p.laboratorio, p.envase].filter(Boolean).map(t => ' · ' + t).join('');
+    const clave = productosPorNombre.has(etiqueta) ? etiqueta + ' · opción ' + (i + 1) : etiqueta;
+    productosPorNombre.set(clave, p);
+    const opt = document.createElement('option'); opt.value = clave; datalist.appendChild(opt);
   });
   nameField.appendChild(nameLabel);
   nameField.appendChild(nameInput);
@@ -3659,7 +3678,7 @@ function buildDoseCalculator(context) {
   presField.className = "calc-field";
   presField.hidden = true;
   const presLabel = document.createElement("label");
-  presLabel.textContent = "Presentación";
+  presLabel.textContent = "Producto y presentación del Catálogo";
   const presSelect = document.createElement("select");
   presField.appendChild(presLabel);
   presField.appendChild(presSelect);
@@ -3751,23 +3770,20 @@ function buildDoseCalculator(context) {
 
   function updatePresField() {
     presSelect.innerHTML = "";
-    const pres = selectedDrug ? selectedDrug.presentaciones.filter((p) => p.concentracion > 0) : [];
+    const pres = selectedDrug ? productos.filter(p => p.farmacoId === selectedDrug.id) : [];
     if (!pres.length) {
       presField.hidden = true;
       return;
     }
     presField.hidden = false;
     const blank=document.createElement('option');blank.value='';blank.textContent='Elige la presentación del producto';presSelect.appendChild(blank);
-    pres.forEach((p, i) => {
+    pres.forEach((p) => {
       const o = document.createElement("option");
-      o.value = String(i);
+      o.value = p.id;
       const via = viaTexto(p.via);
       o.textContent =
-        (p.nombreComercialLocal || "Presentación " + (i + 1)) +
-        " — " +
-        p.concentracion +
-        " " +
-        (p.unidadConc || "") +
+        (p.nombreComercial || "Producto sin nombre") + " — " + resumenComposicion(p) +
+        (p.envase ? ' · ' + p.envase : '') +
         (via ? " · " + via : "");
       presSelect.appendChild(o);
     });
@@ -3795,9 +3811,7 @@ function buildDoseCalculator(context) {
   }
 
   function presentacionElegida() {
-    const pres = selectedDrug ? selectedDrug.presentaciones.filter((p) => p.concentracion > 0) : [];
-    if (!pres.length || presSelect.value === "") return null;
-    return pres[Number(presSelect.value)] || null;
+    return selectedDrug ? productos.find(p => p.farmacoId === selectedDrug.id && p.id === presSelect.value) || null : null;
   }
 
   function showEmpty(text) {
@@ -3871,6 +3885,13 @@ function buildDoseCalculator(context) {
     }
 
     const pauta = pautas[Number(indicacionSelect.value) || 0] || pautas[0];
+
+    if (esCombinacion(selectedDrug) && (principiosDe(selectedDrug).length < 2 ||
+      !(pauta.baseDosis === 'total' || principiosDe(selectedDrug).some(n => pauta.baseDosis === 'componente:' + termino(n))))) {
+      showEmpty('Esta pauta de combinación necesita indicar si la dosis corresponde al total o a un componente. Complétalo en el Vademécum.');
+      result.appendChild(accion('Abrir pauta en el Vademécum', () => { closeCalculatorOverlay(); abrirDestino('farmacos', selectedDrug.id, 'catalogo'); }));
+      return;
+    }
 
     const weight = parseFloat(weightInput.value);
     if (!Number.isFinite(weight) || weight <= 0) {
@@ -3947,15 +3968,20 @@ function buildDoseCalculator(context) {
 
     /* El volumen en mL es el resultado que importa: el error clinico real
        ocurre al convertir los mg a la concentracion del frasco. */
-    const pres = presentacionElegida();
-    const matchingUnit = pres && normalizarBusqueda((pres.unidadConc||'').split('/')[0].trim()) === normalizarBusqueda(massUnit);
-    const matchingRoute = pres && viasDe(pauta.via).some(v => viasDe(pres.via).some(p => normalizarBusqueda(p) === normalizarBusqueda(v)));
-    if (pres && matchingUnit && matchingRoute) {
+    const producto = presentacionElegida();
+    const conversion = producto ? concentracionParaPauta(producto, pauta, selectedDrug) : null;
+    const pres = conversion && !conversion.error ? conversion : null;
+    const baseNombre = pauta.baseDosis === 'total' ? 'Total de la combinación' :
+      (principiosDe(selectedDrug).find(n => 'componente:' + termino(n) === pauta.baseDosis) || principiosDe(selectedDrug)[0] || selectedDrug.nombreGenerico);
+    addLine('Dosis expresada en: ' + baseNombre, 'calc-line-suave');
+    lastTotalLine += ' · Base: ' + baseNombre;
+    if (pres) {
       const concUnidad = pres.unidadConc || "";
       const volUnit = concUnidad.includes("/") ? concUnidad.split("/")[1].trim() : "";
       const volume = totalDose / Number(pres.concentracion);
       const volText = roundNice(volume) + " " + volUnit;
-      addLine("Volumen = " + totalText + " ÷ " + pres.concentracion + " " + concUnidad);
+      addLine('Producto: ' + (producto.nombreComercial || 'Sin nombre') + (producto.laboratorio ? ' · ' + producto.laboratorio : ''), 'calc-line-suave');
+      addLine("Cantidad de producto = " + totalText + " ÷ " + pres.concentracion + " " + concUnidad);
       addLine("= " + volText, "calc-total");
       if (dosisMin !== dosisMax) {
         addLine(
@@ -3968,12 +3994,13 @@ function buildDoseCalculator(context) {
           "calc-line-suave"
         );
       }
-      lastTotalLine += " · Volumen a administrar = " + volText;
+      lastTotalLine += ' · Producto: ' + (producto.nombreComercial || 'Sin nombre') + ' · Concentración usada: ' + pres.concentracion + ' ' + concUnidad + " · Cantidad de producto = " + volText;
     } else {
       addLine(
-        pres ? "No se convierte a volumen: la unidad o vía de esta presentación no coincide con la pauta. Revisa la ficha." : "Selecciona una presentación compatible para convertir la dosis total a volumen o unidades del producto.",
+        conversion?.error || "Selecciona un producto del Catálogo para convertir la dosis a mL o unidades del producto.",
         "calc-line-suave"
       );
+      if (producto) result.appendChild(accion('Revisar producto en el Catálogo', () => { closeCalculatorOverlay(); abrirDestino('farmacos', producto.id, 'productos'); }));
     }
 
     /* Aviso de rango. El resultado NO se oculta: esconderlo empuja a
@@ -4036,10 +4063,12 @@ function buildDoseCalculator(context) {
   }
 
   nameInput.addEventListener("input", () => {
-    selectedDrug = findDrug(nameInput.value);
+    const producto = productosPorNombre.get(nameInput.value);
+    selectedDrug = producto ? farmacos.find(f => f.id === producto.farmacoId) || null : findDrug(nameInput.value);
     updateSpeciesField();
     updateIndicacionField();
     updatePresField();
+    if (producto && selectedDrug) presSelect.value = producto.id;
     actualizarCampoDosis();
     renderResult();
   });
@@ -4094,6 +4123,12 @@ function buildDoseCalculator(context) {
     });
   }
 
+  if (ctx.farmacoId) {
+    selectedDrug = farmacos.find(f => f.id === ctx.farmacoId) || null;
+    nameInput.value = selectedDrug?.nombreGenerico || '';
+    updateSpeciesField(); updateIndicacionField(); updatePresField(); actualizarCampoDosis();
+    if (ctx.productoId) presSelect.value = ctx.productoId;
+  }
   renderResult();
 
   return wrap;
@@ -5141,6 +5176,7 @@ function ponerCaret(nodo, abierto) {
 
 function goToPage(page) {
   state.page = page;
+  state.historialTratamientos = false;
   state.activeId = null;
   state.query = "";
   state.estadoFilter = "";
@@ -5323,6 +5359,7 @@ function render() {
 const ESTADOS_CASO = { abierto: 'Abierto', seguimiento: 'En seguimiento', cerrado: 'Cerrado' };
 function estadoCaso(entry) { return ESTADOS_CASO[entry.estadoCaso] ? entry.estadoCaso : 'abierto'; }
 function abrirDestino(page, id, tab) {
+  state.historialTratamientos = false;
   state.query = '';
   els.search.value = '';
   state.page = page;
@@ -5352,7 +5389,7 @@ function renderDashboardPage(root) {
   const defs = [
     ['Casos abiertos', activos.length, () => {state.estadoFilter='activos'; abrirDestino('patients');}],
     ['Controles hasta hoy', pendientes.length, () => { document.getElementById('controles-inicio').scrollIntoView({block:'start'}); }],
-    ['Fármacos en catálogo', state.formulario.length, () => abrirDestino('farmacos', null, 'catalogo')],
+    ['Fármacos en Vademécum', state.formulario.length, () => abrirDestino('farmacos', null, 'catalogo')],
     ['Apuntes de estudio', entriesForSection('materias').length, () => abrirDestino('study')]
   ];
   defs.forEach(([label, n, fn]) => {
@@ -5390,18 +5427,101 @@ function renderDashboardPage(root) {
   tools.append(intro,buttons); root.appendChild(tools);
 }
 
-function renderFarmacosPage(root) {
-  if(state.activeId) {
-    const item=state.farmacosTab==='historial' ? getMedUsageList().find(f=>f.id===state.activeId) : state.formulario.find(f=>f.id===state.activeId);
-    if(item) { if(state.farmacosTab==='historial') renderFarmacoDetail(root,item); else renderFormularioDetail(root,item); return; }
+function catalogoActual() {
+  return productosDelCatalogo(farmacosNormalizados(), state.catalogo);
+}
+
+function datosProducto(producto) {
+  const datos = Object.fromEntries(Object.entries(producto).filter(([k, v]) => k !== 'id' && !k.startsWith('_') && v !== undefined));
+  return { tipoRegistro: 'productoComercial', ...datos, uid: currentUid };
+}
+
+function guardarProducto(producto, statusText) {
+  const datos = datosProducto(producto);
+  const local = { ...datos, id: producto.id, _pending: true };
+  state.catalogo = state.catalogo.filter(p => p.id !== producto.id).concat(local);
+  scheduleSave('formulario', producto.id, datos, statusText, { createIfMissing: true });
+}
+
+function crearProducto(farmacoId) {
+  const f = farmacosNormalizados().find(f => f.id === farmacoId);
+  const p = {
+    id: doc(collection(db, 'formulario')).id, tipoRegistro: 'productoComercial',
+    farmacoId: farmacoId || '', nombreComercial: '', laboratorio: '', forma: '', envase: '', via: [],
+    composicion: f ? principiosDe(f).map(nombre => ({ nombre, concentracion: null, unidadConc: 'mg/mL' })) : []
+  };
+  guardarProducto(p);
+  abrirDestino('farmacos', p.id, 'productos');
+}
+
+function buildFotosProducto(producto, statusText) {
+  const wrap = document.createElement('div');
+  const entryId = producto.origenFarmacoId || producto.id;
+  const carga = fotosDeEntrada(entryId).then(repartirAdjuntos);
+  const mias = foto => foto.productoId === producto.id ||
+    (!foto.productoId && producto.origenPresentacionId && foto.presentacionId === producto.origenPresentacionId);
+  const galeria = buildPhotosSection({ id: entryId }, statusText, 'Fotos de esta presentación',
+    carga.then(r => ({ ...r, fotos: r.fotos.filter(mias) })),
+    { datosExtra: { productoId: producto.id }, antesDeGuardar: () => guardarProducto(producto, statusText) });
+  wrap.appendChild(galeria);
+  // Las fotografías previas sin vínculo se asignan explícitamente; nunca por posición.
+  if (producto.origenFarmacoId) {
+    const antiguas = document.createElement('div'); antiguas.className = 'catalogo-fotos-anteriores'; wrap.appendChild(antiguas);
+    carga.then(r => {
+      const productos = catalogoActual().concat(state.catalogo.filter(p => p.archivado));
+      const huerfanas = r.fotos.filter(f => !mias(f) && !productos.some(p =>
+        f.productoId ? p.id === f.productoId : p.origenFarmacoId === entryId && p.origenPresentacionId === f.presentacionId));
+      if (!huerfanas.length) return;
+      const nota = document.createElement('p'); nota.className = 'form-vacio'; nota.textContent = 'Fotos anteriores sin asignar. Vincula solo las que correspondan a este producto.'; antiguas.appendChild(nota);
+      huerfanas.forEach(foto => {
+        const item = document.createElement('div'); item.className = 'catalogo-foto-anterior';
+        const img = document.createElement('img'); img.src = foto.datos; img.alt = foto.nombre || 'Foto anterior';
+        img.addEventListener('click', () => abrirVisorFoto(huerfanas, huerfanas.indexOf(foto)));
+        const asignar = accion('Usar en este producto', () => {
+          guardarProducto(producto, statusText);
+          foto.productoId = producto.id;
+          scheduleSave('fotos', foto.id, { productoId: producto.id }, statusText);
+          galeria.agregarFotoExistente(foto); item.remove();
+        });
+        item.append(img, asignar); antiguas.appendChild(item);
+      });
+    }).catch(() => {}); // La galería muestra el error de la misma consulta.
   }
-  root.appendChild(pageHead('Fármacos','Consulta el catálogo o revisa lo registrado en tus casos.'));
-  const tabs=document.createElement('div'); tabs.className='subtabs'; tabs.setAttribute('aria-label','Vistas de fármacos');
-  [['catalogo','Catálogo'],['historial','Historial de uso']].forEach(([id,label])=>{
-    const b=accion(label,()=>{state.farmacosTab=id;state.activeId=null;render();},'subtab');
-    b.setAttribute('aria-pressed',String(state.farmacosTab===id)); b.setAttribute('aria-selected',String(state.farmacosTab===id)); tabs.appendChild(b);
+  return wrap;
+}
+
+function catalogoAPI() {
+  return {
+    farmacos: farmacosNormalizados(), productos: catalogoActual(), archivados: state.catalogo.filter(p => p.archivado), query: state.catalogoQuery,
+    cambiarQuery: q => { state.catalogoQuery = q; }, crear: crearProducto, guardar: guardarProducto,
+    abrirProducto: id => abrirDestino('farmacos', id, 'productos'),
+    abrirFarmaco: id => abrirDestino('farmacos', id, 'catalogo'),
+    volver: () => abrirDestino('farmacos', null, 'productos'),
+    calcular: p => openCalculatorOverlay({ farmacoId: p.farmacoId, productoId: p.id }),
+    fotos: buildFotosProducto,
+    vias: (seleccion, fn) => campoFormulario('Vías del producto', buildViasCheckboxes(seleccion, fn)),
+    confirmarArchivo: () => askConfirm({ title: '¿Archivar producto?', message: 'Dejará de aparecer en el catálogo y la calculadora. Sus fotos y los registros clínicos se conservan.', confirmLabel: 'Archivar' })
+  };
+}
+
+function renderFarmacosPage(root) {
+  if (!['catalogo', 'productos'].includes(state.farmacosTab)) state.farmacosTab = 'catalogo';
+  if (state.activeId) {
+    const item = state.farmacosTab === 'productos' ? catalogoActual().concat(state.catalogo.filter(p => p.archivado)).find(p => p.id === state.activeId) : state.formulario.find(f => f.id === state.activeId);
+    if (item) {
+      if (state.farmacosTab === 'productos') { mountedDetailId = item.id; renderProductoComercial(root, item, catalogoAPI()); }
+      else renderFormularioDetail(root, item);
+      return;
+    }
+  }
+  root.appendChild(pageHead('Fármacos', 'Dosis de referencia y productos comerciales conectados a la calculadora.'));
+  const tabs = document.createElement('div'); tabs.className = 'subtabs'; tabs.setAttribute('aria-label', 'Vistas de fármacos');
+  [['catalogo', 'Vademécum'], ['productos', 'Catálogo comercial']].forEach(([id, label]) => {
+    const b = accion(label, () => { state.farmacosTab = id; state.activeId = null; render(); }, 'subtab');
+    b.setAttribute('aria-pressed', String(state.farmacosTab === id)); b.setAttribute('aria-selected', String(state.farmacosTab === id)); tabs.appendChild(b);
   }); root.appendChild(tabs);
-  if(state.farmacosTab==='historial') renderHistorialFarmacos(root); else renderFormularioTab(root);
+  if (state.farmacosTab === 'productos') renderCatalogoComercial(root, catalogoAPI());
+  else renderFormularioTab(root);
 }
 
 function renderGlobalSearch(root) {
@@ -5411,6 +5531,7 @@ function renderGlobalSearch(root) {
   const groups=[
     ['Pacientes y casos',entriesForSection('casos').filter(e=>matchesQuery(e,q)), e=>e.meta||e.title||'Sin nombre', e=>[e.especie,e.title,ESTADOS_CASO[estadoCaso(e)]].filter(Boolean).join(' · '),e=>abrirDestino('patients',e.id)],
     ['Fármacos',state.formulario.filter(f=>matchesFormularioQuery(f,q)),f=>farmacoNormalizado(f).nombreGenerico||'Sin nombre',f=>farmacoNormalizado(f).familia||'Sin familia',f=>abrirDestino('farmacos',f.id,'catalogo')],
+    ['Productos comerciales',catalogoActual().filter(p=>termino([p.nombreComercial,p.laboratorio,resumenComposicion(p)].join(' ')).includes(termino(q))),p=>p.nombreComercial||'Producto sin nombre',p=>resumenComposicion(p),p=>abrirDestino('farmacos',p.id,'productos')],
     ['Apuntes',entriesForSection('materias').filter(e=>incluyeNormalizado([e.title,e.body].join(' '),q)),e=>e.title||'Sin título',e=>(e.body||'').slice(0,140),e=>abrirDestino('study',e.id)]
   ];
   let total=0;
@@ -5776,6 +5897,12 @@ function buildPatientRow(entry, compact) {
 }
 
 function renderPatientsPage(root) {
+  if (state.historialTratamientos) {
+    root.appendChild(backLink('Pacientes', () => { state.historialTratamientos = false; state.activeId = null; render(); }));
+    root.appendChild(pageHead('Historial de tratamientos', 'Fármacos registrados en los casos clínicos.'));
+    renderHistorialFarmacos(root);
+    return;
+  }
   const active = state.activeId ? state.entries.find((e) => e.id === state.activeId && e.section === "casos") : null;
   if (active) {
     renderPatientDetail(root, active);
@@ -5783,6 +5910,7 @@ function renderPatientsPage(root) {
   }
 
   const head = pageHead("Pacientes", "Casos clínicos registrados.");
+  head.appendChild(accion('Historial de tratamientos', () => { state.historialTratamientos = true; state.activeId = null; render(); }));
   const newBtn = document.createElement("button");
   newBtn.type = "button";
   newBtn.className = "btn-primary";
@@ -6164,6 +6292,8 @@ async function imprimirCaso(entry, boton) {
 }
 
 function renderPatientDetail(root, entry) {
+  root.classList.add("case-notebook");
+  actualizarMarcaEspecie(root, entry.especie);
   mountedDetailId = entry.id;
   root.appendChild(
     backLink("Pacientes", () => {
@@ -6197,7 +6327,12 @@ function renderPatientDetail(root, entry) {
   avatar.className = "patient-avatar";
   function pintarAvatar(especie, nombre) {
     const icono = iconoDeEspecie(especie, nombre);
-    avatar.textContent = icono;
+    avatar.textContent = "";
+    avatar.setAttribute("aria-label", especie || "Paciente");
+    const dibujo = document.createElement("span");
+    dibujo.className = "species-engraving";
+    dibujo.setAttribute("aria-hidden", "true");
+    avatar.appendChild(dibujo);
     // El emoji necesita mas cuerpo que una letra para ocupar el mismo circulo.
     avatar.classList.toggle("patient-avatar-icono", icono.length > 1 || /\p{Emoji}/u.test(icono));
   }
@@ -6212,7 +6347,7 @@ function renderPatientDetail(root, entry) {
   nameInput.placeholder = "Nombre del paciente";
   nameInput.value = entry.meta || "";
   nameInput.addEventListener("input", () => {
-    avatar.textContent = (nameInput.value || "?").trim().charAt(0).toUpperCase() || "?";
+    pintarAvatar(entry.especie, nameInput.value);
     save("meta", nameInput.value);
   });
   const tag = document.createElement("span");
@@ -6236,6 +6371,7 @@ function renderPatientDetail(root, entry) {
       "Especie, raza y peso sin especificar";
     // El icono cambia con la especie en el momento, sin recargar.
     pintarAvatar(speciesSelect.value, nameInput.value);
+    actualizarMarcaEspecie(root, speciesSelect.value);
     if (typeof actualizarHato === "function") actualizarHato(speciesSelect.value);
   }
   sub.textContent =
@@ -6863,7 +6999,7 @@ function escapeHtml(str) {
 
 function renderFarmacoDetail(root, item) {
   root.appendChild(
-    backLink("Fármacos", () => {
+    backLink("Historial de tratamientos", () => {
       state.activeId = null;
       render();
     })
@@ -6912,6 +7048,7 @@ function renderFarmacoDetail(root, item) {
   goBtn.style.marginTop = "16px";
   goBtn.textContent = "Ver caso clínico: " + (item.caseTitle || item.paciente || "(sin título)") + " →";
   goBtn.addEventListener("click", () => {
+    state.historialTratamientos = false;
     state.page = "patients";
     state.activeId = item.entryId;
     render();
@@ -7248,6 +7385,8 @@ function farmacoNormalizado(f) {
     id: f.id,
     uid: f.uid,
     nombreGenerico: f.nombreGenerico || f.nombre || "",
+    esCombinacion: esCombinacion(f),
+    principiosActivos: principiosDe(f),
     /* Que es y para que sirve, en una o dos lineas. Lo carga
        fichas-farmaco.js y se puede reescribir a mano en la ficha. */
     descripcion: f.descripcion || "",
@@ -8438,6 +8577,10 @@ function buildFormularioTable(list, withActions, forzarAbierto) {
         render();
       });
       const delBtn = botonQuitar("Eliminar", async () => {
+        if (catalogoActual().some(p => p.farmacoId === far.id)) {
+          alert('Esta ficha tiene productos vinculados. Reasígnalos o archívalos en el Catálogo antes de eliminarla.');
+          return;
+        }
         const ok = await askConfirm({
           title: "¿Eliminar del formulario?",
           message: "Se quitará “" + (far.nombreGenerico || "este fármaco") + "” del formulario de referencia.",
@@ -8899,7 +9042,7 @@ function renderFormularioTab(root) {
   const cardHead = document.createElement("div");
   cardHead.className = "card-head";
   const cardTitle = document.createElement("h2");
-  cardTitle.textContent = "Catálogo de fármacos";
+  cardTitle.textContent = "Vademécum";
   const addBtn = document.createElement("button");
   addBtn.type = "button";
   addBtn.className = "btn-primary";
@@ -8922,12 +9065,12 @@ function renderFormularioTab(root) {
 
   const filterRow = document.createElement("div");
   filterRow.className = "form-filtros";
-  const localSearch=document.createElement('input');localSearch.type='search';localSearch.className='catalog-search';localSearch.placeholder='Buscar dentro del catálogo…';localSearch.setAttribute('aria-label','Buscar dentro del catálogo');localSearch.value=state.formularioQuery;
+  const localSearch=document.createElement('input');localSearch.type='search';localSearch.className='catalog-search';localSearch.placeholder='Buscar en el Vademécum…';localSearch.setAttribute('aria-label','Buscar en el Vademécum');localSearch.value=state.formularioQuery;
   localSearch.addEventListener('input',()=>{state.formularioQuery=localSearch.value;pintarLista();});filterRow.appendChild(localSearch);
 
   const especieSelect = selectDe(especiesDelFormulario(), state.formularioEspecieFilter, "Todas las especies");
   especieSelect.className = "btn-secondary";
-  especieSelect.setAttribute("aria-label", "Especie del catálogo");
+  especieSelect.setAttribute("aria-label", "Especie del Vademécum");
   especieSelect.addEventListener("change", () => {
     state.formularioEspecieFilter = especieSelect.value;
     render();
@@ -9219,12 +9362,20 @@ function buildMantenimientoFormulario() {
    por especie con su tiempo de retiro dentro, verificacion y, al final,
    las contraindicaciones en rojo. */
 
+function rellenarBaseDosis(select, farmaco, valor) {
+  select.replaceChildren();
+  const opciones = esCombinacion(farmaco) ? [['', 'Elige según la fuente…'], ['total', 'Total de la combinación']] : [];
+  principiosDe(farmaco).forEach(nombre => opciones.push(['componente:' + termino(nombre), nombre]));
+  opciones.forEach(([id, label]) => { const o = document.createElement('option'); o.value = id; o.textContent = label; select.appendChild(o); });
+  select.value = valor || (esCombinacion(farmaco) ? '' : opciones[0]?.[0] || '');
+}
+
 function renderFormularioDetail(root, item) {
   mountedDetailId = item.id;
   const far = farmacoNormalizado(item);
 
   root.appendChild(
-    backLink("Catálogo de fármacos", () => {
+    backLink("Vademécum", () => {
       state.activeId = null;
       render();
     })
@@ -9237,6 +9388,8 @@ function renderFormularioDetail(root, item) {
   const statusText = status.querySelector(".statusText");
 
   function save(campo, valor) {
+    far[campo] = valor;
+    state.formulario = state.formulario.map(f => f.id === far.id ? { ...f, [campo]: valor } : f);
     scheduleSave("formulario", far.id, { [campo]: valor }, statusText);
   }
 
@@ -9268,6 +9421,26 @@ function renderFormularioDetail(root, item) {
 
   root.appendChild(tag);
   root.appendChild(titleInput);
+
+  const identidadClinica = document.createElement('div'); identidadClinica.className = 'card card-pad';
+  const tipo = document.createElement('select');
+  [['simple', 'Un principio activo'], ['combinacion', 'Combinación de principios activos']].forEach(([v, t]) => {
+    const o = document.createElement('option'); o.value = v; o.textContent = t; tipo.appendChild(o);
+  });
+  tipo.value = esCombinacion(far) ? 'combinacion' : 'simple';
+  const principios = inputTexto(principiosDe(far).join(', '), 'Principios activos separados por comas');
+  identidadClinica.append(campoFormulario('Tipo de ficha', tipo), campoFormulario('Principios activos', principios));
+  const notaPrincipios = document.createElement('p'); notaPrincipios.className = 'quiet-copy';
+  notaPrincipios.textContent = 'Una combinación tiene sus propias pautas. En cada dosis indica si se refiere al total o a un componente.';
+  identidadClinica.appendChild(notaPrincipios); root.appendChild(identidadClinica);
+  function actualizarIdentidadClinica() {
+    save('esCombinacion', tipo.value === 'combinacion');
+    save('principiosActivos', principios.value.split(',').map(n => n.trim()).filter(Boolean));
+    pintarDosis();
+    rellenarBaseDosis(altaBase, far, altaBase.value);
+  }
+  tipo.addEventListener('change', actualizarIdentidadClinica);
+  principios.addEventListener('change', actualizarIdentidadClinica);
 
   /* La descripcion va ANTES de la familia: es lo primero que uno quiere
      leer al abrir un farmaco que no maneja a diario. Crece sola porque
@@ -9410,103 +9583,25 @@ function renderFormularioDetail(root, item) {
   momWrap.appendChild(momNota);
   root.appendChild(momWrap);
 
-  /* --- 1. Presentaciones, con la foto del producto al lado ---
-
-     La foto va DENTRO de esta tarjeta y no en una suya: la foto del
-     frasco y lo que dice su etiqueta son el mismo dato mirado de dos
-     maneras, y separarlas obligaba a subir y bajar para cruzarlas.
-
-     La seccion de fotos se reutiliza tal cual de los casos clinicos:
-     solo necesitaba un id, y la coleccion "fotos" guarda
-     uidEntrada = uid + id, sirva ese id para un caso o para un farmaco.
-     Lo unico que cambia es la etiqueta, porque aqui no se guardan
-     radiografias sino la caja del producto.
-
-     Plegada de entrada: la mayoria de las veces se abre la ficha para
-     mirar una dosis, no la concentracion del frasco. */
-  const presPlegable = tarjetaPlegable("Presentaciones", { abierta: false });
-  const presCard = presPlegable.card;
-
-  const presFila = document.createElement("div");
-  presFila.className = "pres-fila";
-
-  const fotoCol = document.createElement("div");
-  fotoCol.className = "pres-foto";
-  fotoCol.appendChild(buildPhotosSection(far, statusText, "Foto del producto"));
-  presFila.appendChild(fotoCol);
-
-  const presCol = document.createElement("div");
-  presCol.className = "pres-datos";
-  presFila.appendChild(presCol);
-  presPlegable.cuerpo.appendChild(presFila);
-
-  const presLista = document.createElement("div");
-  presCol.appendChild(presLista);
-
-  function pintarPresentaciones() {
-    presLista.innerHTML = "";
-    presPlegable.setContador(
-      far.presentaciones.length
-        ? far.presentaciones.length + (far.presentaciones.length === 1 ? " presentación" : " presentaciones")
-        : "ninguna"
-    );
-    if (!far.presentaciones.length) {
-      const vacio = document.createElement("p");
-      vacio.className = "form-vacio";
-      vacio.textContent = "Sin presentaciones. La calculadora necesita al menos una para dar el volumen en mL.";
-      presLista.appendChild(vacio);
-    }
-    far.presentaciones.forEach((p, i) => {
-      const fila = document.createElement("div");
-      fila.className = "form-fila-bloque";
-      const campos = document.createElement("div");
-      campos.className = "field-row";
-
-      function editar(campo, valor) {
-        const copia = far.presentaciones.map((x, j) => (j === i ? { ...x, [campo]: valor } : x));
-        guardarLista("presentaciones", copia);
-      }
-
-      const conc = inputNumero(p.concentracion, "Ej. 50");
-      conc.addEventListener("input", () => editar("concentracion", conc.value === "" ? null : Number(conc.value)));
-      campos.appendChild(campoFormulario("Concentración", conc));
-
-      const unidad = inputTexto(p.unidadConc, "mg/mL, mg/tableta");
-      unidad.addEventListener("input", () => editar("unidadConc", unidad.value));
-      campos.appendChild(campoFormulario("Unidad", unidad));
-
-      const via = buildViasCheckboxes(p.via, (lista) => editar("via", lista));
-      campos.appendChild(campoFormulario("Vía(s)", via));
-
-      const comercial = inputTexto(p.nombreComercialLocal, "Nombre comercial local");
-      comercial.addEventListener("input", () => editar("nombreComercialLocal", comercial.value));
-      campos.appendChild(campoFormulario("Producto local", comercial));
-
-      fila.appendChild(campos);
-      fila.appendChild(
-        botonQuitar("Quitar presentación", () => {
-          guardarLista("presentaciones", far.presentaciones.filter((_, j) => j !== i));
-          pintarPresentaciones();
-        })
-      );
-      presLista.appendChild(fila);
-    });
+  const productosCard = document.createElement('div');
+  productosCard.className = 'card card-pad';
+  productosCard.appendChild(subtituloModulo('Productos comerciales vinculados'));
+  const productos = catalogoActual().filter(p => p.farmacoId === far.id);
+  if (!productos.length) {
+    const nota = document.createElement('p'); nota.className = 'quiet-copy';
+    nota.textContent = 'Las fotos, concentraciones y envases se registran en el Catálogo comercial.';
+    productosCard.appendChild(nota);
   }
-  pintarPresentaciones();
-
-  const addPres = document.createElement("button");
-  addPres.type = "button";
-  addPres.className = "btn-secondary";
-  addPres.textContent = "+ Agregar presentación";
-  addPres.addEventListener("click", () => {
-    guardarLista(
-      "presentaciones",
-      far.presentaciones.concat({ concentracion: null, unidadConc: "mg/mL", via: [], nombreComercialLocal: "" })
-    );
-    pintarPresentaciones();
-  });
-  presCol.appendChild(addPres);
-  root.appendChild(presCard);
+  productos.forEach(p => productosCard.appendChild(accion(
+    (p.nombreComercial || 'Producto sin nombre') + (p.laboratorio ? ' · ' + p.laboratorio : ''),
+    () => abrirDestino('farmacos', p.id, 'productos'), 'catalogo-enlace-producto'
+  )));
+  const productosAcciones = document.createElement('div'); productosAcciones.className = 'quick-actions';
+  productosAcciones.append(
+    accion('+ Agregar producto vinculado', () => crearProducto(far.id)),
+    accion('Calcular dosis', () => openCalculatorOverlay({ farmacoId: far.id }), 'btn-primary')
+  );
+  productosCard.appendChild(productosAcciones); root.appendChild(productosCard);
 
   /* --- 3. Dosis agrupadas por especie --- */
   const dosisCard = document.createElement("div");
@@ -9578,6 +9673,11 @@ function renderFormularioDetail(root, item) {
     const uni = inputTexto(d.unidad, "mg/kg, UI/kg");
     uni.addEventListener("input", () => editar("unidad", uni.value));
     fila2.appendChild(campoFormulario("Unidad", uni));
+
+    const baseDosis = document.createElement('select');
+    rellenarBaseDosis(baseDosis, far, d.baseDosis);
+    baseDosis.addEventListener('change', () => editar('baseDosis', baseDosis.value));
+    fila2.appendChild(campoFormulario('Dosis expresada en', baseDosis));
 
     const frec = inputNumero(d.frecuenciaH, "Ej. 12");
     frec.addEventListener("input", () => editar("frecuenciaH", frec.value === "" ? null : Number(frec.value)));
@@ -9734,6 +9834,9 @@ function renderFormularioDetail(root, item) {
   altaFila.appendChild(campoFormulario("Dosis máx.", altaMax));
   const altaUnidad = inputTexto("mg/kg", "mg/kg");
   altaFila.appendChild(campoFormulario("Unidad", altaUnidad));
+  const altaBase = document.createElement('select');
+  rellenarBaseDosis(altaBase, far, '');
+  altaFila.appendChild(campoFormulario('Dosis expresada en', altaBase));
   let altaVias = [];
   const altaVia = buildViasCheckboxes([], (lista) => {
     altaVias = lista;
@@ -9764,6 +9867,7 @@ function renderFormularioDetail(root, item) {
     if (!altaUnidad.value.trim()) faltan.push("unidad");
     if (!altaVias.length) faltan.push("vía");
     if (!altaFuente.value.trim()) faltan.push("fuente");
+    if (esCombinacion(far) && !altaBase.value) faltan.push('componente o total al que se refiere la dosis');
 
     altaFuente.classList.toggle("campo-invalido", !altaFuente.value.trim());
     if (faltan.length) {
@@ -9782,6 +9886,7 @@ function renderFormularioDetail(root, item) {
         dosisMin: Number(altaMin.value),
         dosisMax: max,
         unidad: altaUnidad.value.trim(),
+        baseDosis: altaBase.value,
         via: altaVias,
         frecuenciaH: null,
         duracionMaxDias: null,
@@ -9977,6 +10082,10 @@ function renderFormularioDetail(root, item) {
   del.type = "button";
   del.textContent = "Eliminar entrada";
   del.addEventListener("click", async () => {
+    if (catalogoActual().some(p => p.farmacoId === far.id)) {
+      alert('Esta ficha tiene productos vinculados. Reasígnalos o archívalos en el Catálogo antes de eliminarla.');
+      return;
+    }
     const ok = await askConfirm({
       title: "¿Eliminar del formulario?",
       message: "Se borrará “" + (far.nombreGenerico || "este fármaco") + "” del formulario de referencia. No se puede deshacer.",
@@ -10397,10 +10506,12 @@ function subscribeFormulario() {
   unsubscribeFormulario = onSnapshot(
     q,
     (snapshot) => {
-      state.formulario = snapshot.docs.map((d) => {
+      const registros = snapshot.docs.map((d) => {
         const data = d.data({ serverTimestamps: "estimate" });
         return { id: d.id, ...data, _pending: d.metadata.hasPendingWrites };
       });
+      state.formulario = registros.filter(f => f.tipoRegistro !== 'productoComercial');
+      state.catalogo = registros.filter(f => f.tipoRegistro === 'productoComercial');
       renderDesdeSnapshot();
     },
     (err) => {
@@ -10537,6 +10648,7 @@ onAuthStateChanged(auth, (user) => {
     }
     state.entries = [];
     state.formulario = [];
+    state.catalogo = [];
     state.profile = null;
     state.ready = false;
 

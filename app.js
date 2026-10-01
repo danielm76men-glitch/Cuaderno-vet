@@ -1,6 +1,7 @@
 import { actualizarMarcaEspecie } from "./identidad.js";
 import { esCombinacion, principiosDe, productosDelCatalogo, resumenComposicion, concentracionParaPauta, termino } from "./catalogo.js";
 import { renderCatalogoComercial, renderProductoComercial } from "./catalogo-ui.js";
+import { incluirFarcovet } from "./farcovet-catalogo.js";
 import { COLECCIONES_RESPALDO, crearRespaldo, leerRespaldo, planificarRestauracion, decodificar, crearSinReemplazar, valorFirestore } from "./respaldo.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { SEMILLA_FORMULARIO, AMPLIACION_FORMULARIO } from "./semilla-formulario.js";
@@ -3631,6 +3632,13 @@ function buildDoseCalculator(context) {
   const indicacionSelect = document.createElement("select");
   indicacionField.appendChild(indicacionLabel);
   indicacionField.appendChild(indicacionSelect);
+  const pautaDetalles = document.createElement('details');
+  pautaDetalles.className = 'calc-pauta-detalles';
+  const pautaResumen = document.createElement('summary');
+  pautaResumen.textContent = 'Ver indicación y detalles de la pauta';
+  const pautaTexto = document.createElement('p');
+  pautaDetalles.append(pautaResumen, pautaTexto);
+  indicacionField.appendChild(pautaDetalles);
 
   /* Dosis a usar. Antes la calculadora imponía el punto medio del rango, y
      eso volvía inútil el aviso de "fuera de rango": el punto medio de un
@@ -3751,14 +3759,12 @@ function buildDoseCalculator(context) {
       return;
     }
     indicacionField.hidden = false;
-    indicacionLabel.textContent = pautas.length > 1 ? "Indicación / pauta" : "Indicación";
+    indicacionLabel.textContent = "Dosis / rango";
     pautas.forEach((d, i) => {
       const o = document.createElement("option");
       o.value = String(i);
       const via = viaTexto(d.via);
       o.textContent =
-        (d.indicacion || "Pauta " + (i + 1)) +
-        " — " +
         d.dosisMin +
         (d.dosisMax !== d.dosisMin ? "–" + d.dosisMax : "") +
         " " +
@@ -3794,6 +3800,9 @@ function buildDoseCalculator(context) {
   function actualizarCampoDosis() {
     const pautas = dosisUtilizables(selectedDrug, speciesSelect.value);
     const pauta = pautas[Number(indicacionSelect.value) || 0] || pautas[0];
+    pautaDetalles.open = false;
+    pautaTexto.textContent = pauta ? [pauta.indicacion, pauta.frecuenciaH ? 'Frecuencia: cada '+pauta.frecuenciaH+' h' : '', pauta.duracionMaxDias ? 'Duración máxima: '+pauta.duracionMaxDias+' días' : '', pauta.fuente ? 'Fuente: '+pauta.fuente : ''].filter(Boolean).join(' · ') : '';
+    pautaDetalles.hidden = !pautaTexto.textContent;
     if (!pauta) {
       dosisField.hidden = true;
       return;
@@ -4031,7 +4040,7 @@ function buildDoseCalculator(context) {
       result.appendChild(extra);
     }
 
-    if (pauta.indicacion) addLine("Indicación: " + pauta.indicacion, "calc-line-suave");
+    // La indicación se consulta en el desplegable junto a la pauta.
     const viasPauta = viaTexto(pauta.via);
     if (viasPauta) addLine("Vía: " + viasPauta, "calc-line-suave");
     if (pauta.frecuenciaH) {
@@ -5428,7 +5437,8 @@ function renderDashboardPage(root) {
 }
 
 function catalogoActual() {
-  return productosDelCatalogo(farmacosNormalizados(), state.catalogo);
+  const farmacos = farmacosNormalizados();
+  return productosDelCatalogo(farmacos, incluirFarcovet(farmacos, state.catalogo));
 }
 
 function datosProducto(producto) {
@@ -9523,7 +9533,7 @@ function renderFormularioDetail(root, item) {
   grupoSelect.className = "input-grupo";
   const autoOpt = document.createElement("option");
   autoOpt.value = "";
-  autoOpt.textContent = "Automático (" + grupoDeFarmaco({ familia: far.familia }) + ")";
+  autoOpt.textContent = grupoDeFarmaco({ familia: far.familia });
   grupoSelect.appendChild(autoOpt);
   nombresDeGrupos().forEach(function (n) {
     const o = document.createElement("option");

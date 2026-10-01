@@ -2,6 +2,20 @@
 
 Cuaderno clínico y de estudio veterinario con Firebase, guardado automático y soporte sin conexión.
 
+## Presentaciones Farcovet 2026 — incorporadas el 30 de septiembre de 2026
+
+El Catálogo comercial incluye 107 productos y variantes de concentración procedentes de 134 fichas de las páginas 7–41 del vademécum aportado (96 denominaciones antes de separar variantes). Incluye medicamentos, suplementos y productos dermatológicos y de higiene de esas secciones. Los alimentos de las páginas posteriores no se incorporan como fármacos.
+
+Cada presentación contiene la fotografía original, envases disponibles, composición publicada, especies, vías identificadas y las fichas completas con sus páginas de origen. Las concentraciones diferentes tienen registros separados; los tamaños de envase con la misma fórmula se reúnen en su presentación. Los productos repetidos conservan todas sus fichas de origen en una sola entrada. Las omisiones y discrepancias se señalan expresamente. Las dosis textuales del catálogo no se convierten en pautas del Vademécum.
+
+Los datos se incluyen con los archivos del cuaderno mediante `farcovet-datos.js`, `farcovet-catalogo.js` y `assets/farcovet-2026/`. El PDF completo también se conserva en esa carpeta. No se requiere una carga manual de semilla: aparecen al abrir esta versión. Las fichas existentes se vinculan únicamente cuando coinciden todos los principios activos; los demás productos pueden vincularse desde su editor. Las ediciones personales se guardan en Firebase y prevalecen sobre la biblioteca, incluso después de restaurar un respaldo.
+
+La biblioteca original forma parte de los archivos de la aplicación, no de los registros personales de Firebase. Los respaldos personales incluyen los productos que hayas editado; conserva también esta carpeta completa para mantener las fotos y el PDF. Las fotos y fichas consultadas se guardan en caché para usarlas sin conexión.
+
+Para actualizar una versión publicada, subir todos los archivos de esta carpeta, incluida `assets`. Esta entrega modifica la copia local; no despliega el sitio ni escribe productos automáticamente en la cuenta.
+
+Verificación: 41 pruebas superadas, incluyendo concentraciones separadas, archivo/restauración sin duplicados, correspondencia de archivos y bloqueo de datos ambiguos. Se revisaron las fotos extraídas. La revisión visual de la aplicación en navegador no pudo completarse: el navegador integrado bloqueó localhost y Chrome no estaba disponible.
+
 ## Vademécum y Catálogo comercial — 29 de septiembre de 2026
 
 - Vademécum contiene las fichas de principios activos y combinaciones con sus pautas por especie. Las combinaciones indican, por pauta, si la dosis corresponde al total o a un componente.
@@ -26,7 +40,7 @@ Cuaderno clínico y de estudio veterinario con Firebase, guardado automático y 
 
 Conservar todos los archivos juntos, incluidos `catalogo.js`, `catalogo-ui.js`, `respaldo.js`, los estilos y `firebase-config.js`. Se requiere servir la aplicación por HTTP/HTTPS; abrir `index.html` con doble clic no es suficiente para cargar los módulos.
 
-La caché de la aplicación se actualizó a la versión 89. Para actualizar una instalación publicada, subir el conjunto completo de archivos al mismo alojamiento y recargar la aplicación.
+La caché de la aplicación se actualizó a la versión 90. Para actualizar una instalación publicada, subir el conjunto completo de archivos al mismo alojamiento y recargar la aplicación.
 
 La configuración y las reglas de Firebase se conservan. Esta actualización de archivos no publica cambios en el alojamiento ni migra registros de la base de datos al arrancar.
 

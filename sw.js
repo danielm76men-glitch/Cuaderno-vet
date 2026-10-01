@@ -17,7 +17,7 @@
 
    IMPORTANTE: sube VERSION en cada despliegue. Es la unica linea que hay
    que tocar aqui. */
-const VERSION = "89";
+const VERSION = "91";
 
 const CACHE_SHELL = "vetdiario-shell-v" + VERSION;
 
@@ -42,6 +42,8 @@ const APP_SHELL = [
   "./app.js",
   "./catalogo.js",
   "./catalogo-ui.js",
+  "./farcovet-catalogo.js",
+  "./farcovet-datos.js",
   "./semilla-formulario.js",
   "./fichas-farmaco.js",
   "./styles.css",
@@ -163,7 +165,8 @@ self.addEventListener("fetch", (event) => {
     esNavegacion ||
     APP_SHELL.some((asset) => asset === "./" + ruta);
 
-  if (!esDelShell) return;
+  const esFarcovet = url.pathname.includes('/assets/farcovet-2026/');
+  if (!esDelShell && !esFarcovet) return;
 
   event.respondWith(redPrimero(request));
 });

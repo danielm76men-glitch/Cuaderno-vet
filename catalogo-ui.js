@@ -13,40 +13,92 @@ function campo(titulo, control) {
   const label = el('label', 'field-group'); label.append(el('span', 'meds-field-label', titulo), control); return label;
 }
 
+function enlaceFuente(p, pagina, texto) {
+  const a = el('a', 'farcovet-link', texto || 'Ver página ' + pagina + ' del PDF');
+  a.href = p.fuenteCatalogo.archivo + '#page=' + pagina; a.target = '_blank'; a.rel = 'noopener';
+  return a;
+}
+
+function fichaDeFuente(p) {
+  const section = el('section', 'card card-pad farcovet-ficha');
+  section.append(el('p', 'section-tag', p.fuenteCatalogo.titulo));
+  const hero = el('div', 'farcovet-hero');
+  const fotoLink = el('a', 'farcovet-foto-link'); fotoLink.href = p.fotoCatalogo; fotoLink.target = '_blank'; fotoLink.rel = 'noopener';
+  const img = el('img', 'farcovet-foto'); img.src = p.fotoCatalogo; img.alt = 'Presentación de ' + p.nombreComercial + ' en el catálogo Farcovet';
+  fotoLink.append(img, el('span', 'farcovet-referencia', 'Foto original del catálogo; puede incluir varias variantes.'));
+  const datos = el('div', 'farcovet-datos');
+  const dl = el('dl', 'farcovet-resumen');
+  for (const [titulo, valor] of [
+    ['Empresa', p.laboratorio], ['Forma', p.forma], ['Presentaciones y envases', p.envase],
+    ['Composición publicada', p.formulaCatalogo], ['Especies indicadas en la fuente', p.especiesCatalogo],
+    ['Vías registradas', p.via?.join(' · ') || 'Consultar la ficha original']
+  ]) { dl.append(el('dt', '', titulo), el('dd', '', valor || 'No indicado en el catálogo')); }
+  datos.append(dl); hero.append(fotoLink, datos); section.append(hero);
+  if (p.observacionesCatalogo?.length) {
+    const notas = el('aside', 'farcovet-observaciones'); notas.append(el('h3', '', 'Observaciones de la fuente'));
+    const lista = el('ul'); p.observacionesCatalogo.forEach(t => lista.append(el('li', '', t))); notas.append(lista); section.append(notas);
+  }
+  section.append(el('p', 'quiet-copy', 'Fotos y texto del catálogo aportado. Las dosis publicadas se conservan en la ficha original y no se añaden como pautas al Vademécum.'));
+  for (const ficha of p.fichasCatalogo || []) {
+    const detalle = el('details', 'farcovet-original');
+    detalle.append(el('summary', '', 'Ficha completa · página ' + ficha.pagina));
+    detalle.append(enlaceFuente(p, ficha.pagina));
+    const texto = el('div', 'farcovet-texto', ficha.texto); detalle.append(texto);
+    const a = el('a'); a.href = ficha.ficha; a.target = '_blank'; a.rel = 'noopener';
+    const original = el('img', 'farcovet-recorte'); original.src = ficha.ficha; original.loading = 'lazy';
+    original.alt = 'Ficha original de ' + ficha.nombre + ', página ' + ficha.pagina;
+    a.append(original); detalle.append(a); section.append(detalle);
+  }
+  return section;
+}
+
 export function renderCatalogoComercial(root, api) {
   const card = el('section', 'card card-pad');
   const cab = el('div', 'card-head');
   cab.append(el('h2', '', 'Catálogo comercial'), boton('+ Agregar producto', () => api.crear(), 'btn-primary'));
-  card.append(cab, el('p', 'quiet-copy', 'Marcas, laboratorios, composición y envases. Cada producto está vinculado a una ficha del Vademécum.'));
+  card.append(cab, el('p', 'quiet-copy', 'Marcas, fotos, composición y envases. Incluye las presentaciones del vademécum Farcovet 2026.'));
   const buscar = el('input', 'catalog-search'); buscar.type = 'search'; buscar.placeholder = 'Buscar marca, laboratorio o principio activo…'; buscar.setAttribute('aria-label', buscar.placeholder);
   buscar.value = api.query || '';
   const verArchivados = el('input'); verArchivados.type = 'checkbox';
   const filtroArchivo = el('label', 'form-check'); filtroArchivo.append(verArchivados, document.createTextNode(' Mostrar productos archivados'));
   const lista = el('div', 'catalogo-productos');
+  const contador = el('p', 'quiet-copy'); contador.setAttribute('aria-live', 'polite');
   function pintar() {
     lista.replaceChildren();
     const q = termino(buscar.value);
     const productos = (verArchivados.checked ? api.archivados : api.productos).filter(p => {
       const f = api.farmacos.find(f => f.id === p.farmacoId);
-      return termino([p.nombreComercial, p.laboratorio, p.forma, p.envase, f?.nombreGenerico, resumenComposicion(p)].join(' ')).includes(q);
+      return termino([p.nombreComercial, p.laboratorio, p.forma, p.envase, p.especiesCatalogo, p.formulaCatalogo, f?.nombreGenerico, resumenComposicion(p)].join(' ')).includes(q);
     });
+    contador.textContent = productos.length + ' presentaciones comerciales';
     if (!productos.length) lista.append(el('p', 'form-vacio', 'No hay productos que mostrar. Agrega uno y vincúlalo a su fármaco o combinación.'));
     productos.forEach(p => {
       const f = api.farmacos.find(f => f.id === p.farmacoId);
       const item = el('article', 'form-fila-bloque catalogo-producto');
+      if (p.fotoCatalogo) {
+        const foto = boton('', () => api.abrirProducto(p.id), 'farcovet-miniatura');
+        foto.setAttribute('aria-label', 'Abrir ' + p.nombreComercial);
+        const img = el('img'); img.src = p.fotoCatalogo; img.alt = p.nombreComercial; img.loading = 'lazy';
+        foto.append(img); item.append(foto);
+      }
       item.append(boton(p.nombreComercial || 'Producto sin nombre comercial', () => api.abrirProducto(p.id), 'catalogo-producto-nombre'));
       item.append(el('p', 'quiet-copy', [p.laboratorio, p.forma, p.envase].filter(Boolean).join(' · ') || 'Laboratorio y envase por completar'));
       item.append(el('p', 'catalogo-composicion', resumenComposicion(p)));
+      if (p.fuenteCatalogo) item.append(el('p', 'farcovet-referencia', 'Farcovet 2026 · pág. ' + p.fuenteCatalogo.paginas.join(', ')));
       const acciones = el('div', 'quick-actions');
       if (p.archivado) acciones.append(boton('Restaurar producto', () => { api.guardar({ ...p, archivado: false }); api.volver(); }));
-      else if (f) acciones.append(boton('Vademécum: ' + f.nombreGenerico, () => api.abrirFarmaco(f.id)), boton('Calcular dosis', () => api.calcular(p)));
-      else acciones.append(el('span', 'form-aviso-error', 'Vincula este producto a una ficha del Vademécum.'));
+      else if (f) {
+        acciones.append(boton('Vademécum: ' + f.nombreGenerico, () => api.abrirFarmaco(f.id)));
+        if (!p.bloqueoCalculoCatalogo) acciones.append(boton('Calcular dosis', () => api.calcular(p)));
+      }
+      else if (!p.fuenteCatalogo) acciones.append(el('span', 'form-aviso-error', 'Vincula este producto a una ficha del Vademécum.'));
+      if (p.fuenteCatalogo) acciones.append(boton('Ver presentación completa', () => api.abrirProducto(p.id)));
       item.append(acciones); lista.append(item);
     });
   }
   buscar.addEventListener('input', () => { api.cambiarQuery(buscar.value); pintar(); });
   verArchivados.addEventListener('change', pintar);
-  card.append(buscar, filtroArchivo, lista); root.append(card); pintar();
+  card.append(buscar, filtroArchivo, contador, lista); root.append(card); pintar();
 }
 
 export function renderProductoComercial(root, original, api) {
@@ -60,6 +112,12 @@ export function renderProductoComercial(root, original, api) {
   title.value = p.nombreComercial || ''; title.placeholder = 'Nombre comercial del producto'; title.setAttribute('aria-label', 'Nombre comercial');
   title.addEventListener('input', () => { p.nombreComercial = title.value; guardar(); });
   root.append(el('p', 'section-tag', 'Producto comercial'), title);
+  if (p.fuenteCatalogo) {
+    root.append(fichaDeFuente(p));
+    const editar = el('details', 'farcovet-editar'); editar.append(el('summary', '', 'Editar mis datos y vincular al Vademécum'));
+    const editor = el('div'); editar.append(editor); root.append(editar); root = editor;
+    statusText.textContent = p._biblioteca ? 'Incluido en el cuaderno' : 'Sincronizado';
+  }
   const identidad = el('section', 'card card-pad');
   const datos = el('div', 'field-row');
   for (const [key, label, hint] of [['laboratorio', 'Laboratorio / empresa', 'Empresa fabricante'], ['forma', 'Forma farmacéutica', 'Tableta, suspensión, solución…'], ['envase', 'Envase', 'Caja de 10 tabletas, frasco de 100 mL…']]) {
@@ -80,7 +138,7 @@ export function renderProductoComercial(root, original, api) {
     const f = api.farmacos.find(f => f.id === p.farmacoId);
     if (f) {
       enlaces.append(boton('Consultar dosis en el Vademécum', () => api.abrirFarmaco(f.id)));
-      if (!p.archivado) enlaces.append(boton('Calcular con este producto', () => api.calcular(p), 'btn-primary'));
+      if (!p.archivado && !p.bloqueoCalculoCatalogo) enlaces.append(boton('Calcular con este producto', () => api.calcular(p), 'btn-primary'));
     }
     else enlaces.append(el('p', 'form-aviso-error', 'Selecciona una ficha para usar este producto en la calculadora.'));
   }

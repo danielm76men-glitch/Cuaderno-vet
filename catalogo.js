@@ -37,12 +37,14 @@ export function productosDelCatalogo(farmacos, guardados) {
 }
 
 export function resumenComposicion(p) {
+  if (!(p.composicion || []).length && p.formulaCatalogo) return p.formulaCatalogo;
   return (p.composicion || []).map(c => c.nombre + ': ' + (c.concentracion ?? '—') + ' ' + (c.unidadConc || '')).join(' + ')
     || (p.concentracionAnterior != null ? p.concentracionAnterior + ' ' + (p.unidadAnterior || '') + ' · composición por completar' : 'Composición por completar');
 }
 
 export function concentracionParaPauta(producto, pauta, farmaco) {
   const error = (texto) => ({ error: texto });
+  if (producto?.bloqueoCalculoCatalogo) return error('Esta presentación tiene datos incompletos o discrepancias en el catálogo. Consulta las observaciones y confirma la etiqueta antes de convertir una dosis.');
   if (!producto || producto.farmacoId !== farmaco.id || producto.archivado) return error('El producto debe estar vinculado a esta ficha del Vademécum.');
   const componentes = producto.composicion || [];
   if (!componentes.length) return error('Completa la composición del producto en el Catálogo.');

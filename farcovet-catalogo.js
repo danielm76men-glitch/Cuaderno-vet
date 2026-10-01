@@ -13,7 +13,22 @@ export function incluirFarcovet(farmacos, guardados) {
     const candidatas = nombres.length ? farmacos.filter(f => clave(principiosDe(f)) === clave(nombres)) : [];
     return { ...base, origenCatalogoId: base.id, farmacoId: candidatas.length === 1 ? candidatas[0].id : '', _biblioteca: true };
   });
-  return incluidos.concat([...existentes.values()]);
+  return incluidos.concat([...existentes.values()]).map(recursosPublicados);
 }
 
 export { PRODUCTOS_FARCOVET };
+
+// Adaptación a la ubicación comprobada en danielm76men-glitch/Cuaderno-vet.
+// Los 269 recursos Farcovet están publicados en la raíz del repositorio.
+// Se corrigen las rutas al leer, incluidos los productos personales ya guardados.
+// No se modifica la composición, los vínculos ni los documentos de Firebase.
+function recursosPublicados(p) {
+  const ruta = v => typeof v === 'string' && v.startsWith('assets/farcovet-2026/')
+    ? './' + v.slice('assets/farcovet-2026/'.length) : v;
+  if (!p.fuenteCatalogo) return p;
+  return { ...p,
+    fotoCatalogo: ruta(p.fotoCatalogo),
+    fuenteCatalogo: { ...p.fuenteCatalogo, archivo: ruta(p.fuenteCatalogo.archivo) },
+    fichasCatalogo: (p.fichasCatalogo || []).map(f => ({ ...f, foto: ruta(f.foto), ficha: ruta(f.ficha) }))
+  };
+}
